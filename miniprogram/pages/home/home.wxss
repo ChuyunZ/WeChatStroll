@@ -1,0 +1,22 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60rpx 40rpx;
+}
+
+.title {
+  font-size: 48rpx;
+  font-weight: bold;
+  margin-bottom: 16rpx;
+}
+
+.subtitle {
+  font-size: 28rpx;
+  margin-bottom: 32rpx;
+}
+
+.nav-button {
+  width: 500rpx;
+  margin-bottom: 20rpx;
+}

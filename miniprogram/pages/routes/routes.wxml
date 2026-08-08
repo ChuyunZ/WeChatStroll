@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Routes</text>
+  <text class="subtitle">Recommended walking routes will go here.</text>
+</view>

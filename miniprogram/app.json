@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/preferences/preferences",
+    "pages/routes/routes",
+    "pages/route-detail/route-detail",
+    "pages/walking/walking",
+    "pages/feedback/feedback",
+    "pages/profile/profile"
+  ],
+  "window": {
+    "navigationBarTitleText": "WeChatStroll",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black"
+  }
+}

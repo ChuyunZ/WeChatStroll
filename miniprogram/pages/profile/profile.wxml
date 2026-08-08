@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Profile</text>
+  <text class="subtitle">User profile will go here.</text>
+</view>
