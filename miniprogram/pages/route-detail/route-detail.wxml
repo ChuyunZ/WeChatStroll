@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Route Detail</text>
+  <text class="subtitle">Route information will go here.</text>
+</view>

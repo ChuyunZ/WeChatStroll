@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Preferences</text>
+  <text class="subtitle">Walking preference questionnaire will go here.</text>
+</view>

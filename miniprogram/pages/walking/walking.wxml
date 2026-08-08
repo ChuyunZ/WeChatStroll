@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Walking</text>
+  <text class="subtitle">Active walking session will go here.</text>
+</view>

@@ -1,0 +1,4 @@
+<view class="container">
+  <text class="title">Feedback</text>
+  <text class="subtitle">Walking feedback will go here.</text>
+</view>
