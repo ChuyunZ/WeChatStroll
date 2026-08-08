@@ -1,0 +1,41 @@
+<view>
+
+<button
+  bindtap="getLocation"
+  loading="{{loading}}"
+  disabled="{{loading}}"
+>
+  Get Current Location
+</button>
+
+<view wx:if="{{loading}}">
+  Getting your location...
+</view>
+
+<view>
+  Latitude: {{latitude}}
+</view>
+
+<view>
+  Longitude: {{longitude}}
+</view>
+
+<view wx:if="{{errorMessage}}">
+  {{errorMessage}}
+</view>
+
+<button
+  wx:if="{{showRetry}}"
+  bindtap="getLocation"
+>
+  Retry
+</button>
+
+<button
+  wx:if="{{permissionDenied}}"
+  bindtap="openSettings"
+>
+  Open Settings
+</button>
+
+</view>

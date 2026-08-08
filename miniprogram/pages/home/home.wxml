@@ -47,6 +47,15 @@
     bindtap="navigateToPage"
     data-url="/pages/profile/profile"
   >
-    Profile
+  Profile
   </button>
+
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/location-test/location-test"
+  >
+  location-test
+  </button>
+
 </view>

@@ -6,11 +6,20 @@
     "pages/route-detail/route-detail",
     "pages/walking/walking",
     "pages/feedback/feedback",
-    "pages/profile/profile"
+    "pages/profile/profile",
+    "pages/location-test/location-test"
   ],
   "window": {
     "navigationBarTitleText": "WeChatStroll",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black"
-  }
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "你的位置信息将用于推荐和展示附近的散步路线"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ]
 }
