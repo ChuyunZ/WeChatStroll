@@ -1,0 +1,19 @@
+<view class="page">
+  <view class="header">
+    <text class="title">Map Route Spike</text>
+    <text class="description">
+      Test markers and walking route polyline
+    </text>
+  </view>
+
+  <map
+    class="route-map"
+    latitude="{{latitude}}"
+    longitude="{{longitude}}"
+    markers="{{markers}}"
+    polyline="{{polyline}}"
+    include-points="{{includePoints}}"
+    show-location
+  >
+  </map>
+</view>

@@ -58,4 +58,12 @@
   location-test
   </button>
 
+    <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/map-spike/map-spike"
+  >
+  map-spike
+  </button>
+
 </view>
