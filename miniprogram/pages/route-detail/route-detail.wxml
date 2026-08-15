@@ -1,4 +1,252 @@
-<view class="container">
-  <text class="title">Route Detail</text>
-  <text class="subtitle">Route information will go here.</text>
+<view class="page">
+
+<!-- Loading -->
+<view
+  class="state-container"
+  wx:if="{{loading}}"
+>
+  <text class="state-title">
+    正在加载路线...
+  </text>
+
+  <text class="state-description">
+    请稍等一下
+  </text>
+</view>
+
+
+<!-- Error -->
+<view
+  class="state-container"
+  wx:elif="{{error}}"
+>
+  <text class="state-title">
+    无法加载这条路线
+  </text>
+
+  <text class="state-description">
+    路线数据可能不存在
+  </text>
+
+  <button
+    class="back-button"
+    bindtap="replaceRoute"
+  >
+    返回路线推荐
+  </button>
+</view>
+
+
+<!-- Main content -->
+<view wx:else>
+
+  <!-- Header -->
+  <view class="detail-header">
+
+    <view class="header-content">
+
+      <text class="header-small">
+        AI 为你推荐的路线
+      </text>
+
+      <text class="route-title">
+        {{route.title}}
+      </text>
+
+    </view>
+
+    <view class="avatar">
+      <view class="avatar-person">
+        🚶🏻
+      </view>
+    </view>
+
+  </view>
+
+
+  <!-- Tags -->
+  <view class="tags">
+
+    <view class="route-type">
+      {{route.routeTypeText}}
+    </view>
+
+    <view
+      class="tag"
+      wx:for="{{route.displayTags}}"
+      wx:for-item="tag"
+      wx:key="*this"
+    >
+      {{tag}}
+    </view>
+
+  </view>
+
+
+  <!-- Route information -->
+  <view class="info-card">
+
+    <text class="card-title">
+      路线信息
+    </text>
+
+
+    <view class="info-list">
+
+      <view class="info-row">
+
+        <text class="info-label">
+          预计时间
+        </text>
+
+        <text class="info-value">
+          {{route.durationMinutes}} 分钟
+        </text>
+
+      </view>
+
+
+      <view class="info-row">
+
+        <text class="info-label">
+          路线距离
+        </text>
+
+        <text class="info-value">
+          {{route.distanceKm}} km
+        </text>
+
+      </view>
+
+
+      <view class="info-row">
+
+        <text class="info-label">
+          人流量
+        </text>
+
+        <text class="info-value crowd-value">
+          {{route.crowdText}}
+        </text>
+
+      </view>
+
+    </view>
+
+  </view>
+
+
+  <!-- Map -->
+  <view class="map-section">
+
+    <view class="section-header">
+
+      <text class="section-title">
+        路线地图
+      </text>
+
+      <text class="section-hint">
+        可拖动和缩放
+      </text>
+
+    </view>
+
+
+    <map
+      class="route-map"
+
+      latitude="{{mapLatitude}}"
+      longitude="{{mapLongitude}}"
+
+      scale="16"
+
+      polyline="{{mapPolyline}}"
+      markers="{{markers}}"
+
+      include-points="{{mapPoints}}"
+
+      enable-scroll="{{true}}"
+      enable-zoom="{{true}}"
+      enable-rotate="{{false}}"
+    >
+    </map>
+
+
+    <view class="map-legend">
+
+      <view class="legend-item">
+        <view class="legend-dot start-dot"></view>
+        <text class="legend-text">
+          起点
+        </text>
+      </view>
+
+      <view class="legend-item legend-middle">
+        <view class="legend-line"></view>
+        <text class="legend-text">
+          步行路线
+        </text>
+      </view>
+
+      <view class="legend-item">
+        <view class="legend-dot end-dot"></view>
+        <text class="legend-text">
+          终点
+        </text>
+      </view>
+
+    </view>
+
+  </view>
+
+
+  <!-- Description -->
+  <view class="content-card">
+
+    <text class="card-title">
+      路线介绍
+    </text>
+
+    <text class="content-text">
+      {{route.description}}
+    </text>
+
+  </view>
+
+
+  <!-- Recommendation -->
+  <view class="content-card recommendation-card">
+
+    <text class="card-title">
+      为什么推荐给你
+    </text>
+
+    <text class="content-text">
+      {{route.recommendationReason}}
+    </text>
+
+  </view>
+
+
+  <!-- Actions -->
+  <view class="action-buttons">
+
+    <button
+      class="replace-button"
+      bindtap="replaceRoute"
+    >
+      换一条路线
+    </button>
+
+    <button
+      class="start-button"
+      bindtap="startWalk"
+    >
+      开始散步
+    </button>
+
+  </view>
+
+</view>
+
 </view>
