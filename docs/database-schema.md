@@ -7,16 +7,6 @@
   "_id": "user_1837",
   "openid": "oAbC123xyz",
   "username": "Tom",
-  "questionnaireAnswers": [
-    {
-      "questionId": "q1",
-      "answer": "I prefer quiet places with trees"
-    },
-    {
-      "questionId": "q2",
-      "answer": "Around 30 minutes"
-    }
-  ],
   "totalWalks": 5,
   "createdAt": "2026-08-13T10:00:00+08:00"
 }
@@ -29,23 +19,8 @@
 | `_id` | string | Yes | Unique identifier for the user record in the database | `"user_1837"` |
 | `openid` | string | Yes | WeChat OpenID used to identify the user within the mini program | `"oAbC123xyz"` |
 | `username` | string | Yes | User-facing display name | `"Tom"` |
-| `questionnaireAnswers` | object[] | No | Answers submitted by the user to the questionnaire | See Questionnaire Answer Object |
 | `totalWalks` | number | Yes | Total number of walks created by the user | `5` |
 | `createdAt` | string | Yes | Time the user record was created in ISO 8601 format | `"2026-08-13T10:00:00+08:00"` |
-
-## Questionnaire Answer Object
-
-```json
-{
-  "questionId": "q1",
-  "answer": "I prefer quiet places with trees"
-}
-```
-
-| Field | Type | Required | Description | Example |
-| --- | --- | ---: | --- | --- |
-| `questionId` | string | Yes | Unique identifier of the questionnaire question | `"q1"` |
-| `answer` | string | Yes | User's answer to the questionnaire question | `"I prefer quiet places with trees"` |
 
 ---
 
