@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "Route Detail"
+  "navigationBarTitleText": "路线详情",
+  "navigationBarBackgroundColor": "#ffffff",
+  "navigationBarTextStyle": "black"
 }

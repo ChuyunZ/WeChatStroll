@@ -1,4 +1,155 @@
-<view class="container">
-  <text class="title">Routes</text>
-  <text class="subtitle">Recommended walking routes will go here.</text>
+<view class="page">
+
+<!-- Header -->
+<view class="header">
+  <view class="avatar">
+    <text class="avatar-person">🚶🏻</text>
+  </view>
+
+  <text class="title">AI 为你推荐的路线</text>
+  <text class="subtitle">点击地图查看路线详情</text>
+</view>
+
+
+<!-- Loading -->
+<view class="state-container" wx:if="{{loading}}">
+  <text class="state-title">正在为你寻找合适的路线...</text>
+  <text class="state-description">请稍等一下</text>
+</view>
+
+
+<!-- Error -->
+<view class="state-container" wx:elif="{{error}}">
+  <text class="state-title">路线加载失败</text>
+  <text class="state-description">请稍后重新尝试</text>
+
+  <button
+    class="secondary-button"
+    bindtap="loadRoutes"
+  >
+    重试
+  </button>
+</view>
+
+
+<!-- Empty -->
+<view
+  class="state-container"
+  wx:elif="{{!loading && !error && routes.length === 0}}"
+>
+  <text class="state-title">暂时没有找到合适的路线</text>
+  <text class="state-description">可以尝试重新推荐路线</text>
+
+  <button
+    class="secondary-button"
+    bindtap="loadRoutes"
+  >
+    重新推荐
+  </button>
+</view>
+
+
+<!-- Route list -->
+<view wx:else class="route-list">
+
+  <view
+    class="route-card"
+    wx:for="{{routes}}"
+    wx:key="routeId"
+  >
+
+    <view class="route-main">
+
+      <!-- Map preview -->
+      <map
+        class="preview-map"
+        latitude="{{item.previewLatitude}}"
+        longitude="{{item.previewLongitude}}"
+        scale="16"
+        polyline="{{item.previewPolyline}}"
+        enable-scroll="{{false}}"
+        enable-zoom="{{false}}"
+        enable-rotate="{{false}}"
+        data-id="{{item.routeId}}"
+        bindtap="viewRoute"
+      >
+      </map>
+
+
+      <!-- Right information -->
+      <view class="route-summary">
+
+        <text class="route-title">
+          {{item.title}}
+        </text>
+
+        <view class="route-type">
+          {{item.routeTypeText}}
+        </view>
+
+        <view class="info-panel">
+
+          <view class="info-row">
+            <text class="info-label">预计</text>
+            <text class="info-value">{{item.durationMinutes}} 分钟</text>
+          </view>
+
+          <view class="info-row">
+            <text class="info-label">距离</text>
+            <text class="info-value">{{item.distanceKm}} km</text>
+          </view>
+
+          <view class="info-row">
+            <text class="info-label">人流量</text>
+            <text class="info-value">{{item.crowdText}}</text>
+          </view>
+
+        </view>
+
+        <view class="tags">
+          <view
+            class="tag"
+            wx:for="{{item.displayTags}}"
+            wx:for-item="tag"
+            wx:key="*this"
+          >
+            {{tag}}
+          </view>
+        </view>
+
+      </view>
+
+    </view>
+
+
+    <!-- Recommendation -->
+    <view class="reason">
+      <text class="reason-label">推荐理由</text>
+      <text class="reason-text">
+        {{item.recommendationReason}}
+      </text>
+    </view>
+
+
+    <!-- Button -->
+    <button
+      class="view-route-button"
+      data-id="{{item.routeId}}"
+      bindtap="viewRoute"
+    >
+      查看路线
+    </button>
+
+  </view>
+
+
+  <button
+    class="other-routes-button"
+    bindtap="showOtherRoutes"
+  >
+    换一批路线
+  </button>
+
+</view>
+
 </view>

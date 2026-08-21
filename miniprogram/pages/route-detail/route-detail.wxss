@@ -1,0 +1,457 @@
+page {
+  background: #f7f8f5;
+}
+
+.page {
+  min-height: 100vh;
+
+  padding: 36rpx 30rpx 60rpx;
+
+  box-sizing: border-box;
+}
+
+
+/* ========================
+   Header
+======================== */
+
+.detail-header {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 16rpx;
+}
+
+.header-content {
+  flex: 1;
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+}
+
+.header-small {
+  font-size: 23rpx;
+  line-height: 34rpx;
+
+  color: #999999;
+}
+
+.route-title {
+  margin-top: 8rpx;
+
+  font-size: 38rpx;
+  font-weight: 600;
+  line-height: 52rpx;
+
+  color: #222222;
+}
+
+
+/* ========================
+   Avatar
+======================== */
+
+.avatar {
+  flex-shrink: 0;
+
+  width: 72rpx;
+  height: 72rpx;
+
+  margin-left: 20rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #eef7f1;
+
+  border: 2rpx solid #53725f;
+  border-radius: 50%;
+
+  box-sizing: border-box;
+}
+
+.avatar-person {
+  font-size: 38rpx;
+  line-height: 72rpx;
+
+  text-align: center;
+}
+
+
+/* ========================
+   Tags
+======================== */
+
+.tags {
+  width: 100%;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+
+  margin-bottom: 22rpx;
+}
+
+.route-type,
+.tag {
+  min-height: 42rpx;
+
+  margin-right: 10rpx;
+  margin-bottom: 8rpx;
+
+  padding: 0 14rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 14rpx;
+
+  box-sizing: border-box;
+
+  font-size: 20rpx;
+  line-height: 28rpx;
+
+  white-space: nowrap;
+}
+
+.route-type {
+  background: #e9f7ed;
+  color: #439a61;
+}
+
+.tag {
+  background: #f0f4ee;
+  color: #647568;
+}
+
+
+/* ========================
+   Generic card title
+======================== */
+
+.card-title {
+  font-size: 27rpx;
+  font-weight: 600;
+  line-height: 38rpx;
+
+  color: #444444;
+}
+
+
+/* ========================
+   Route information
+======================== */
+
+.info-card {
+  width: 100%;
+
+  margin-bottom: 28rpx;
+  padding: 26rpx;
+
+  background: #ffffff;
+
+  border-radius: 22rpx;
+
+  box-sizing: border-box;
+
+  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.04);
+}
+
+.info-list {
+  width: 100%;
+
+  margin-top: 16rpx;
+}
+
+.info-row {
+  width: 100%;
+  min-height: 68rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  box-sizing: border-box;
+}
+
+.info-row + .info-row {
+  border-top: 1rpx solid #edf0ed;
+}
+
+.info-label {
+  font-size: 24rpx;
+  line-height: 34rpx;
+
+  color: #888888;
+}
+
+.info-value {
+  font-size: 25rpx;
+  font-weight: 500;
+  line-height: 34rpx;
+
+  color: #444444;
+}
+
+.crowd-value {
+  color: #4d7459;
+}
+
+
+/* ========================
+   Map
+======================== */
+
+.map-section {
+  width: 100%;
+
+  margin-bottom: 26rpx;
+}
+
+.section-header {
+  width: 100%;
+
+  margin-bottom: 14rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 29rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+
+  color: #333333;
+}
+
+.section-hint {
+  font-size: 21rpx;
+  line-height: 30rpx;
+
+  color: #999999;
+}
+
+.route-map {
+  width: 100%;
+  height: 520rpx;
+
+  border-radius: 24rpx;
+
+  overflow: hidden;
+}
+
+
+/* ========================
+   Legend
+======================== */
+
+.map-legend {
+  width: 100%;
+
+  margin-top: 16rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+}
+
+.legend-middle {
+  margin-left: 30rpx;
+  margin-right: 30rpx;
+}
+
+.legend-dot {
+  width: 18rpx;
+  height: 18rpx;
+
+  margin-right: 8rpx;
+
+  border-radius: 50%;
+}
+
+.start-dot {
+  background: #58b978;
+}
+
+.end-dot {
+  background: #e66a63;
+}
+
+.legend-line {
+  width: 38rpx;
+  height: 6rpx;
+
+  margin-right: 8rpx;
+
+  background: #20bfea;
+
+  border-radius: 6rpx;
+}
+
+.legend-text {
+  font-size: 20rpx;
+  line-height: 28rpx;
+
+  color: #777777;
+}
+
+
+/* ========================
+   Content cards
+======================== */
+
+.content-card {
+  width: 100%;
+
+  margin-bottom: 22rpx;
+  padding: 26rpx;
+
+  display: flex;
+  flex-direction: column;
+
+  background: #ffffff;
+
+  border-radius: 22rpx;
+
+  box-sizing: border-box;
+
+  box-shadow: 0 6rpx 20rpx rgba(0, 0, 0, 0.035);
+}
+
+.recommendation-card {
+  background: #f3f8f2;
+}
+
+.content-text {
+  margin-top: 14rpx;
+
+  font-size: 25rpx;
+  line-height: 42rpx;
+
+  color: #666666;
+}
+
+
+/* ========================
+   Buttons
+======================== */
+
+.action-buttons {
+  width: 100%;
+
+  margin-top: 8rpx;
+
+  display: flex;
+}
+
+.replace-button,
+.start-button {
+  flex: 1;
+
+  height: 84rpx;
+
+  padding: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 22rpx;
+
+  box-sizing: border-box;
+
+  font-size: 27rpx;
+  line-height: 80rpx;
+}
+
+.replace-button {
+  margin-right: 18rpx;
+
+  background: #ffffff;
+
+  color: #4a9b67;
+
+  border: 2rpx solid #66c987;
+}
+
+.start-button {
+  background: #66c987;
+
+  color: #ffffff;
+
+  font-weight: 500;
+}
+
+.replace-button::after,
+.start-button::after {
+  border: none;
+}
+
+
+/* ========================
+   Loading / Error
+======================== */
+
+.state-container {
+  margin-top: 160rpx;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  text-align: center;
+}
+
+.state-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 44rpx;
+
+  color: #444444;
+}
+
+.state-description {
+  margin-top: 12rpx;
+
+  font-size: 25rpx;
+  line-height: 36rpx;
+
+  color: #999999;
+}
+
+.back-button {
+  height: 76rpx;
+
+  margin-top: 32rpx;
+  padding: 0 34rpx;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #66c987;
+
+  color: #ffffff;
+
+  border-radius: 22rpx;
+
+  font-size: 26rpx;
+  line-height: 76rpx;
+}
+
+.back-button::after {
+  border: none;
+}
