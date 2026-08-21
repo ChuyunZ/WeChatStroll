@@ -1,0 +1,9 @@
+{
+  "name": "healthCheck",
+  "version": "1.0.0",
+  "description": "CloudBase health check function",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}

@@ -1,6 +1,7 @@
 {
   "description": "WeChatStroll Mini Program",
   "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
   "setting": {
     "urlCheck": false,
     "es6": true,
@@ -27,7 +28,7 @@
     }
   },
   "compileType": "miniprogram",
-  "appid": "wxbc6fec842d53d850",
+  "appid": "wx0caa5420daa30d87",
   "projectname": "WeChatStroll",
   "simulatorPluginLibVersion": {},
   "packOptions": {
