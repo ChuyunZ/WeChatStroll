@@ -1,6 +1,7 @@
 {
   "description": "WeChatStroll Mini Program",
   "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
   "setting": {
     "urlCheck": false,
     "es6": true,

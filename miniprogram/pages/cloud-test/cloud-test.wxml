@@ -1,0 +1,29 @@
+<view class="container">
+  <view class="title">Cloud Function Test</view>
+
+  <button
+    type="primary"
+    loading="{{loading}}"
+    disabled="{{loading}}"
+    bindtap="callHealthCheck"
+  >
+    {{loading ? 'Calling...' : 'Call healthCheck'}}
+  </button>
+
+  <view wx:if="{{status === 'success'}}" class="result">
+    <view class="status success">Status: Success</view>
+
+    <view class="label">Message</view>
+    <view class="value">{{message}}</view>
+
+    <view class="label">Server Time</view>
+    <view class="value">{{timestamp}}</view>
+  </view>
+
+  <view wx:if="{{status === 'error'}}" class="result">
+    <view class="status error">Status: Error</view>
+
+    <view class="label">Error</view>
+    <view class="value">{{errorMessage}}</view>
+  </view>
+</view>
