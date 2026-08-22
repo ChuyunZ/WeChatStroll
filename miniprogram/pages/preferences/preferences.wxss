@@ -1,103 +1,142 @@
 .container {
+
   position: relative;
 
   min-height: 100vh;
+
   box-sizing: border-box;
 
   display: block;
 
-  padding: 40rpx 60rpx 150rpx;
+  padding: 40rpx 60rpx 50rpx;
 
   background: #f7f7f7;
+
 }
 
 
 /* ======================
+
    Profile
+
 ====================== */
 
 .avatar {
+
   position: absolute;
+
   top: 0;
+
   right: 4rpx;
 
   width: 72rpx;
+
   height: 72rpx;
 
   display: flex;
+
   align-items: center;
+
   justify-content: center;
 
   background: #eef7f1;
+
   border: 2rpx solid #53725f;
+
   border-radius: 50%;
 
   box-sizing: border-box;
+
 }
 
 .avatar-person {
+
   font-size: 38rpx;
+
   line-height: 72rpx;
+
   text-align: center;
+
 }
 
 
 /* ======================
+
    Header
+
 ====================== */
 
 .header {
+
   position: relative;
 
   display: flex;
+
   flex-direction: column;
+
   align-items: center;
 
   padding: 8rpx 90rpx 0;
 
   box-sizing: border-box;
+
 }
 
 .title {
+
   display: block;
 
   font-size: 40rpx;
+
   font-weight: bold;
+
 }
 
 .subtitle {
+
   display: block;
 
   margin-top: 10rpx;
 
   font-size: 28rpx;
+
 }
 
 
 /* ======================
+
    Questions
+
 ====================== */
 
 .question-block {
+
   width: 100%;
 
   margin-top: 80rpx;
+
 }
 
 .question-header {
+
   width: 100%;
 
   display: flex;
+
   flex-direction: row;
 
   align-items: center;
+
   justify-content: flex-start;
 
   text-align: left;
+
 }
 
 .question-dot {
+
   width: 18rpx;
+
   height: 18rpx;
 
   flex-shrink: 0;
@@ -109,24 +148,32 @@
   background: #2fc766;
 
   transform: translateY(20rpx);
+
 }
 
 .question-title {
+
   font-size: 34rpx;
+
   font-weight: 600;
 
   line-height: 1.4;
 
   text-align: left;
+
 }
 
 
 /* ======================
+
    Time Picker
+
 ====================== */
 
 .time-picker {
+
   width: 500rpx;
+
   height: 300rpx;
 
   margin: 40rpx auto 0;
@@ -136,9 +183,11 @@
   border-radius: 24rpx;
 
   overflow: hidden;
+
 }
 
 .picker-item {
+
   height: 100rpx;
 
   line-height: 100rpx;
@@ -146,27 +195,41 @@
   text-align: center;
 
   font-size: 34rpx;
+
 }
 
 .picker-selected {
-  background: rgba(120, 170, 150, 0.15);
+
+  background: rgba(
+    120,
+    170,
+    150,
+    0.15
+  );
+
 }
 
 
 /* ======================
+
    Option Cards
+
 ====================== */
 
 .option-card {
+
   width: 100%;
+
   min-height: 100rpx;
 
   box-sizing: border-box;
 
   display: flex;
+
   flex-direction: row;
 
   align-items: center;
+
   justify-content: space-between;
 
   margin-top: 24rpx;
@@ -176,119 +239,482 @@
   background: #eef4f5;
 
   border-radius: 20rpx;
+
 }
 
 .option-text {
+
   font-size: 30rpx;
+
 }
 
 
 /* ======================
+
    Selection Circle
+
 ====================== */
 
 .radio-circle {
+
   width: 34rpx;
+
   height: 34rpx;
 
   box-sizing: border-box;
 
   border: 4rpx solid #222;
+
   border-radius: 50%;
+
 }
 
 .radio-circle.selected {
+
   border-color: #2fc766;
 
   background: #2fc766;
 
   box-shadow:
+
     inset 0 0 0 7rpx #eef4f5;
+
 }
 
 
 /* ======================
+
+   Q2 Route Options
+
+====================== */
+
+.route-option-card {
+
+  min-height: 140rpx;
+
+  padding: 18rpx 24rpx;
+
+}
+
+.route-option-info {
+
+  flex: 1;
+
+  min-width: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  justify-content: center;
+
+  margin-right: 16rpx;
+
+}
+
+.route-option-title {
+
+  display: block;
+
+  font-size: 30rpx;
+
+  font-weight: 600;
+
+}
+
+.route-option-description {
+
+  display: block;
+
+  margin-top: 8rpx;
+
+  font-size: 22rpx;
+
+  line-height: 1.45;
+
+  color: #777777;
+
+}
+
+.route-preview-wrapper {
+
+  width: 100rpx;
+
+  flex-shrink: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+  margin-right: 18rpx;
+
+}
+
+.route-preview {
+
+  width: 96rpx;
+
+  height: 66rpx;
+
+  box-sizing: border-box;
+
+  padding: 5rpx;
+
+  background: #ffffff;
+
+  border-radius: 12rpx;
+
+}
+
+.route-preview-hint {
+
+  margin-top: 3rpx;
+
+  font-size: 17rpx;
+
+  color: #999999;
+
+}
+
+
+/* ======================
+
+   Q2 Image Modal
+
+====================== */
+
+.preview-overlay {
+
+  position: fixed;
+
+  top: 0;
+
+  left: 0;
+
+  right: 0;
+
+  bottom: 0;
+
+  z-index: 999;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  padding: 60rpx;
+
+  box-sizing: border-box;
+
+  background: rgba(0, 0, 0, 0.55);
+
+}
+
+.preview-modal {
+
+  width: 100%;
+
+  box-sizing: border-box;
+
+  padding: 30rpx;
+
+  background: #ffffff;
+
+  border-radius: 28rpx;
+
+}
+
+.preview-modal-header {
+
+  display: flex;
+
+  flex-direction: row;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+}
+
+.preview-modal-title {
+
+  font-size: 34rpx;
+
+  font-weight: 600;
+
+}
+
+.preview-close {
+
+  width: 64rpx;
+
+  height: 64rpx;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  flex-shrink: 0;
+
+  font-size: 52rpx;
+
+  line-height: 1;
+
+  color: #777777;
+
+}
+
+.preview-large-image {
+
+  width: 100%;
+
+  height: 420rpx;
+
+  margin-top: 20rpx;
+
+}
+
+
+/* ======================
+
    Page 2 Compact Layout
+
 ====================== */
 
 .page-two .question-block {
+
   margin-top: 50rpx;
+
 }
 
 .page-two .question-block + .question-block {
+
   margin-top: 42rpx;
+
 }
 
 .page-two .option-card {
+
   min-height: 96rpx;
 
   margin-top: 18rpx;
 
   padding: 0 32rpx;
+
 }
 
 .page-two .option-text {
+
   font-size: 30rpx;
+
 }
 
 .page-two .radio-circle {
+
   width: 32rpx;
+
   height: 32rpx;
+
 }
 
+
 /* ======================
+
+   Q4 Ranking
+
+====================== */
+
+.rank-description {
+
+  display: block;
+
+  margin-top: 14rpx;
+
+  margin-left: 36rpx;
+
+  font-size: 22rpx;
+
+  color: #888888;
+
+}
+
+.rank-option-card {
+
+  width: 100%;
+
+  min-height: 96rpx;
+
+  box-sizing: border-box;
+
+  display: flex;
+
+  flex-direction: row;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  margin-top: 18rpx;
+
+  padding: 0 28rpx;
+
+  background: #eef4f5;
+
+  border-radius: 20rpx;
+
+}
+
+.rank-option-selected {
+
+  background: #eef7f1;
+
+}
+
+.rank-option-text {
+
+  font-size: 30rpx;
+
+}
+
+.rank-circle {
+
+  width: 38rpx;
+
+  height: 38rpx;
+
+  box-sizing: border-box;
+
+  border: 3rpx solid #999999;
+
+  border-radius: 50%;
+
+}
+
+.rank-number {
+
+  width: 46rpx;
+
+  height: 46rpx;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
+
+  box-sizing: border-box;
+
+  background: #2fc766;
+
+  border-radius: 50%;
+
+  font-size: 26rpx;
+
+  font-weight: 600;
+
+  color: #ffffff;
+
+}
+
+
+/* ======================
+
    Bottom Navigation
+
 ====================== */
 
 .page-navigation {
+
   position: fixed;
 
   left: 60rpx;
+
   right: 60rpx;
+
   bottom: 50rpx;
 
   display: flex;
 
   justify-content: space-between;
+
   align-items: center;
+
+}
+
+.page-navigation-page-one {
+
+  position: static;
+
+  width: 100%;
+
+  margin-top: 50rpx;
+
+  display: flex;
+
+  justify-content: flex-end;
+
 }
 
 .nav-arrow {
+
   font-size: 56rpx;
 
   color: #2fc766;
+
 }
 
 .next-arrow {
+
   margin-left: auto;
+
 }
 
 
 /* ======================
+
    Recommend Button
+
 ====================== */
 
 .recommend-button {
+
   width: 220rpx;
+
   height: 80rpx;
 
   margin: 0;
+
   padding: 0;
 
   display: flex;
 
   align-items: center;
+
   justify-content: center;
 
   background: #2fc766;
+
   color: #ffffff;
 
   border-radius: 40rpx;
 
   font-size: 28rpx;
+
   font-weight: 600;
+
 }
 
 .recommend-button::after {
+
   border: none;
+
+}
+
+.page-one-bottom-space {
+  height: 150rpx;
 }
