@@ -327,10 +327,19 @@ Page({
   // =========================
 
   nextPage() {
+    if (this.data.questions[1].answer == null) {
+      wx.showModal({
+        title: "提示",
+        content: "请先选择你喜欢的散步路线",
+        showCancel: false
+      })
+
+      return;
+    }
+
     if (this.data.currentPage < 1) {
       this.setData({
-        currentPage:
-          this.data.currentPage + 1
+        currentPage: this.data.currentPage + 1
       })
     }
   },
