@@ -356,6 +356,25 @@ Page({
 
 
   goToRoutes() {
+    if (this.data.questions[2].answer  == null) {
+      wx.showModal({
+        title: "提示",
+        content: "请先选择人流偏好",
+        showCancel: false
+      })
+
+      return;
+    } 
+
+    if (this.data.questions[3].answer.length != 4) {
+      wx.showModal({
+        title: "提示",
+        content: "请先对散步环境排序",
+        showCancel: false
+      })
+
+      return;
+    }
     console.log(
       "final answers:",
       this.data.questions.map(
