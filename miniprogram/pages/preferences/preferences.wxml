@@ -1,4 +1,333 @@
 <view class="container">
-  <text class="title">Preferences</text>
-  <text class="subtitle">Walking preference questionnaire will go here.</text>
+
+<!-- Header -->
+<view class="header">
+
+  <view class="avatar" bindtap="goToProfile">
+    <text class="avatar-person">🚶🏻</text>
+  </view>
+
+  <text class="title">个人散步偏好调查</text>
+  <text class="subtitle">让AI更好的了解你</text>
+
+</view>
+
+
+<!-- ==================== -->
+<!-- PAGE 1 -->
+<!-- ==================== -->
+
+<view wx:if="{{currentPage === 0}}">
+
+
+  <!-- Q1 -->
+
+  <view class="question-block">
+
+    <view class="question-header">
+
+      <view class="question-dot"></view>
+
+      <text class="question-title">
+        {{questions[0].questionText}}
+      </text>
+
+    </view>
+
+
+    <picker-view
+      class="time-picker"
+      value="{{timePickerValue}}"
+      bindchange="onTimeChange"
+      indicator-class="picker-selected"
+    >
+
+      <!-- Hour -->
+
+      <picker-view-column>
+
+        <view
+          class="picker-item"
+          wx:for="{{hourOptions}}"
+          wx:key="*this"
+        >
+          {{item}} 小时
+        </view>
+
+      </picker-view-column>
+
+
+      <!-- Minute -->
+
+      <picker-view-column>
+
+        <view
+          class="picker-item"
+          wx:for="{{minuteOptions}}"
+          wx:key="*this"
+        >
+          {{item}} 分钟
+        </view>
+
+      </picker-view-column>
+
+    </picker-view>
+
+  </view>
+
+
+  <!-- Q2 -->
+
+  <view class="question-block">
+
+    <view class="question-header">
+
+      <view class="question-dot"></view>
+
+      <text class="question-title">
+        {{questions[1].questionText}}
+      </text>
+
+    </view>
+
+
+    <view
+      class="option-card route-option-card"
+      wx:for="{{questions[1].options}}"
+      wx:key="value"
+      bindtap="onSingleSelect"
+      data-question-index="1"
+      data-option-index="{{index}}"
+    >
+
+
+      <!-- 左边文字 -->
+
+      <view class="route-option-info">
+
+        <text class="route-option-title">
+          {{item.label}}
+        </text>
+
+        <text class="route-option-description">
+          {{item.description}}
+        </text>
+
+      </view>
+
+
+      <!-- 小路线图 -->
+
+      <view
+        class="route-preview-wrapper"
+        catchtap="openRoutePreview"
+        data-src="{{item.image}}"
+        data-title="{{item.label}}"
+      >
+
+        <image
+          class="route-preview"
+          src="{{item.image}}"
+          mode="aspectFit"
+        />
+
+        <text class="route-preview-hint">
+          点击放大
+        </text>
+
+      </view>
+
+
+      <!-- 单选 -->
+
+      <view
+        class="radio-circle {{item.selected ? 'selected' : ''}}"
+      ></view>
+
+    </view>
+
+  </view>
+
+</view>
+
+
+<!-- ==================== -->
+<!-- PAGE 2 -->
+<!-- ==================== -->
+
+<view
+  wx:if="{{currentPage === 1}}"
+  class="page-two"
+>
+
+
+  <!-- Q3 -->
+
+  <view class="question-block">
+
+    <view class="question-header">
+
+      <view class="question-dot"></view>
+
+      <text class="question-title">
+        {{questions[2].questionText}}
+      </text>
+
+    </view>
+
+
+    <view
+      class="option-card"
+      wx:for="{{questions[2].options}}"
+      wx:key="label"
+      bindtap="onSingleSelect"
+      data-question-index="2"
+      data-option-index="{{index}}"
+    >
+
+      <text class="option-text">
+        {{item.label}}
+      </text>
+
+      <view
+        class="radio-circle {{item.selected ? 'selected' : ''}}"
+      ></view>
+
+    </view>
+
+  </view>
+
+
+  <!-- Q4 -->
+
+  <view class="question-block">
+
+    <view class="question-header">
+
+      <view class="question-dot"></view>
+
+      <text class="question-title">
+        {{questions[3].questionText}}
+      </text>
+
+    </view>
+
+
+    <text class="rank-description">
+      按喜好顺序点击，1 代表最喜欢
+    </text>
+
+
+    <view
+      class="rank-option-card {{item.rank !== null ? 'rank-option-selected' : ''}}"
+      wx:for="{{questions[3].options}}"
+      wx:key="label"
+      bindtap="onRankSelect"
+      data-option-index="{{index}}"
+    >
+
+      <text class="rank-option-text">
+        {{item.label}}
+      </text>
+
+
+      <!-- 尚未排序 -->
+
+      <view
+        class="rank-circle"
+        wx:if="{{item.rank === null}}"
+      >
+      </view>
+
+
+      <!-- 已排序 -->
+
+      <view
+        class="rank-number"
+        wx:else
+      >
+        {{item.rank}}
+      </view>
+
+    </view>
+
+  </view>
+
+</view>
+
+
+<!-- ==================== -->
+<!-- Bottom Navigation -->
+<!-- ==================== -->
+
+<view class="page-navigation {{currentPage === 0 ? 'page-navigation-page-one' : ''}}">
+
+  <view
+    class="nav-arrow"
+    wx:if="{{currentPage === 1}}"
+    bindtap="previousPage"
+  >
+    ◀
+  </view>
+
+  <view
+    class="nav-arrow next-arrow"
+    wx:if="{{currentPage === 0}}"
+    bindtap="nextPage"
+  >
+    ▶
+  </view>
+
+  <button
+    class="recommend-button"
+    wx:if="{{currentPage === 1}}"
+    bindtap="goToRoutes"
+  >
+    推荐路线
+  </button>
+
+</view>
+
+
+<!-- ==================== -->
+<!-- Route Image Modal -->
+<!-- ==================== -->
+
+<view
+  class="preview-overlay"
+  wx:if="{{previewVisible}}"
+  bindtap="closeRoutePreview"
+>
+
+  <view
+    class="preview-modal"
+    catchtap="preventClose"
+  >
+
+    <view class="preview-modal-header">
+
+      <text class="preview-modal-title">
+        {{previewTitle}}
+      </text>
+
+      <view
+        class="preview-close"
+        bindtap="closeRoutePreview"
+      >
+        ×
+      </view>
+
+    </view>
+
+
+    <image
+      class="preview-large-image"
+      src="{{previewImage}}"
+      mode="aspectFit"
+    />
+
+  </view>
+
+</view>
+
 </view>
