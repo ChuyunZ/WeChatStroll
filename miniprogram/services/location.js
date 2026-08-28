@@ -49,13 +49,41 @@ function requestLocationPermission() {
       },
 
       fail: (err) => {
-        reject(
-          createLocationError(
-            ERROR_CODES.PERMISSION_DENIED,
-            'Location permission was denied.',
-            err
-          )
-        )
+        wx.getSetting({
+          success: (res) => {
+            const permission = res.authSetting[LOCATION_SCOPE]
+
+            if (permission === false) {
+              reject(
+                createLocationError(
+                  ERROR_CODES.PERMISSION_DENIED,
+                  'Location permission was denied.',
+                  err
+                )
+              )
+
+              return
+            }
+
+            reject(
+              createLocationError(
+                ERROR_CODES.LOCATION_FAILED,
+                'Unable to request location permission.',
+                err
+              )
+            )
+          },
+
+          fail: () => {
+            reject(
+              createLocationError(
+                ERROR_CODES.LOCATION_FAILED,
+                'Unable to request location permission.',
+                err
+              )
+            )
+          }
+        })
       }
     })
   })
@@ -135,7 +163,10 @@ function requestCurrentLocation(timeout = DEFAULT_TIMEOUT) {
 }
 
 async function getCurrentLocation(options = {}) {
-  const timeout = options.timeout || DEFAULT_TIMEOUT
+  const timeout =
+  Number.isFinite(options.timeout) && options.timeout > 0
+    ? options.timeout
+    : DEFAULT_TIMEOUT
 
   await ensureLocationPermission()
 
