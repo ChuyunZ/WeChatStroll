@@ -1,3 +1,5 @@
+const locationService = require('../../services/location')
+
 Page({
   data: {
     latitude: '-',
@@ -8,7 +10,7 @@ Page({
     showRetry: false
   },
 
-  getLocation() {
+  async getLocation() {
     this.setData({
       loading: true,
       errorMessage: '',
@@ -16,48 +18,46 @@ Page({
       showRetry: false
     })
 
-    wx.getSetting({
-      success: (res) => {
-        const permission = res.authSetting['scope.userLocation']
+    try {
+      const location = await locationService.getCurrentLocation()
 
-        if (permission === true) {
-          this.requestLocation()
-        } else if (permission === false) {
-          this.handlePermissionDenied()
-        } else {
-          wx.authorize({
-            scope: 'scope.userLocation',
+      console.log('Location:', location)
 
-            success: () => {
-              this.requestLocation()
-            },
+      this.setData({
+        latitude: location.latitude,
+        longitude: location.longitude,
+        loading: false,
+        errorMessage: '',
+        permissionDenied: false,
+        showRetry: false
+      })
+    } catch (error) {
+      console.log('Location error:', error)
 
-            fail: () => {
-              this.handlePermissionDenied()
-            }
-          })
-        }
-      },
-
-      fail: (err) => {
-        console.log('getSetting failed:', err)
-
-        this.setData({
-          loading: false,
-          errorMessage:
-            'Unable to check location permission. Please try again.',
-          showRetry: true
-        })
-      }
-    })
+      this.handleLocationError(error)
+    }
   },
 
-  requestLocation() {
-    let requestTimedOut = false
-  
-    const timer = setTimeout(() => {
-      requestTimedOut = true
-  
+  handleLocationError(error) {
+    if (
+      error.code ===
+      locationService.ERROR_CODES.PERMISSION_DENIED
+    ) {
+      this.setData({
+        loading: false,
+        errorMessage:
+          'Location permission is required. Please enable it in Settings.',
+        permissionDenied: true,
+        showRetry: true
+      })
+
+      return
+    }
+
+    if (
+      error.code ===
+      locationService.ERROR_CODES.LOCATION_TIMEOUT
+    ) {
       this.setData({
         loading: false,
         errorMessage:
@@ -65,69 +65,35 @@ Page({
         permissionDenied: false,
         showRetry: true
       })
-    }, 10000)
-  
-    wx.getLocation({
-      type: 'gcj02',
-  
-      success: (res) => {
-        if (requestTimedOut) {
-          return
-        }
-  
-        clearTimeout(timer)
-  
-        console.log('Location:', res)
-  
-        this.setData({
-          latitude: res.latitude,
-          longitude: res.longitude,
-          loading: false,
-          errorMessage: '',
-          permissionDenied: false,
-          showRetry: false
-        })
-      },
-  
-      fail: (err) => {
-        if (requestTimedOut) {
-          return
-        }
-  
-        clearTimeout(timer)
-  
-        console.log('getLocation failed:', err)
-  
-        this.setData({
-          loading: false,
-          errorMessage:
-            'Unable to get your location. Please check your location services and try again.',
-          permissionDenied: false,
-          showRetry: true
-        })
-      }
-    })
-  },
 
-  handlePermissionDenied() {
+      return
+    }
+
     this.setData({
       loading: false,
       errorMessage:
-        'Location permission is required. Please enable it in Settings.',
-      permissionDenied: true,
+        'Unable to get your location. Please check your location services and try again.',
+      permissionDenied: false,
       showRetry: true
     })
   },
 
-  openSettings() {
-    wx.openSetting({
-      success: (res) => {
-        const permission = res.authSetting['scope.userLocation']
+  async openSettings() {
+    try {
+      const result =
+        await locationService.openLocationSettings()
 
-        if (permission === true) {
-          this.getLocation()
-        }
+      if (result.authorized) {
+        this.getLocation()
       }
-    })
+    } catch (error) {
+      console.log('openSettings failed:', error)
+
+      this.setData({
+        errorMessage:
+          'Unable to open Settings. Please try again.',
+        showRetry: true
+      })
+    }
   }
 })
