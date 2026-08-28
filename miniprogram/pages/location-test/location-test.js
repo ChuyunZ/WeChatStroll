@@ -72,7 +72,8 @@ Page({
     this.setData({
       loading: false,
       errorMessage:
-        'Unable to get your location. Please check your location services and try again.',
+        error.message ||
+        'Unable to get your location. Please try again.',
       permissionDenied: false,
       showRetry: true
     })
