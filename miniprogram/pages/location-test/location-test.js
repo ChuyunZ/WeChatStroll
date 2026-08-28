@@ -38,46 +38,60 @@ Page({
     }
   },
 
-  handleLocationError(error) {
-    if (
-      error.code ===
-      locationService.ERROR_CODES.PERMISSION_DENIED
-    ) {
-      this.setData({
-        loading: false,
-        errorMessage:
-          'Location permission is required. Please enable it in Settings.',
-        permissionDenied: true,
-        showRetry: true
-      })
-
-      return
-    }
-
-    if (
-      error.code ===
-      locationService.ERROR_CODES.LOCATION_TIMEOUT
-    ) {
-      this.setData({
-        loading: false,
-        errorMessage:
-          'Location request timed out. Please try again.',
-        permissionDenied: false,
-        showRetry: true
-      })
-
-      return
-    }
-
+handleLocationError(error) {
+  if (
+    error.code ===
+    locationService.ERROR_CODES.PERMISSION_DENIED
+  ) {
     this.setData({
       loading: false,
       errorMessage:
-        error.message ||
+        'Location permission is required. Please enable it in Settings.',
+      permissionDenied: true,
+      showRetry: true
+    })
+
+    return
+  }
+
+  if (
+    error.code ===
+    locationService.ERROR_CODES.LOCATION_TIMEOUT
+  ) {
+    this.setData({
+      loading: false,
+      errorMessage:
+        'Location request timed out. Please try again.',
+      permissionDenied: false,
+      showRetry: true
+    })
+
+    return
+  }
+
+  if (
+    error.code ===
+    locationService.ERROR_CODES.LOCATION_FAILED
+  ) {
+    this.setData({
+      loading: false,
+      errorMessage:
         'Unable to get your location. Please try again.',
       permissionDenied: false,
       showRetry: true
     })
-  },
+
+    return
+  }
+
+  this.setData({
+    loading: false,
+    errorMessage:
+      'Something went wrong. Please try again.',
+    permissionDenied: false,
+    showRetry: true
+  })
+},
 
   async openSettings() {
     try {
