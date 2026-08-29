@@ -3,28 +3,58 @@ const { mockRoutes } = require("../../data/mock-routes");
 Page({
   data: {
     routes: [],
-    loading: true,
-    error: false
+    routeState: "loading"
   },
 
   onLoad() {
     this.loadRoutes();
   },
 
-  loadRoutes() {
+  async loadRoutes() {
+    // Every load/retry starts from the loading state.
     this.setData({
-      loading: true,
-      error: false
+      routes: [],
+      routeState: "loading"
     });
 
-    setTimeout(() => {
-      const preparedRoutes = this.prepareRoutes(mockRoutes);
+    try {
+      const routes = await this.getRoutes();
+
+      if (!Array.isArray(routes)) {
+        throw new Error("Invalid route data");
+      }
+
+      // Request succeeded, but no routes were found.
+      if (routes.length === 0) {
+        this.setData({
+          routes: [],
+          routeState: "empty"
+        });
+        return;
+      }
+
+      const preparedRoutes = this.prepareRoutes(routes);
 
       this.setData({
         routes: preparedRoutes,
-        loading: false
+        routeState: "success"
       });
-    }, 2000);
+    } catch (error) {
+      console.error("[Routes] Failed to load routes:", error);
+
+      this.setData({
+        routes: [],
+        routeState: "error"
+      });
+    }
+  },
+
+  getRoutes() {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(mockRoutes);
+      }, 2000);
+    });
   },
 
   prepareRoutes(routes) {
@@ -69,6 +99,16 @@ Page({
           }
         ]
       };
+    });
+  },
+
+  retryLoadRoutes() {
+    this.loadRoutes();
+  },
+
+  changePreferences() {
+    wx.redirectTo({
+      url: "/pages/preferences/preferences"
     });
   },
 
