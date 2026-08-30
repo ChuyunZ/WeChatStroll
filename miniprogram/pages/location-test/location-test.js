@@ -1,3 +1,5 @@
+const locationService = require('../../services/location')
+
 Page({
   data: {
     latitude: '-',
@@ -8,7 +10,7 @@ Page({
     showRetry: false
   },
 
-  getLocation() {
+  async getLocation() {
     this.setData({
       loading: true,
       errorMessage: '',
@@ -16,100 +18,31 @@ Page({
       showRetry: false
     })
 
-    wx.getSetting({
-      success: (res) => {
-        const permission = res.authSetting['scope.userLocation']
+    try {
+      const location = await locationService.getCurrentLocation()
 
-        if (permission === true) {
-          this.requestLocation()
-        } else if (permission === false) {
-          this.handlePermissionDenied()
-        } else {
-          wx.authorize({
-            scope: 'scope.userLocation',
+      console.log('Location:', location)
 
-            success: () => {
-              this.requestLocation()
-            },
-
-            fail: () => {
-              this.handlePermissionDenied()
-            }
-          })
-        }
-      },
-
-      fail: (err) => {
-        console.log('getSetting failed:', err)
-
-        this.setData({
-          loading: false,
-          errorMessage:
-            'Unable to check location permission. Please try again.',
-          showRetry: true
-        })
-      }
-    })
-  },
-
-  requestLocation() {
-    let requestTimedOut = false
-  
-    const timer = setTimeout(() => {
-      requestTimedOut = true
-  
       this.setData({
+        latitude: location.latitude,
+        longitude: location.longitude,
         loading: false,
-        errorMessage:
-          'Location request timed out. Please try again.',
+        errorMessage: '',
         permissionDenied: false,
-        showRetry: true
+        showRetry: false
       })
-    }, 10000)
-  
-    wx.getLocation({
-      type: 'gcj02',
-  
-      success: (res) => {
-        if (requestTimedOut) {
-          return
-        }
-  
-        clearTimeout(timer)
-  
-        console.log('Location:', res)
-  
-        this.setData({
-          latitude: res.latitude,
-          longitude: res.longitude,
-          loading: false,
-          errorMessage: '',
-          permissionDenied: false,
-          showRetry: false
-        })
-      },
-  
-      fail: (err) => {
-        if (requestTimedOut) {
-          return
-        }
-  
-        clearTimeout(timer)
-  
-        console.log('getLocation failed:', err)
-  
-        this.setData({
-          loading: false,
-          errorMessage:
-            'Unable to get your location. Please check your location services and try again.',
-          permissionDenied: false,
-          showRetry: true
-        })
-      }
-    })
+    } catch (error) {
+      console.log('Location error:', error)
+
+      this.handleLocationError(error)
+    }
   },
 
-  handlePermissionDenied() {
+handleLocationError(error) {
+  if (
+    error.code ===
+    locationService.ERROR_CODES.PERMISSION_DENIED
+  ) {
     this.setData({
       loading: false,
       errorMessage:
@@ -117,17 +50,65 @@ Page({
       permissionDenied: true,
       showRetry: true
     })
-  },
 
-  openSettings() {
-    wx.openSetting({
-      success: (res) => {
-        const permission = res.authSetting['scope.userLocation']
+    return
+  }
 
-        if (permission === true) {
-          this.getLocation()
-        }
-      }
+  if (
+    error.code ===
+    locationService.ERROR_CODES.LOCATION_TIMEOUT
+  ) {
+    this.setData({
+      loading: false,
+      errorMessage:
+        'Location request timed out. Please try again.',
+      permissionDenied: false,
+      showRetry: true
     })
+
+    return
+  }
+
+  if (
+    error.code ===
+    locationService.ERROR_CODES.LOCATION_FAILED
+  ) {
+    this.setData({
+      loading: false,
+      errorMessage:
+        'Unable to get your location. Please try again.',
+      permissionDenied: false,
+      showRetry: true
+    })
+
+    return
+  }
+
+  this.setData({
+    loading: false,
+    errorMessage:
+      'Something went wrong. Please try again.',
+    permissionDenied: false,
+    showRetry: true
+  })
+},
+
+  async openSettings() {
+    try {
+      const result =
+        await locationService.openLocationSettings()
+
+      if (result.authorized) {
+        this.getLocation()
+      }
+    } catch (error) {
+      console.log('openSettings failed:', error)
+
+      this.setData({
+        errorMessage:
+          'Unable to open Settings. Please try again.',
+        showRetry: true
+      })
+    }
   }
 })
