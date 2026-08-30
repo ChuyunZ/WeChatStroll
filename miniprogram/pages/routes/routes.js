@@ -10,7 +10,16 @@ Page({
     this.loadRoutes();
   },
 
+  onUnload() {
+    // Invalidate any request that is still in flight when the page closes.
+    this._routeRequestId = (this._routeRequestId || 0) + 1;
+  },
+
   async loadRoutes() {
+    // Give every route request a unique increasing ID.
+    const requestId = (this._routeRequestId || 0) + 1;
+    this._routeRequestId = requestId;
+
     // Every load/retry starts from the loading state.
     this.setData({
       routes: [],
@@ -19,6 +28,12 @@ Page({
 
     try {
       const routes = await this.getRoutes();
+
+      // A newer request has already started.
+      // Ignore this stale response.
+      if (requestId !== this._routeRequestId) {
+        return;
+      }
 
       if (!Array.isArray(routes)) {
         throw new Error("Invalid route data");
@@ -40,6 +55,12 @@ Page({
         routeState: "success"
       });
     } catch (error) {
+      // A newer request has already started.
+      // Ignore errors from stale requests.
+      if (requestId !== this._routeRequestId) {
+        return;
+      }
+
       console.error("[Routes] Failed to load routes:", error);
 
       this.setData({
