@@ -1,0 +1,9 @@
+{
+  "name": "getNearbyPois",
+  "version": "1.0.0",
+  "description": "Get nearby POIs from AMap",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "latest"
+  }
+}
