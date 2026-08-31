@@ -45,7 +45,8 @@
   >
     <text class="state-title">暂时没有找到合适的路线</text>
     <text class="state-description">
-      可以尝试调整你的散步偏好
+      当前时长内没有合适的路线
+        附近符合你偏好的路线需要更长时间。
     </text>
 
     <button
