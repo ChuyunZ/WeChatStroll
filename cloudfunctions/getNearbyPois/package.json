@@ -4,7 +4,7 @@
   "description": "Get nearby POIs from AMap",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "latest",
-    "axios": "latest"
+    "wx-server-sdk": "4.0.2",
+    "axios": "1.20.0"
   }
 }
