@@ -41,10 +41,19 @@ async function runTests() {
     })
 
     assert.strictEqual(result.success, true)
-    assert.ok(Array.isArray(result.pois))
-    assert.ok(result.pois.length > 0)
 
-    const poi = result.pois[0]
+    assert.ok(
+      result.poisByCategory &&
+      typeof result.poisByCategory === 'object'
+    )
+
+    assert.ok(Array.isArray(result.poisByCategory.park))
+    assert.ok(Array.isArray(result.poisByCategory.water))
+    assert.ok(Array.isArray(result.poisByCategory.shoppingStreet))
+
+    assert.ok(result.poisByCategory.park.length > 0)
+
+    const poi = result.poisByCategory.park[0]
 
     assert.strictEqual(poi.poiId, 'poi_001')
     assert.strictEqual(poi.name, 'Test Park')
@@ -151,7 +160,15 @@ async function runTests() {
     })
 
     assert.strictEqual(result.success, true)
-    assert.deepStrictEqual(result.pois, [])
+
+    assert.deepStrictEqual(
+      result.poisByCategory,
+      {
+        park: [],
+        water: [],
+        shoppingStreet: []
+      }
+    )
 
 
     // Case 5: Provider / network failure
@@ -236,7 +253,11 @@ async function runTests() {
 
     assert.strictEqual(result.success, true)
 
-    for (const returnedPoi of result.pois) {
+    const allPois = Object.values(
+      result.poisByCategory
+    ).flat()
+
+    for (const returnedPoi of allPois) {
       assert.ok(returnedPoi.poiId)
       assert.ok(returnedPoi.name)
       assert.ok(returnedPoi.category)
@@ -245,34 +266,34 @@ async function runTests() {
     }
 
     assert.strictEqual(
-      result.pois.some(
+      allPois.some(
         poi => poi.poiId === 'bad-location'
       ),
       false
     )
 
     assert.strictEqual(
-      result.pois.some(
+      allPois.some(
         poi => poi.poiId === 'bad-location-format'
       ),
       false
     )
 
     assert.strictEqual(
-      result.pois.some(
+      allPois.some(
         poi => poi.poiId === 'out-of-range-location'
       ),
       false
     )
 
     assert.strictEqual(
-      result.pois.some(
+      allPois.some(
         poi => poi.poiId === 'no-location'
       ),
       false
     )
 
-    const badDistancePoi = result.pois.find(
+    const badDistancePoi = allPois.find(
       poi => poi.poiId === 'bad-distance'
     )
 

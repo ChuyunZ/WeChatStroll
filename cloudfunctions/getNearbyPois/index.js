@@ -156,11 +156,15 @@ exports.main = async (event, context) => {
 
     const results = await Promise.all(searches)
 
-    const pois = results.flatMap(result => result.pois)
+    const poisByCategory = {}
+
+    for (const result of results) {
+      poisByCategory[result.category] = result.pois
+    }
 
     return {
       success: true,
-      pois
+      poisByCategory
     }
 
   } catch (error) {
