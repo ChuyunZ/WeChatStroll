@@ -3,28 +3,79 @@ const { mockRoutes } = require("../../data/mock-routes");
 Page({
   data: {
     routes: [],
-    loading: true,
-    error: false
+    routeState: "loading"
   },
 
   onLoad() {
     this.loadRoutes();
   },
 
-  loadRoutes() {
+  onUnload() {
+    // Invalidate any request that is still in flight when the page closes.
+    this._routeRequestId = (this._routeRequestId || 0) + 1;
+  },
+
+  async loadRoutes() {
+    // Give every route request a unique increasing ID.
+    const requestId = (this._routeRequestId || 0) + 1;
+    this._routeRequestId = requestId;
+
+    // Every load/retry starts from the loading state.
     this.setData({
-      loading: true,
-      error: false
+      routes: [],
+      routeState: "loading"
     });
 
-    setTimeout(() => {
-      const preparedRoutes = this.prepareRoutes(mockRoutes);
+    try {
+      const routes = await this.getRoutes();
+
+      // A newer request has already started.
+      // Ignore this stale response.
+      if (requestId !== this._routeRequestId) {
+        return;
+      }
+
+      if (!Array.isArray(routes)) {
+        throw new Error("Invalid route data");
+      }
+
+      // Request succeeded, but no routes were found.
+      if (routes.length === 0) {
+        this.setData({
+          routes: [],
+          routeState: "empty"
+        });
+        return;
+      }
+
+      const preparedRoutes = this.prepareRoutes(routes);
 
       this.setData({
         routes: preparedRoutes,
-        loading: false
+        routeState: "success"
       });
-    }, 2000);
+    } catch (error) {
+      // A newer request has already started.
+      // Ignore errors from stale requests.
+      if (requestId !== this._routeRequestId) {
+        return;
+      }
+
+      console.error("[Routes] Failed to load routes:", error);
+
+      this.setData({
+        routes: [],
+        routeState: "error"
+      });
+    }
+  },
+
+  getRoutes() {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(mockRoutes);
+      }, 2000);
+    });
   },
 
   prepareRoutes(routes) {
@@ -69,6 +120,16 @@ Page({
           }
         ]
       };
+    });
+  },
+
+  retryLoadRoutes() {
+    this.loadRoutes();
+  },
+
+  changePreferences() {
+    wx.redirectTo({
+      url: "/pages/preferences/preferences"
     });
   },
 
