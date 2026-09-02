@@ -1,4 +1,3 @@
-const assert = require('assert')
 const axios = require('axios')
 
 process.env.AMAP_API_KEY = 'test-api-key'
@@ -18,9 +17,12 @@ function createAMapSuccessResponse(pois = []) {
   }
 }
 
-async function runTests() {
-  try {
-    // Case 1: Valid location + normalization
+describe('getNearbyPois', () => {
+  afterEach(() => {
+    axios.get = originalAxiosGet
+  })
+
+  test('Case 1: Valid location + normalization', async () => {
     axios.get = async () => {
       return createAMapSuccessResponse([
         {
@@ -35,166 +37,140 @@ async function runTests() {
       ])
     }
 
-    let result = await main({
+    const result = await main({
       longitude: 116.473168,
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, true)
+    expect(result.success).toBe(true)
 
-    assert.ok(
-      result.poisByCategory &&
-      typeof result.poisByCategory === 'object'
-    )
+    expect(result.poisByCategory).toBeDefined()
+    expect(typeof result.poisByCategory).toBe('object')
 
-    assert.ok(Array.isArray(result.poisByCategory.park))
-    assert.ok(Array.isArray(result.poisByCategory.water))
-    assert.ok(Array.isArray(result.poisByCategory.shoppingStreet))
+    expect(Array.isArray(result.poisByCategory.park)).toBe(true)
+    expect(Array.isArray(result.poisByCategory.water)).toBe(true)
+    expect(Array.isArray(result.poisByCategory.shoppingStreet)).toBe(true)
 
-    assert.ok(result.poisByCategory.park.length > 0)
+    expect(result.poisByCategory.park.length).toBeGreaterThan(0)
 
     const poi = result.poisByCategory.park[0]
 
-    assert.strictEqual(poi.poiId, 'poi_001')
-    assert.strictEqual(poi.name, 'Test Park')
-    assert.strictEqual(poi.category, 'park')
-    assert.strictEqual(poi.longitude, 116.473168)
-    assert.strictEqual(poi.latitude, 39.993015)
-    assert.strictEqual(poi.distanceInMeters, 350)
-    assert.strictEqual(poi.address, 'Test Address')
+    expect(poi.poiId).toBe('poi_001')
+    expect(poi.name).toBe('Test Park')
+    expect(poi.category).toBe('park')
+    expect(poi.longitude).toBe(116.473168)
+    expect(poi.latitude).toBe(39.993015)
+    expect(poi.distanceInMeters).toBe(350)
+    expect(poi.address).toBe('Test Address')
 
-    assert.deepStrictEqual(
-      poi.providerMeta,
-      {
-        type: '风景名胜;公园广场;公园',
-        typecode: '110101'
-      }
-    )
+    expect(poi.providerMeta).toEqual({
+      type: '风景名胜;公园广场;公园',
+      typecode: '110101'
+    })
+  })
 
-
-    // Case 2: Missing coordinates
-    result = await main({
+  test('Case 2: Missing coordinates', async () => {
+    let result = await main({
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'INVALID_COORDINATES',
-        message: 'Missing longitude or latitude'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'INVALID_COORDINATES',
+      message: 'Missing longitude or latitude'
+    })
 
     result = await main({
       longitude: 116.473168
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'INVALID_COORDINATES',
-        message: 'Missing longitude or latitude'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'INVALID_COORDINATES',
+      message: 'Missing longitude or latitude'
+    })
+  })
 
-
-    // Case 3: Invalid coordinates
-    result = await main({
+  test('Case 3: Invalid coordinates', async () => {
+    let result = await main({
       longitude: 181,
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'INVALID_COORDINATES',
-        message: 'Invalid longitude or latitude'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'INVALID_COORDINATES',
+      message: 'Invalid longitude or latitude'
+    })
 
     result = await main({
       longitude: 116.473168,
       latitude: 91
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'INVALID_COORDINATES',
-        message: 'Invalid longitude or latitude'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'INVALID_COORDINATES',
+      message: 'Invalid longitude or latitude'
+    })
 
     result = await main({
       longitude: '116.473168',
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'INVALID_COORDINATES',
-        message: 'Invalid longitude or latitude'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'INVALID_COORDINATES',
+      message: 'Invalid longitude or latitude'
+    })
+  })
 
-
-    // Case 4: Empty POIs
+  test('Case 4: Empty POIs', async () => {
     axios.get = async () => {
       return createAMapSuccessResponse([])
     }
 
-    result = await main({
+    const result = await main({
       longitude: 116.473168,
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, true)
+    expect(result.success).toBe(true)
 
-    assert.deepStrictEqual(
-      result.poisByCategory,
-      {
-        park: [],
-        water: [],
-        shoppingStreet: []
-      }
-    )
+    expect(result.poisByCategory).toEqual({
+      park: [],
+      water: [],
+      shoppingStreet: []
+    })
+  })
 
-
-    // Case 5: Provider / network failure
+  test('Case 5: Provider / network failure', async () => {
     axios.get = async () => {
       throw new Error('Simulated AMap network failure')
     }
 
-    result = await main({
+    const result = await main({
       longitude: 116.473168,
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, false)
+    expect(result.success).toBe(false)
 
-    assert.deepStrictEqual(
-      result.error,
-      {
-        code: 'POI_SEARCH_FAILED',
-        message: 'Unable to retrieve nearby places'
-      }
-    )
+    expect(result.error).toEqual({
+      code: 'POI_SEARCH_FAILED',
+      message: 'Unable to retrieve nearby places'
+    })
 
-    assert.strictEqual(result.details, undefined)
+    expect(result.details).toBeUndefined()
+  })
 
-
-    // Case 6: Malformed provider data
+  test('Case 6: Malformed provider data', async () => {
     axios.get = async () => {
       return createAMapSuccessResponse([
         {
@@ -246,72 +222,57 @@ async function runTests() {
       ])
     }
 
-    result = await main({
+    const result = await main({
       longitude: 116.473168,
       latitude: 39.993015
     })
 
-    assert.strictEqual(result.success, true)
+    expect(result.success).toBe(true)
 
     const allPois = Object.values(
       result.poisByCategory
     ).flat()
 
     for (const returnedPoi of allPois) {
-      assert.ok(returnedPoi.poiId)
-      assert.ok(returnedPoi.name)
-      assert.ok(returnedPoi.category)
-      assert.ok(Number.isFinite(returnedPoi.longitude))
-      assert.ok(Number.isFinite(returnedPoi.latitude))
+      expect(returnedPoi.poiId).toBeTruthy()
+      expect(returnedPoi.name).toBeTruthy()
+      expect(returnedPoi.category).toBeTruthy()
+      expect(Number.isFinite(returnedPoi.longitude)).toBe(true)
+      expect(Number.isFinite(returnedPoi.latitude)).toBe(true)
     }
 
-    assert.strictEqual(
+    expect(
       allPois.some(
         poi => poi.poiId === 'bad-location'
-      ),
-      false
-    )
+      )
+    ).toBe(false)
 
-    assert.strictEqual(
+    expect(
       allPois.some(
         poi => poi.poiId === 'bad-location-format'
-      ),
-      false
-    )
+      )
+    ).toBe(false)
 
-    assert.strictEqual(
+    expect(
       allPois.some(
         poi => poi.poiId === 'out-of-range-location'
-      ),
-      false
-    )
+      )
+    ).toBe(false)
 
-    assert.strictEqual(
+    expect(
       allPois.some(
         poi => poi.poiId === 'no-location'
-      ),
-      false
-    )
+      )
+    ).toBe(false)
 
     const badDistancePoi = allPois.find(
       poi => poi.poiId === 'bad-distance'
     )
 
-    assert.ok(badDistancePoi)
+    expect(badDistancePoi).toBeTruthy()
 
-    assert.strictEqual(
-      badDistancePoi.distanceInMeters,
-      null
-    )
-
-    console.log('All getNearbyPois tests passed')
-
-  } finally {
-    axios.get = originalAxiosGet
-  }
-}
-
-runTests().catch(error => {
-  console.error('Test failed:', error)
-  process.exit(1)
+    expect(
+      badDistancePoi.distanceInMeters
+    ).toBeNull()
+  })
 })
