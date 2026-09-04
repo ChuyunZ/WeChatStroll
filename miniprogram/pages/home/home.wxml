@@ -1,25 +1,41 @@
-<view class="page">
+<view class="container">
 
-<!-- 上面的聊天内容 -->
-<view class="chat-row">
-  <view class="avatar">
-    <text class="avatar-emoji">🏃</text>
+<!-- Welcome chat -->
+<view class="welcome-section">
+
+  <!-- Walking avatar -->
+  <view class="walking-avatar">
+    <text class="walking-person">🚶‍♀️</text>
   </view>
 
+  <!-- Chat bubble -->
   <view class="chat-bubble">
-    <view class="bubble-tail"></view>
 
-    <text class="welcome-title">欢迎来到微信散步</text>
-    <text class="welcome-subtitle">嗨，新朋友快进来</text>
+    <!-- Bubble tail -->
+    <view class="chat-tail"></view>
+
+    <text class="welcome-title">
+      欢迎来到微信散步
+    </text>
+
+    <text class="welcome-subtitle">
+      嗨，新朋友快进来
+    </text>
+
   </view>
+
 </view>
 
+
+<!-- Primary CTA -->
 <view
   class="bottom-action"
   bindtap="goPreference"
   hover-class="bottom-action-active"
 >
-  <text class="bottom-action-text">开始散步</text>
+  <text class="bottom-action-text">
+    开始规划散步
+  </text>
 </view>
 
 </view>

@@ -1,106 +1,125 @@
-.page {
+.container {
   min-height: 100vh;
-  background: #f5f5f5;
+
   box-sizing: border-box;
 
-  padding: 60rpx 32rpx 220rpx;
+  background: #f7f7f7;
+  padding: 40rpx 28rpx 200rpx;
 }
 
 
-/* =========================
-   Chat message
-   ========================= */
+/* ======================
+   Welcome Chat
+====================== */
 
-.chat-row {
+.welcome-section {
+  width: 100%;
+
+  margin-top: 70rpx;
+
   display: flex;
   flex-direction: row;
   align-items: flex-start;
+
+  justify-content: flex-start;
 }
 
 
-/* Avatar */
+/* ======================
+   Walking Avatar
+====================== */
 
-.avatar {
-  width: 82rpx;
-  height: 82rpx;
+.walking-avatar {
+  width: 64rpx;
+  height: 64rpx;
 
-  background: #ffffff;
-  border-radius: 12rpx;
+  flex-shrink: 0;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  flex-shrink: 0;
+  margin-right: 30rpx;
+
+  background: #dff5e5;
+  border-radius: 50%;
 }
 
-.avatar-emoji {
-  font-size: 50rpx;
-  line-height: 1;
+.walking-person {
+  font-size: 42rpx;
+  line-height: 64rpx;
 }
 
 
-/* Chat bubble */
+/* ======================
+   Chat Bubble
+====================== */
 
 .chat-bubble {
   position: relative;
 
-  margin-left: 24rpx;
-
-  max-width: 500rpx;
-  min-height: 110rpx;
-
-  background: #ffffff;
-  border-radius: 10rpx;
+  max-width: 520rpx;
 
   box-sizing: border-box;
-  padding: 22rpx 26rpx;
 
-  display: flex;
-  flex-direction: column;
+  padding: 22rpx 28rpx 24rpx;
+
+  background: #ffffff;
+
+  border-radius: 20rpx;
 }
 
 
-/* Small triangle on left of bubble */
+/* Left chat-bubble tail */
 
-.bubble-tail {
+.chat-tail {
   position: absolute;
 
   left: -16rpx;
-  top: 26rpx;
+  top: 22rpx;
 
   width: 0;
   height: 0;
 
-  border-top: 14rpx solid transparent;
-  border-bottom: 14rpx solid transparent;
+  border-top: 13rpx solid transparent;
+  border-bottom: 13rpx solid transparent;
   border-right: 18rpx solid #ffffff;
 }
 
 
+/* ======================
+   Welcome Text
+====================== */
+
 .welcome-title {
-  font-size: 29rpx;
-  font-weight: 500;
-  color: #111111;
+  display: block;
 
-  line-height: 1.5;
+  font-size: 34rpx;
+  font-weight: 600;
 
-  margin-bottom: 8rpx;
+  line-height: 0.8;
+
+  color: #222222;
+
+  text-align: left;
 }
 
 .welcome-subtitle {
-  font-size: 22rpx;
-  color: #888888;
+  display: block;
 
-  line-height: 1.5;
+  margin-top: 0rpx;
+
+  font-size: 28rpx;
+  font-weight: normal;
+
+  line-height: 1.4;
+
+  color: #777777;
+
+  text-align: left;
 }
 
-.page {
-  min-height: 100vh;
-  background: #f5f5f5;
-  box-sizing: border-box;
-  padding: 60rpx 32rpx 180rpx;
-}
+
 
 .bottom-action {
   position: fixed;
@@ -109,27 +128,21 @@
   right: 0;
   bottom: 0;
 
-  height: 70rpx;
+  height: 140rpx;
 
-  background: #ffffff;
-  border-top: 1rpx solid #e8e8e8;
+  box-sizing: border-box;
 
   display: flex;
   align-items: center;
   justify-content: center;
 
-  padding-bottom: env(safe-area-inset-bottom);
+  background: #ffffff;
 
-  box-sizing: content-box;
-  z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .bottom-action-text {
-  font-size: 32rpx;
-  font-weight: 500;
-  color: #333333;
-}
-
-.bottom-action-active {
-  background: #eeeeee;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #222222;
 }
