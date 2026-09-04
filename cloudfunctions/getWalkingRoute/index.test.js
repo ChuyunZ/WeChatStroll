@@ -26,12 +26,20 @@ function createAMapRouteResponse() {
 
             steps: [
               {
+                step_distance: '800',
                 polyline:
-                  '121.456000,31.123000;121.458000,31.124000'
+                  '121.456000,31.123000;121.458000,31.124000',
+                navi: {
+                  walk_type: '0'
+                }
               },
               {
+                step_distance: '1600',
                 polyline:
-                  '121.458000,31.124000;121.470000,31.130000'
+                  '121.458000,31.124000;121.470000,31.130000',
+                navi: {
+                  walk_type: '6'
+                }
               }
             ]
           }
@@ -53,6 +61,16 @@ function createValidEvent() {
       longitude: 121.47
     }
   }
+}
+
+function expectWalkingRouteFailure(result) {
+  expect(result).toEqual({
+    success: false,
+    error: {
+      code: 'WALKING_ROUTE_FAILED',
+      message: 'Unable to generate walking route'
+    }
+  })
 }
 
 describe('getWalkingRoute', () => {
@@ -97,6 +115,19 @@ describe('getWalkingRoute', () => {
         longitude: 121.47
       }
     ])
+
+    expect(result.route.environmentStats).toEqual({
+      totalStepDistanceMeters: 2400,
+      analyzedDistanceMeters: 2400,
+      unknownWalkTypeDistanceMeters: 0,
+      normalRoadDistanceMeters: 800,
+      normalRoadRatio: 800 / 2400,
+      walkTypeCoverageRatio: 1,
+      walkTypeDistanceMeters: {
+        '0': 800,
+        '6': 1600
+      }
+    })
   })
 
   test('Case 2: Sends correct request to AMap', async () => {
@@ -121,7 +152,7 @@ describe('getWalkingRoute', () => {
         key: 'test-api-key',
         origin: '121.456000,31.123000',
         destination: '121.470000,31.130000',
-        show_fields: 'cost,polyline'
+        show_fields: 'cost,polyline,navi'
       },
       timeout: 2000
     })
@@ -213,13 +244,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 7: Network or Axios failure', async () => {
@@ -229,13 +254,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 8: Invalid response data', async () => {
@@ -247,13 +266,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 9: Invalid route count', async () => {
@@ -267,13 +280,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 10: Route count is positive but paths are missing', async () => {
@@ -287,13 +294,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 11: Invalid path object', async () => {
@@ -307,13 +308,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 12: Invalid walking distance', async () => {
@@ -327,13 +322,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 13: Invalid walking duration', async () => {
@@ -347,13 +336,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 14: Missing route steps', async () => {
@@ -367,13 +350,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 15: Step is missing polyline', async () => {
@@ -387,13 +364,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 16: Polyline coordinate has invalid format', async () => {
@@ -408,13 +379,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 17: Polyline coordinate contains empty value', async () => {
@@ -429,13 +394,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 18: Polyline coordinate is outside valid range', async () => {
@@ -450,13 +409,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 19: Polyline contains fewer than two points', async () => {
@@ -465,7 +418,11 @@ describe('getWalkingRoute', () => {
 
       response.data.route.paths[0].steps = [
         {
-          polyline: '121.456000,31.123000'
+          step_distance: '2400',
+          polyline: '121.456000,31.123000',
+          navi: {
+            walk_type: '0'
+          }
         }
       ]
 
@@ -474,13 +431,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'WALKING_ROUTE_FAILED',
-        message: 'Unable to generate walking route'
-      }
-    })
+    expectWalkingRouteFailure(result)
   })
 
   test('Case 20: Duration rounds up to whole minutes', async () => {
@@ -496,5 +447,161 @@ describe('getWalkingRoute', () => {
 
     expect(result.success).toBe(true)
     expect(result.route.durationMinutes).toBe(33)
+  })
+
+  test(
+    'Case 21: Normal-road ratio is based on distance, not step count',
+    async () => {
+      axios.get = async () => {
+        const response = createAMapRouteResponse()
+
+        response.data.route.paths[0].distance = '1000'
+
+        response.data.route.paths[0].steps = [
+          {
+            step_distance: '10',
+            polyline:
+              '121.456000,31.123000;121.457000,31.123500',
+            navi: {
+              walk_type: '0'
+            }
+          },
+          {
+            step_distance: '10',
+            polyline:
+              '121.457000,31.123500;121.458000,31.124000',
+            navi: {
+              walk_type: '0'
+            }
+          },
+          {
+            step_distance: '10',
+            polyline:
+              '121.458000,31.124000;121.459000,31.124500',
+            navi: {
+              walk_type: '0'
+            }
+          },
+          {
+            step_distance: '970',
+            polyline:
+              '121.459000,31.124500;121.470000,31.130000',
+            navi: {
+              walk_type: '6'
+            }
+          }
+        ]
+
+        return response
+      }
+
+      const result = await main(createValidEvent())
+
+      expect(result.success).toBe(true)
+
+      expect(
+        result.route.environmentStats.normalRoadDistanceMeters
+      ).toBe(30)
+
+      expect(
+        result.route.environmentStats.normalRoadRatio
+      ).toBe(0.03)
+
+      expect(
+        result.route.environmentStats.walkTypeDistanceMeters
+      ).toEqual({
+        '0': 30,
+        '6': 970
+      })
+    }
+  )
+
+  test(
+    'Case 22: Missing walk_type is tracked as unknown coverage',
+    async () => {
+      axios.get = async () => {
+        const response = createAMapRouteResponse()
+
+        delete response.data.route.paths[0].steps[0].navi
+
+        response.data.route.paths[0].steps[1].navi.walk_type =
+          '0'
+
+        return response
+      }
+
+      const result = await main(createValidEvent())
+
+      expect(result.success).toBe(true)
+
+      expect(result.route.environmentStats).toEqual({
+        totalStepDistanceMeters: 2400,
+        analyzedDistanceMeters: 1600,
+        unknownWalkTypeDistanceMeters: 800,
+        normalRoadDistanceMeters: 1600,
+        normalRoadRatio: 1600 / 2400,
+        walkTypeCoverageRatio: 1600 / 2400,
+        walkTypeDistanceMeters: {
+          '0': 1600
+        }
+      })
+    }
+  )
+
+  test(
+    'Case 23: Numeric walk_type is normalized to a string key',
+    async () => {
+      axios.get = async () => {
+        const response = createAMapRouteResponse()
+
+        response.data.route.paths[0].steps[0].navi.walk_type =
+          0
+
+        return response
+      }
+
+      const result = await main(createValidEvent())
+
+      expect(result.success).toBe(true)
+
+      expect(
+        result.route.environmentStats.normalRoadDistanceMeters
+      ).toBe(800)
+
+      expect(
+        result.route.environmentStats.walkTypeDistanceMeters
+      ).toEqual({
+        '0': 800,
+        '6': 1600
+      })
+    }
+  )
+
+  test('Case 24: Missing step distance', async () => {
+    axios.get = async () => {
+      const response = createAMapRouteResponse()
+
+      delete response.data.route.paths[0].steps[0].step_distance
+
+      return response
+    }
+
+    const result = await main(createValidEvent())
+
+    expectWalkingRouteFailure(result)
+  })
+
+  test('Case 25: Invalid negative step distance', async () => {
+    axios.get = async () => {
+      const response = createAMapRouteResponse()
+
+      response.data.route.paths[0].steps[0].step_distance = '-1'
+
+      return response
+    }
+
+    const result = await main(createValidEvent())
+
+    expectWalkingRouteFailure(result)
   })
 })
