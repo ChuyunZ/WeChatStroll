@@ -10,7 +10,6 @@ cloud.init({
 const CATEGORY_TYPES = {
   park: [
     '110101', // 公园
-    '110105'  // 城市广场
   ],
 
   water: [
