@@ -1,7 +1,9 @@
 Page({
-  goPreference() {
+  navigateToPage(event) {
+    const url = event.currentTarget.dataset.url
+
     wx.navigateTo({
-      url: '/pages/preferences/preferences'
+      url
     })
   }
 })

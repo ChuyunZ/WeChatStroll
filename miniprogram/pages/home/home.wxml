@@ -1,25 +1,61 @@
-<view class="page">
+<view class="container">
+  <text class="title">WeChatStroll</text>
+  <text class="subtitle">Page Navigation Test</text>
 
-<!-- 上面的聊天内容 -->
-<view class="chat-row">
-  <view class="avatar">
-    <text class="avatar-emoji">🏃</text>
-  </view>
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/preferences/preferences"
+  >
+    Preferences
+  </button>
 
-  <view class="chat-bubble">
-    <view class="bubble-tail"></view>
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/routes/routes"
+  >
+    Routes
+  </button>
 
-    <text class="welcome-title">欢迎来到微信散步</text>
-    <text class="welcome-subtitle">嗨，新朋友快进来</text>
-  </view>
-</view>
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/route-detail/route-detail"
+  >
+    Route Detail
+  </button>
 
-<view
-  class="bottom-action"
-  bindtap="goPreference"
-  hover-class="bottom-action-active"
->
-  <text class="bottom-action-text">开始散步</text>
-</view>
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/walking/walking"
+  >
+    Walking
+  </button>
+
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/feedback/feedback"
+  >
+    Feedback
+  </button>
+
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/profile/profile"
+  >
+  Profile
+  </button>
+
+  <button
+    class="nav-button"
+    bindtap="navigateToPage"
+    data-url="/pages/location-test/location-test"
+  >
+  location-test
+  </button>
 
 </view>
