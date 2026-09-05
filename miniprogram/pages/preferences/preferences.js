@@ -89,7 +89,7 @@ Page({
           },
           {
             label: "水边",
-            value: "waterside",
+            value: "river",
             rank: null
           },
           {
