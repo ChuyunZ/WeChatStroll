@@ -1,61 +1,39 @@
 <view class="container">
-  <text class="title">WeChatStroll</text>
-  <text class="subtitle">Page Navigation Test</text>
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/preferences/preferences"
-  >
-    Preferences
-  </button>
+<!-- Welcome chat -->
+<view class="welcome-section">
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/routes/routes"
-  >
-    Routes
-  </button>
+  <!-- Walking avatar -->
+  <view class="walking-avatar">
+    <text class="walking-person">🚶‍♀️</text>
+  </view>
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/route-detail/route-detail"
-  >
-    Route Detail
-  </button>
+  <!-- Chat bubble -->
+  <view class="chat-bubble">
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/walking/walking"
-  >
-    Walking
-  </button>
+    <!-- Bubble tail -->
+    <view class="chat-tail"></view>
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/feedback/feedback"
-  >
-    Feedback
-  </button>
+    <text class="welcome-title">Let's 散步</text>
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/profile/profile"
-  >
-  Profile
-  </button>
+    <text class="welcome-subtitle">
+      嗨，新朋友快进来
+    </text>
 
-  <button
-    class="nav-button"
-    bindtap="navigateToPage"
-    data-url="/pages/location-test/location-test"
-  >
-  location-test
-  </button>
+  </view>
+
+</view>
+
+
+<!-- Primary CTA -->
+<view
+  class="bottom-action"
+  bindtap="goPreference"
+  hover-class="bottom-action-active"
+>
+  <text class="bottom-action-text">
+    开始规划散步
+  </text>
+</view>
 
 </view>

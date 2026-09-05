@@ -1,22 +1,148 @@
 .container {
+  min-height: 100vh;
+
+  box-sizing: border-box;
+
+  background: #f7f7f7;
+  padding: 40rpx 28rpx 200rpx;
+}
+
+
+/* ======================
+   Welcome Chat
+====================== */
+
+.welcome-section {
+  width: 100%;
+
+  margin-top: 70rpx;
+
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-start;
+
+  justify-content: flex-start;
+}
+
+
+/* ======================
+   Walking Avatar
+====================== */
+
+.walking-avatar {
+  width: 64rpx;
+  height: 64rpx;
+
+  flex-shrink: 0;
+
+  display: flex;
   align-items: center;
-  padding: 60rpx 40rpx;
+  justify-content: center;
+
+  margin-right: 30rpx;
+
+  background: #dff5e5;
+  border-radius: 50%;
 }
 
-.title {
-  font-size: 48rpx;
-  font-weight: bold;
-  margin-bottom: 16rpx;
+.walking-person {
+  font-size: 42rpx;
+  line-height: 64rpx;
 }
 
-.subtitle {
+
+/* ======================
+   Chat Bubble
+====================== */
+
+.chat-bubble {
+  position: relative;
+
+  max-width: 520rpx;
+
+  box-sizing: border-box;
+
+  padding: 22rpx 28rpx 24rpx;
+
+  background: #ffffff;
+
+  border-radius: 20rpx;
+}
+
+
+/* Left chat-bubble tail */
+
+.chat-tail {
+  position: absolute;
+
+  left: -16rpx;
+  top: 22rpx;
+
+  width: 0;
+  height: 0;
+
+  border-top: 13rpx solid transparent;
+  border-bottom: 13rpx solid transparent;
+  border-right: 18rpx solid #ffffff;
+}
+
+
+/* ======================
+   Welcome Text
+====================== */
+
+.welcome-title {
+  display: block;
+
+  font-size: 34rpx;
+  font-weight: 600;
+
+  line-height: 0.8;
+
+  color: #222222;
+
+  text-align: left;
+}
+
+.welcome-subtitle {
+  display: block;
+
+  margin-top: 0rpx;
+
   font-size: 28rpx;
-  margin-bottom: 32rpx;
+  font-weight: normal;
+
+  line-height: 1.4;
+
+  color: #777777;
+
+  text-align: left;
 }
 
-.nav-button {
-  width: 500rpx;
-  margin-bottom: 20rpx;
+
+
+.bottom-action {
+  position: fixed;
+
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  height: 140rpx;
+
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #ffffff;
+
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.bottom-action-text {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #222222;
 }
