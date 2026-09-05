@@ -13,7 +13,6 @@ The goal is to make sure every part of the application uses the same field names
 | `durationMinutes` | number | Yes | Estimated walking duration in minutes |
 | `distanceMeters` | number | Yes | Estimated walking distance in meters |
 | `routeType` | string | Yes | Shape/type of the route |
-| `returnsToStart` | boolean | Yes | Whether the route ends at the starting point |
 | `crowdLevel` | string | Yes | Estimated crowd level |
 | `tags` | string[] | Yes | Environment/features associated with the route |
 | `description` | string | Yes | Longer description shown on the detail page |
@@ -107,7 +106,6 @@ A route card uses a subset of the route object:
 - `durationMinutes`
 - `distanceMeters`
 - `routeType`
-- `returnsToStart`
 - `crowdLevel`
 - `tags`
 - `recommendationReason`
@@ -121,7 +119,6 @@ Loop route
 Crowd: Medium
 River · Quiet · Trees
 Recommended because you prefer a quiet 30-minute walk.
-Returns to starting point
 ```
 
 ## 7. Route detail page
@@ -132,7 +129,6 @@ The route detail page can use:
 - `durationMinutes`
 - `distanceMeters`
 - `routeType`
-- `returnsToStart`
 - `crowdLevel`
 - `tags`
 - `description`
@@ -157,7 +153,6 @@ The following are UI actions, not route data fields:
   "durationMinutes": 32,
   "distanceMeters": 2600,
   "routeType": "loop",
-  "returnsToStart": true,
   "crowdLevel": "medium",
   "tags": ["river", "quiet", "trees"],
   "description": "A mostly riverside route with several resting areas.",

@@ -95,7 +95,6 @@ The route structure mainly follows `docs/route-data-contract.md`.
   "durationMinutes": 32,
   "distanceMeters": 2600,
   "routeType": "loop",
-  "returnsToStart": true,
   "crowdLevel": "medium",
   "tags": [
     "river",
@@ -131,7 +130,8 @@ The route structure mainly follows `docs/route-data-contract.md`.
       "latitude": 31.2312,
       "longitude": 121.4751
     }
-  ]
+  ],
+  "updatedAt": "2026-09-05T00:00:00Z"
 }
 ```
 
@@ -144,7 +144,6 @@ The route structure mainly follows `docs/route-data-contract.md`.
 | `durationMinutes` | number | Yes | Estimated walking duration in minutes | `32` |
 | `distanceMeters` | number | Yes | Estimated route distance in meters | `2600` |
 | `routeType` | string | Yes | Shape/type of the route | `"loop"` |
-| `returnsToStart` | boolean | Yes | Whether the route ends at its starting point | `true` |
 | `crowdLevel` | string | Yes | Estimated crowd level | `"medium"` |
 | `tags` | string[] | Yes | Environment and route features | `["river", "quiet", "trees"]` |
 | `description` | string | Yes | Longer description of the route | `"A mostly riverside route with several resting areas."` |
@@ -153,6 +152,7 @@ The route structure mainly follows `docs/route-data-contract.md`.
 | `endPoint` | object | Yes | Ending location of the route | See LocationPoint |
 | `polyline` | object[] | Yes | Ordered coordinates used to draw the route on the map | See GeoPoint |
 | `pointsOfInterest` | object[] | No | Interesting places located along the route | See PointOfInterest |
+| `updatedAt` | string | Yes | Last update time in ISO 8601 format | `"2026-09-05T00:00:00Z"` |
 
 `LocationPoint`, `GeoPoint`, `PointOfInterest`, `routeType`, and `crowdLevel` follow the definitions in `docs/route-data-contract.md`.
 
