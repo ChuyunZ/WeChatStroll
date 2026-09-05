@@ -1,16 +1,16 @@
+jest.mock(
+  '../miniprogram/services/location',
+  () => ({
+    getCurrentLocation: jest.fn()
+  })
+)
+
 const locationService = require(
   '../miniprogram/services/location'
 )
 
 const routeGenerationService = require(
   '../miniprogram/services/route-generation'
-)
-
-jest.mock(
-  '../miniprogram/services/location',
-  () => ({
-    getCurrentLocation: jest.fn()
-  })
 )
 
 const TEST_LOCATION = {
