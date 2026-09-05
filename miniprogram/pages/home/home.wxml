@@ -14,9 +14,7 @@
     <!-- Bubble tail -->
     <view class="chat-tail"></view>
 
-    <text class="welcome-title">
-      欢迎来到微信散步
-    </text>
+    <text class="welcome-title">Let's 散步</text>
 
     <text class="welcome-subtitle">
       嗨，新朋友快进来
