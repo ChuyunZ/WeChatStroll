@@ -1,16 +1,96 @@
-const { mockRoutes } = require("../miniprogram/data/mock-routes");
+const {
+  mockRoutes
+} = require(
+  "../miniprogram/data/mock-routes"
+);
+
+const ROUTE_GENERATION_PATH =
+  "../miniprogram/services/route-generation";
+
+const GENERATED_ROUTE = {
+  routeId: "generated_park-1_123",
+
+  title:
+    "前往人民公园的散步路线",
+
+  durationMinutes: 4,
+
+  distanceMeters: 279,
+
+  routeType:
+    "point_to_point",
+
+  returnsToStart:
+    false,
+
+  crowdLevel:
+    "unknown",
+
+  tags: [
+    "公园"
+  ],
+
+  description:
+    "从当前位置步行前往人民公园的真实路线。",
+
+  recommendationReason:
+    "根据你的散步环境偏好排序，推荐前往人民公园。",
+
+  startPoint: {
+    name: "当前位置",
+    latitude: 23.129158,
+    longitude: 113.264939
+  },
+
+  endPoint: {
+    name: "人民公园",
+    latitude: 23.127159,
+    longitude: 113.264345
+  },
+
+  polyline: [
+    {
+      latitude: 23.129158,
+      longitude: 113.264939
+    },
+    {
+      latitude: 23.128,
+      longitude: 113.2646
+    },
+    {
+      latitude: 23.127159,
+      longitude: 113.264345
+    }
+  ],
+
+  pointsOfInterest: [
+    {
+      name: "人民公园",
+      type: "park",
+      latitude: 23.127159,
+      longitude: 113.264345
+    }
+  ],
+
+  updatedAt:
+    "2026-09-05T00:00:00.000Z"
+};
+
 
 let pageDefinition;
 let page;
+let routeGenerationServiceMock;
+
 
 function createDeferred() {
   let resolve;
   let reject;
 
-  const promise = new Promise((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
+  const promise =
+    new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
 
   return {
     promise,
@@ -19,268 +99,916 @@ function createDeferred() {
   };
 }
 
-function loadRoutesPage() {
+
+function createEventChannel() {
+  const handlers = {};
+
+  return {
+    handlers,
+
+    on: jest.fn(
+      (eventName, handler) => {
+        handlers[eventName] =
+          handler;
+      }
+    )
+  };
+}
+
+
+function loadRoutesPage({
+  eventChannel = null
+} = {}) {
   jest.resetModules();
 
   pageDefinition = null;
 
-  // Mock WeChat's global Page function.
-  global.Page = jest.fn((definition) => {
-    pageDefinition = definition;
-  });
-
-  // Mock WeChat APIs used by routes.js.
-  global.wx = {
-    navigateTo: jest.fn(),
-    redirectTo: jest.fn(),
-    showToast: jest.fn()
+  // Mock route-generation service.
+  routeGenerationServiceMock = {
+    generateFirstRoute:
+      jest.fn()
   };
 
-  require("../miniprogram/pages/routes/routes");
+  jest.doMock(
+    ROUTE_GENERATION_PATH,
+    () =>
+      routeGenerationServiceMock
+  );
+
+
+  // Mock WeChat Page().
+  global.Page =
+    jest.fn((definition) => {
+      pageDefinition =
+        definition;
+    });
+
+
+  // Mock WeChat APIs.
+  global.wx = {
+    navigateTo:
+      jest.fn(),
+
+    redirectTo:
+      jest.fn(),
+
+    showToast:
+      jest.fn()
+  };
+
+
+  require(
+    "../miniprogram/pages/routes/routes"
+  );
+
 
   const pageInstance = {
     ...pageDefinition,
+
     data: {
       ...pageDefinition.data
     }
   };
 
-  // Mock WeChat Page.setData().
-  pageInstance.setData = jest.fn((updates) => {
-    pageInstance.data = {
-      ...pageInstance.data,
-      ...updates
-    };
-  });
+
+  // Mock setData().
+  pageInstance.setData =
+    jest.fn((updates) => {
+      pageInstance.data = {
+        ...pageInstance.data,
+        ...updates
+      };
+    });
+
+
+  // Mock EventChannel receiver.
+  pageInstance.getOpenerEventChannel =
+    jest.fn(
+      () => eventChannel
+    );
+
 
   return pageInstance;
 }
 
+
 beforeEach(() => {
-  page = loadRoutesPage();
+  page =
+    loadRoutesPage();
 });
+
 
 afterEach(() => {
   jest.restoreAllMocks();
+
+  delete global.Page;
+  delete global.wx;
 });
 
 
-describe("Routes page state handling", () => {
-  test("loadRoutes starts in loading state", async () => {
-    const deferred = createDeferred();
+describe(
+  "Routes page integration and state handling",
+  () => {
 
-    page.data.routeState = "success";
-    page.data.routes = mockRoutes;
+    test(
+      "onLoad waits for route preferences when opened from Preferences",
+      () => {
+        const eventChannel =
+          createEventChannel();
 
-    page.getRoutes = jest.fn(() => deferred.promise);
+        page =
+          loadRoutesPage({
+            eventChannel
+          });
 
-    const loadPromise = page.loadRoutes();
-
-    expect(page.data.routeState).toBe("loading");
-    expect(page.data.routes).toEqual([]);
-
-    deferred.resolve(mockRoutes);
-
-    await loadPromise;
-  });
-
-
-  test("loadRoutes sets success when routes exist", async () => {
-    page.getRoutes = jest.fn().mockResolvedValue(mockRoutes);
-
-    await page.loadRoutes();
-
-    expect(page.data.routeState).toBe("success");
-    expect(page.data.routes.length).toBe(mockRoutes.length);
-    expect(page.data.routes.length).toBeGreaterThan(0);
-  });
+        page.loadRoutes =
+          jest.fn();
 
 
-  test("loadRoutes sets empty when no routes exist", async () => {
-    page.getRoutes = jest.fn().mockResolvedValue([]);
+        const preferences = {
+          durationMinutes: 30,
 
-    await page.loadRoutes();
+          routeType:
+            "loop",
 
-    expect(page.data.routeState).toBe("empty");
-    expect(page.data.routes).toEqual([]);
-  });
+          crowdPreference:
+            "low",
 
-
-  test("loadRoutes sets error when request fails", async () => {
-    const consoleErrorSpy = jest
-      .spyOn(console, "error")
-      .mockImplementation(() => {});
-
-    page.getRoutes = jest
-      .fn()
-      .mockRejectedValue(new Error("Mock route loading failed"));
-
-    await page.loadRoutes();
-
-    expect(page.data.routeState).toBe("error");
-    expect(page.data.routes).toEqual([]);
-
-    expect(consoleErrorSpy).toHaveBeenCalled();
-  });
+          environmentPreferences: [
+            "街道",
+            "公园",
+            "水边",
+            "商街"
+          ]
+        };
 
 
-  test("retryLoadRoutes uses the normal loadRoutes flow", () => {
-    page.loadRoutes = jest.fn();
-
-    page.retryLoadRoutes();
-
-    expect(page.loadRoutes).toHaveBeenCalledTimes(1);
-  });
+        page.onLoad({
+          from: "preferences"
+        });
 
 
-  test("stale success cannot overwrite a newer success", async () => {
-    const firstRequest = createDeferred();
-    const secondRequest = createDeferred();
+        expect(
+          eventChannel.on
+        ).toHaveBeenCalledWith(
+          "routePreferences",
+          expect.any(Function)
+        );
 
-    const oldRoutes = [
-      {
-        ...mockRoutes[0],
-        title: "旧请求路线"
+
+        // Preferences 还没收到前，
+        // 不能提前生成路线。
+        expect(
+          page.loadRoutes
+        ).not.toHaveBeenCalled();
+
+
+        // 模拟 Preferences 页面
+        // 发出 EventChannel event。
+        eventChannel
+          .handlers
+          .routePreferences(
+            preferences
+          );
+
+
+        expect(
+          page._routePreferences
+        ).toEqual(
+          preferences
+        );
+
+
+        expect(
+          page.loadRoutes
+        ).toHaveBeenCalledTimes(
+          1
+        );
       }
-    ];
+    );
 
-    const newRoutes = [
-      {
-        ...mockRoutes[0],
-        title: "最新请求路线"
+
+    test(
+      "onLoad directly loads routes with empty preferences when not opened from Preferences",
+      () => {
+        page.loadRoutes =
+          jest.fn();
+
+
+        page.onLoad({});
+
+
+        expect(
+          page._routePreferences
+        ).toEqual({});
+
+
+        expect(
+          page.loadRoutes
+        ).toHaveBeenCalledTimes(
+          1
+        );
       }
-    ];
-
-    page.getRoutes = jest
-      .fn()
-      .mockImplementationOnce(() => firstRequest.promise)
-      .mockImplementationOnce(() => secondRequest.promise);
-
-    // Request 1 starts first.
-    const oldLoadPromise = page.loadRoutes();
-
-    // Request 2 starts later and should become authoritative.
-    const newLoadPromise = page.loadRoutes();
-
-    // Newer request finishes first.
-    secondRequest.resolve(newRoutes);
-
-    await newLoadPromise;
-
-    expect(page.data.routeState).toBe("success");
-    expect(page.data.routes[0].title).toBe("最新请求路线");
-
-    // Older request finishes afterwards.
-    firstRequest.resolve(oldRoutes);
-
-    await oldLoadPromise;
-
-    // Old result must NOT overwrite the newer one.
-    expect(page.data.routeState).toBe("success");
-    expect(page.data.routes[0].title).toBe("最新请求路线");
-  });
+    );
 
 
-  test("stale error cannot overwrite a newer success", async () => {
-    const firstRequest = createDeferred();
-    const secondRequest = createDeferred();
+    test(
+      "getRoutes passes preferences to route generation and wraps a success route in an array",
+      async () => {
+        const preferences = {
+          durationMinutes: 30,
 
-    const newRoutes = [
-      {
-        ...mockRoutes[0],
-        title: "最新请求路线"
+          routeType:
+            "loop",
+
+          crowdPreference:
+            "low",
+
+          environmentPreferences: [
+            "公园",
+            "水边",
+            "街道",
+            "商街"
+          ]
+        };
+
+
+        page._routePreferences =
+          preferences;
+
+
+        routeGenerationServiceMock
+          .generateFirstRoute
+          .mockResolvedValue({
+            status:
+              "success",
+
+            route:
+              GENERATED_ROUTE
+          });
+
+
+        const routes =
+          await page.getRoutes();
+
+
+        expect(
+          routeGenerationServiceMock
+            .generateFirstRoute
+        ).toHaveBeenCalledWith(
+          preferences
+        );
+
+
+        expect(
+          routes
+        ).toEqual([
+          GENERATED_ROUTE
+        ]);
       }
-    ];
-
-    page.getRoutes = jest
-      .fn()
-      .mockImplementationOnce(() => firstRequest.promise)
-      .mockImplementationOnce(() => secondRequest.promise);
-
-    // Old request starts.
-    const oldLoadPromise = page.loadRoutes();
-
-    // New request starts afterwards.
-    const newLoadPromise = page.loadRoutes();
-
-    // New request succeeds first.
-    secondRequest.resolve(newRoutes);
-
-    await newLoadPromise;
-
-    expect(page.data.routeState).toBe("success");
-    expect(page.data.routes[0].title).toBe("最新请求路线");
-
-    // Old request fails afterwards.
-    firstRequest.reject(new Error("Old request failed"));
-
-    await oldLoadPromise;
-
-    // Old error must NOT overwrite the newer success state.
-    expect(page.data.routeState).toBe("success");
-    expect(page.data.routes[0].title).toBe("最新请求路线");
-  });
+    );
 
 
-  test("viewRoute navigates to the correct Route Detail page", () => {
-    const routeId = mockRoutes[0].routeId;
+    test(
+      "getRoutes converts an explicit empty generation result to an empty array",
+      async () => {
+        routeGenerationServiceMock
+          .generateFirstRoute
+          .mockResolvedValue({
+            status:
+              "empty",
 
-    page.viewRoute({
-      currentTarget: {
-        dataset: {
-          id: routeId
-        }
+            reason:
+              "NO_VALID_POI"
+          });
+
+
+        const routes =
+          await page.getRoutes();
+
+
+        expect(
+          routes
+        ).toEqual([]);
       }
-    });
-
-    expect(wx.navigateTo).toHaveBeenCalledTimes(1);
-
-    expect(wx.navigateTo).toHaveBeenCalledWith({
-      url: `/pages/route-detail/route-detail?id=${routeId}`
-    });
-  });
+    );
 
 
-  test("showOtherRoutes rotates the route order", () => {
-    page.data.routes = [
-      { routeId: "route-a" },
-      { routeId: "route-b" },
-      { routeId: "route-c" }
-    ];
-
-    page.showOtherRoutes();
-
-    expect(page.data.routes).toEqual([
-      { routeId: "route-b" },
-      { routeId: "route-c" },
-      { routeId: "route-a" }
-    ]);
-
-    expect(wx.showToast).toHaveBeenCalledWith({
-      title: "已更换路线",
-      icon: "none"
-    });
-  });
+    test(
+      "getRoutes rejects an invalid route generation result",
+      async () => {
+        routeGenerationServiceMock
+          .generateFirstRoute
+          .mockResolvedValue({
+            status:
+              "unexpected"
+          });
 
 
-  test("onUnload invalidates an in-flight route request", async () => {
-    const deferred = createDeferred();
+        await expect(
+          page.getRoutes()
+        ).rejects.toThrow(
+          "Invalid route generation result"
+        );
+      }
+    );
 
-    page.getRoutes = jest.fn(() => deferred.promise);
 
-    const loadPromise = page.loadRoutes();
+    test(
+      "loadRoutes starts in loading state",
+      async () => {
+        const deferred =
+          createDeferred();
 
-    expect(page.data.routeState).toBe("loading");
 
-    // Simulate leaving the Routes page while request is still running.
-    page.onUnload();
+        page.data.routeState =
+          "success";
 
-    deferred.resolve(mockRoutes);
+        page.data.routes =
+          mockRoutes;
 
-    await loadPromise;
 
-    // Only the initial loading setData should have happened.
-    // The stale request must not update the destroyed page.
-    expect(page.setData).toHaveBeenCalledTimes(1);
-  });
-});
+        page.getRoutes =
+          jest.fn(
+            () =>
+              deferred.promise
+          );
+
+
+        const loadPromise =
+          page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "loading"
+        );
+
+
+        expect(
+          page.data.routes
+        ).toEqual([]);
+
+
+        deferred.resolve(
+          mockRoutes
+        );
+
+
+        await loadPromise;
+      }
+    );
+
+
+    test(
+      "loadRoutes sets success when routes exist",
+      async () => {
+        page.getRoutes =
+          jest.fn()
+            .mockResolvedValue(
+              mockRoutes
+            );
+
+
+        await page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "success"
+        );
+
+
+        expect(
+          page.data.routes.length
+        ).toBe(
+          mockRoutes.length
+        );
+
+
+        expect(
+          page.data.routes.length
+        ).toBeGreaterThan(0);
+      }
+    );
+
+
+    test(
+      "loadRoutes sets empty when no routes exist",
+      async () => {
+        page.getRoutes =
+          jest.fn()
+            .mockResolvedValue(
+              []
+            );
+
+
+        await page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "empty"
+        );
+
+
+        expect(
+          page.data.routes
+        ).toEqual([]);
+      }
+    );
+
+
+    test(
+      "loadRoutes sets error when request fails",
+      async () => {
+        const consoleErrorSpy =
+          jest
+            .spyOn(
+              console,
+              "error"
+            )
+            .mockImplementation(
+              () => {}
+            );
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockRejectedValue(
+              new Error(
+                "Mock route loading failed"
+              )
+            );
+
+
+        await page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "error"
+        );
+
+
+        expect(
+          page.data.routes
+        ).toEqual([]);
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalled();
+      }
+    );
+
+
+    test(
+      "prepareRoutes formats a generated real route correctly",
+      () => {
+        const [
+          preparedRoute
+        ] =
+          page.prepareRoutes([
+            GENERATED_ROUTE
+          ]);
+
+
+        expect(
+          preparedRoute
+            .distanceKm
+        ).toBe(
+          "0.3"
+        );
+
+
+        expect(
+          preparedRoute
+            .routeTypeText
+        ).toBe(
+          "单程路线"
+        );
+
+
+        expect(
+          preparedRoute
+            .crowdText
+        ).toBe(
+          "暂无数据"
+        );
+
+
+        expect(
+          preparedRoute
+            .displayTags
+        ).toEqual([
+          "公园"
+        ]);
+
+
+        expect(
+          preparedRoute
+            .previewLatitude
+        ).toBe(
+          23.128
+        );
+
+
+        expect(
+          preparedRoute
+            .previewLongitude
+        ).toBe(
+          113.2646
+        );
+
+
+        expect(
+          preparedRoute
+            .previewPolyline
+        ).toEqual([
+          {
+            points:
+              GENERATED_ROUTE
+                .polyline,
+
+            color:
+              "#20BFEA",
+
+            width:
+              5
+          }
+        ]);
+      }
+    );
+
+
+    test(
+      "retryLoadRoutes uses the normal loadRoutes flow",
+      () => {
+        page.loadRoutes =
+          jest.fn();
+
+
+        page.retryLoadRoutes();
+
+
+        expect(
+          page.loadRoutes
+        ).toHaveBeenCalledTimes(
+          1
+        );
+      }
+    );
+
+
+    test(
+      "stale success cannot overwrite a newer success",
+      async () => {
+        const firstRequest =
+          createDeferred();
+
+        const secondRequest =
+          createDeferred();
+
+
+        const oldRoutes = [
+          {
+            ...mockRoutes[0],
+
+            title:
+              "旧请求路线"
+          }
+        ];
+
+
+        const newRoutes = [
+          {
+            ...mockRoutes[0],
+
+            title:
+              "最新请求路线"
+          }
+        ];
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockImplementationOnce(
+              () =>
+                firstRequest.promise
+            )
+            .mockImplementationOnce(
+              () =>
+                secondRequest.promise
+            );
+
+
+        const oldLoadPromise =
+          page.loadRoutes();
+
+
+        const newLoadPromise =
+          page.loadRoutes();
+
+
+        secondRequest.resolve(
+          newRoutes
+        );
+
+
+        await newLoadPromise;
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "success"
+        );
+
+
+        expect(
+          page.data
+            .routes[0]
+            .title
+        ).toBe(
+          "最新请求路线"
+        );
+
+
+        firstRequest.resolve(
+          oldRoutes
+        );
+
+
+        await oldLoadPromise;
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "success"
+        );
+
+
+        expect(
+          page.data
+            .routes[0]
+            .title
+        ).toBe(
+          "最新请求路线"
+        );
+      }
+    );
+
+
+    test(
+      "stale error cannot overwrite a newer success",
+      async () => {
+        const firstRequest =
+          createDeferred();
+
+        const secondRequest =
+          createDeferred();
+
+
+        const newRoutes = [
+          {
+            ...mockRoutes[0],
+
+            title:
+              "最新请求路线"
+          }
+        ];
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockImplementationOnce(
+              () =>
+                firstRequest.promise
+            )
+            .mockImplementationOnce(
+              () =>
+                secondRequest.promise
+            );
+
+
+        const oldLoadPromise =
+          page.loadRoutes();
+
+
+        const newLoadPromise =
+          page.loadRoutes();
+
+
+        secondRequest.resolve(
+          newRoutes
+        );
+
+
+        await newLoadPromise;
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "success"
+        );
+
+
+        expect(
+          page.data
+            .routes[0]
+            .title
+        ).toBe(
+          "最新请求路线"
+        );
+
+
+        firstRequest.reject(
+          new Error(
+            "Old request failed"
+          )
+        );
+
+
+        await oldLoadPromise;
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "success"
+        );
+
+
+        expect(
+          page.data
+            .routes[0]
+            .title
+        ).toBe(
+          "最新请求路线"
+        );
+      }
+    );
+
+
+    test(
+      "viewRoute navigates to the correct Route Detail page",
+      () => {
+        const routeId =
+          GENERATED_ROUTE.routeId;
+
+
+        page.viewRoute({
+          currentTarget: {
+            dataset: {
+              id:
+                routeId
+            }
+          }
+        });
+
+
+        expect(
+          wx.navigateTo
+        ).toHaveBeenCalledWith({
+          url:
+            `/pages/route-detail/route-detail?id=${routeId}`
+        });
+      }
+    );
+
+
+    test(
+      "showOtherRoutes rotates the route order when multiple routes exist",
+      () => {
+        page.data.routes = [
+          {
+            routeId:
+              "route-a"
+          },
+          {
+            routeId:
+              "route-b"
+          },
+          {
+            routeId:
+              "route-c"
+          }
+        ];
+
+
+        page.showOtherRoutes();
+
+
+        expect(
+          page.data.routes
+        ).toEqual([
+          {
+            routeId:
+              "route-b"
+          },
+          {
+            routeId:
+              "route-c"
+          },
+          {
+            routeId:
+              "route-a"
+          }
+        ]);
+
+
+        expect(
+          wx.showToast
+        ).toHaveBeenCalledWith({
+          title:
+            "已更换路线",
+
+          icon:
+            "none"
+        });
+      }
+    );
+
+
+    test(
+      "showOtherRoutes reports no alternatives when only one route exists",
+      () => {
+        page.data.routes = [
+          GENERATED_ROUTE
+        ];
+
+
+        page.showOtherRoutes();
+
+
+        expect(
+          page.setData
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          wx.showToast
+        ).toHaveBeenCalledWith({
+          title:
+            "暂无其他路线",
+
+          icon:
+            "none"
+        });
+      }
+    );
+
+
+    test(
+      "onUnload invalidates an in-flight route request",
+      async () => {
+        const deferred =
+          createDeferred();
+
+
+        page.getRoutes =
+          jest.fn(
+            () =>
+              deferred.promise
+          );
+
+
+        const loadPromise =
+          page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "loading"
+        );
+
+
+        page.onUnload();
+
+
+        deferred.resolve(
+          mockRoutes
+        );
+
+
+        await loadPromise;
+
+
+        expect(
+          page.setData
+        ).toHaveBeenCalledTimes(
+          1
+        );
+      }
+    );
+
+  }
+);
