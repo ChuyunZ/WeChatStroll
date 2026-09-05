@@ -79,20 +79,26 @@ Page({
   },
 
   prepareRoutes(routes) {
+    const routeTypeLabels = {
+      loop: "环形路线",
+      out_and_back: "往返路线",
+      point_to_point: "单程路线"
+    }
+
     return routes.map((route) => {
       const middleIndex = Math.floor(route.polyline.length / 2);
       const centerPoint = route.polyline[middleIndex];
 
-      const displayTags = route.tags.filter(
-        (tag) => tag !== "环形路线"
-      );
+      const displayTags = route.tags;
 
-      let crowdText = "适中";
+      let crowdText = "未知"
 
-      if (route.crowdLevel === "quiet") {
-        crowdText = "安静";
-      } else if (route.crowdLevel === "busy") {
-        crowdText = "较拥挤";
+      if (route.crowdLevel === "low") {
+        crowdText = "安静"
+      } else if (route.crowdLevel === "medium") {
+        crowdText = "适中"
+      } else if (route.crowdLevel === "high") {
+        crowdText = "热闹"
       }
 
       return {
@@ -100,10 +106,7 @@ Page({
 
         distanceKm: (route.distanceMeters / 1000).toFixed(1),
 
-        routeTypeText:
-          route.routeType === "loop"
-            ? "环形路线"
-            : "单程路线",
+        routeTypeText: routeTypeLabels[route.routeType] || "未知路线",
 
         crowdText,
 
