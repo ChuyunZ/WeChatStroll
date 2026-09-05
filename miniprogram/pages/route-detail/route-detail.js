@@ -33,9 +33,7 @@ Page({
 
     if (
       !route ||
-      !route.startPoint ||
-      !route.endPoint ||
-      !Array.isArray(route.polyline) ||
+      !route.polyline ||
       route.polyline.length < 2
     ) {
       this.setData({
@@ -48,10 +46,10 @@ Page({
 
     const preparedRoute = this.prepareRoute(route);
 
-    const startPoint = route.startPoint
-    const endPoint = route.endPoint
+    const startPoint = route.polyline[0];
 
-    let endMarkerPoint = endPoint
+    let endPoint =
+      route.polyline[route.polyline.length - 1];
 
     /*
      * Loop routes in our mock data currently end
@@ -65,8 +63,8 @@ Page({
       startPoint.longitude === endPoint.longitude &&
       route.polyline.length >= 3
     ) {
-      endMarkerPoint =
-        route.polyline[route.polyline.length - 2]
+      endPoint =
+        route.polyline[route.polyline.length - 2];
     }
 
     const middleIndex =
@@ -120,8 +118,8 @@ Page({
         {
           id: 2,
 
-          latitude: endMarkerPoint.latitude,
-          longitude: endMarkerPoint.longitude,
+          latitude: endPoint.latitude,
+          longitude: endPoint.longitude,
 
           width: 28,
           height: 36,
@@ -143,23 +141,17 @@ Page({
   },
 
   prepareRoute(route) {
-    const routeTypeLabels = {
-      loop: "环形路线",
-      out_and_back: "往返路线",
-      point_to_point: "单程路线"
+    let crowdText = "适中";
+
+    if (route.crowdLevel === "quiet") {
+      crowdText = "安静";
+    } else if (route.crowdLevel === "busy") {
+      crowdText = "较拥挤";
     }
 
-    let crowdText = "未知"
-
-    if (route.crowdLevel === "low") {
-      crowdText = "安静"
-    } else if (route.crowdLevel === "medium") {
-      crowdText = "适中"
-    } else if (route.crowdLevel === "high") {
-      crowdText = "热闹"
-    }
-
-    const displayTags = route.tags;
+    const displayTags = route.tags.filter(
+      (tag) => tag !== "环形路线"
+    );
 
     return {
       ...route,
@@ -167,7 +159,10 @@ Page({
       distanceKm:
         (route.distanceMeters / 1000).toFixed(1),
 
-      routeTypeText: routeTypeLabels[route.routeType] || "未知路线",
+      routeTypeText:
+        route.routeType === "loop"
+          ? "环形路线"
+          : "单程路线",
 
       crowdText,
 
