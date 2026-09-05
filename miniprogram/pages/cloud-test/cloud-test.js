@@ -18,15 +18,15 @@ Page({
 
     try {
       const response = await wx.cloud.callFunction({
-        name: 'healthCheck'
+        name: 'cloudHealthCheck'
       })
 
-      console.log('healthCheck response:', response)
+      console.log('cloudHealthCheck response:', response)
 
       const result = response.result
 
       if (!result || result.success !== true) {
-        throw new Error('Unexpected response from healthCheck')
+        throw new Error('Unexpected response from cloudHealthCheck')
       }
 
       this.setData({
@@ -35,7 +35,7 @@ Page({
         timestamp: result.timestamp
       })
     } catch (error) {
-      console.error('healthCheck failed:', error)
+      console.error('cloudHealthCheck failed:', error)
 
       this.setData({
         status: 'error',
