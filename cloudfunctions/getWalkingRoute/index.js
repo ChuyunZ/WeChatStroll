@@ -225,7 +225,7 @@ function parseEnvironmentStats(steps) {
     throw error
   }
 
-  const walkTypeDistanceMeters = {}
+  const walkTypeDistanceMeters = Object.create(null)
 
   let totalStepDistanceMeters = 0
   let analyzedDistanceMeters = 0
