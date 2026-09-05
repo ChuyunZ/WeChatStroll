@@ -1,38 +1,23 @@
 const {
   mockRoutes
-} = require(
-  "../miniprogram/data/mock-routes"
-);
+} = require("../miniprogram/data/mock-routes");
 
 const ROUTE_GENERATION_PATH =
   "../miniprogram/services/route-generation";
 
 const GENERATED_ROUTE = {
   routeId: "generated_park-1_123",
-
-  title:
-    "前往人民公园的散步路线",
-
+  title: "前往人民公园的散步路线",
   durationMinutes: 4,
-
   distanceMeters: 279,
-
-  routeType:
-    "point_to_point",
-
-  returnsToStart:
-    false,
-
-  crowdLevel:
-    "unknown",
-
+  routeType: "point_to_point",
+  returnsToStart: false,
+  crowdLevel: "unknown",
   tags: [
     "公园"
   ],
-
   description:
     "从当前位置步行前往人民公园的真实路线。",
-
   recommendationReason:
     "根据你的散步环境偏好排序，推荐前往人民公园。",
 
@@ -123,7 +108,6 @@ function loadRoutesPage({
 
   pageDefinition = null;
 
-  // Mock route-generation service.
   routeGenerationServiceMock = {
     generateFirstRoute:
       jest.fn()
@@ -136,7 +120,6 @@ function loadRoutesPage({
   );
 
 
-  // Mock WeChat Page().
   global.Page =
     jest.fn((definition) => {
       pageDefinition =
@@ -144,7 +127,6 @@ function loadRoutesPage({
     });
 
 
-  // Mock WeChat APIs.
   global.wx = {
     navigateTo:
       jest.fn(),
@@ -171,7 +153,6 @@ function loadRoutesPage({
   };
 
 
-  // Mock setData().
   pageInstance.setData =
     jest.fn((updates) => {
       pageInstance.data = {
@@ -181,7 +162,6 @@ function loadRoutesPage({
     });
 
 
-  // Mock EventChannel receiver.
   pageInstance.getOpenerEventChannel =
     jest.fn(
       () => eventChannel
@@ -256,15 +236,11 @@ describe(
         );
 
 
-        // Preferences 还没收到前，
-        // 不能提前生成路线。
         expect(
           page.loadRoutes
         ).not.toHaveBeenCalled();
 
 
-        // 模拟 Preferences 页面
-        // 发出 EventChannel event。
         eventChannel
           .handlers
           .routePreferences(
@@ -301,6 +277,11 @@ describe(
         expect(
           page._routePreferences
         ).toEqual({});
+
+
+        expect(
+          page._rawRoutes
+        ).toEqual([]);
 
 
         expect(
@@ -451,6 +432,11 @@ describe(
         ).toEqual([]);
 
 
+        expect(
+          page._rawRoutes
+        ).toEqual([]);
+
+
         deferred.resolve(
           mockRoutes
         );
@@ -462,13 +448,13 @@ describe(
 
 
     test(
-      "loadRoutes sets success when routes exist",
+      "loadRoutes sets success and stores raw routes when routes exist",
       async () => {
         page.getRoutes =
           jest.fn()
-            .mockResolvedValue(
-              mockRoutes
-            );
+            .mockResolvedValue([
+              GENERATED_ROUTE
+            ]);
 
 
         await page.loadRoutes();
@@ -482,22 +468,27 @@ describe(
 
 
         expect(
-          page.data.routes.length
-        ).toBe(
-          mockRoutes.length
-        );
+          page.data.routes
+        ).toHaveLength(1);
 
 
         expect(
-          page.data.routes.length
-        ).toBeGreaterThan(0);
+          page._rawRoutes
+        ).toEqual([
+          GENERATED_ROUTE
+        ]);
       }
     );
 
 
     test(
-      "loadRoutes sets empty when no routes exist",
+      "loadRoutes sets empty and clears raw routes when no routes exist",
       async () => {
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
+
+
         page.getRoutes =
           jest.fn()
             .mockResolvedValue(
@@ -518,12 +509,17 @@ describe(
         expect(
           page.data.routes
         ).toEqual([]);
+
+
+        expect(
+          page._rawRoutes
+        ).toEqual([]);
       }
     );
 
 
     test(
-      "loadRoutes sets error when request fails",
+      "loadRoutes sets error and clears raw routes when request fails",
       async () => {
         const consoleErrorSpy =
           jest
@@ -534,6 +530,11 @@ describe(
             .mockImplementation(
               () => {}
             );
+
+
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
 
 
         page.getRoutes =
@@ -557,6 +558,11 @@ describe(
 
         expect(
           page.data.routes
+        ).toEqual([]);
+
+
+        expect(
+          page._rawRoutes
         ).toEqual([]);
 
 
@@ -761,6 +767,13 @@ describe(
         ).toBe(
           "最新请求路线"
         );
+
+
+        expect(
+          page._rawRoutes[0].title
+        ).toBe(
+          "最新请求路线"
+        );
       }
     );
 
@@ -853,22 +866,53 @@ describe(
         ).toBe(
           "最新请求路线"
         );
+
+
+        expect(
+          page._rawRoutes[0].title
+        ).toBe(
+          "最新请求路线"
+        );
       }
     );
 
 
     test(
-      "viewRoute navigates to the correct Route Detail page",
+      "viewRoute passes the selected raw route to Route Detail through EventChannel",
       () => {
-        const routeId =
-          GENERATED_ROUTE.routeId;
+        const detailEventChannel = {
+          emit:
+            jest.fn()
+        };
+
+
+        wx.navigateTo
+          .mockImplementation(
+            ({ success }) => {
+              success({
+                eventChannel:
+                  detailEventChannel
+              });
+            }
+          );
+
+
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
+
+
+        page.data.routes =
+          page.prepareRoutes([
+            GENERATED_ROUTE
+          ]);
 
 
         page.viewRoute({
           currentTarget: {
             dataset: {
               id:
-                routeId
+                GENERATED_ROUTE.routeId
             }
           }
         });
@@ -876,9 +920,64 @@ describe(
 
         expect(
           wx.navigateTo
+        ).toHaveBeenCalledTimes(
+          1
+        );
+
+
+        expect(
+          wx.navigateTo
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url:
+              `/pages/route-detail/route-detail?id=${GENERATED_ROUTE.routeId}&from=routes`,
+
+            success:
+              expect.any(Function)
+          })
+        );
+
+
+        expect(
+          detailEventChannel.emit
+        ).toHaveBeenCalledWith(
+          "selectedRoute",
+          GENERATED_ROUTE
+        );
+      }
+    );
+
+
+    test(
+      "viewRoute shows an error toast when the route cannot be found",
+      () => {
+        page._rawRoutes = [];
+        page.data.routes = [];
+
+
+        page.viewRoute({
+          currentTarget: {
+            dataset: {
+              id:
+                "missing-route"
+            }
+          }
+        });
+
+
+        expect(
+          wx.navigateTo
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          wx.showToast
         ).toHaveBeenCalledWith({
-          url:
-            `/pages/route-detail/route-detail?id=${routeId}`
+          title:
+            "无法打开这条路线",
+
+          icon:
+            "none"
         });
       }
     );

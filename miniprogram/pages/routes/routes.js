@@ -10,6 +10,7 @@ Page({
 
   onLoad(options = {}) {
     this._routePreferences = {};
+    this._rawRoutes = [];
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -42,8 +43,8 @@ Page({
       }
     }
 
-    // 如果是开发阶段直接打开 Routes，
-    // 仍然允许使用默认空 preferences 生成路线。
+    // 开发阶段直接打开 Routes 时，
+    // 允许使用默认空 preferences。
     this.loadRoutes();
   },
 
@@ -54,14 +55,15 @@ Page({
   },
 
   async loadRoutes() {
-    // 每次请求都有新的 ID。
     const requestId =
       (this._routeRequestId || 0) + 1;
 
     this._routeRequestId = requestId;
 
-    // 每次首次加载 / retry
-    // 都重新进入 loading。
+    // 新请求开始后，
+    // 清除上一批原始 Route。
+    this._rawRoutes = [];
+
     this.setData({
       routes: [],
       routeState: "loading"
@@ -71,8 +73,8 @@ Page({
       const routes =
         await this.getRoutes();
 
-      // 如果期间已经开始了更新的请求，
-      // 当前结果已经过期，直接忽略。
+      // 新请求已经开始，
+      // 当前结果已经过期。
       if (
         requestId !==
         this._routeRequestId
@@ -86,9 +88,9 @@ Page({
         );
       }
 
-      // 正常执行完 pipeline，
-      // 但没有找到可用路线。
       if (routes.length === 0) {
+        this._rawRoutes = [];
+
         this.setData({
           routes: [],
           routeState: "empty"
@@ -96,6 +98,10 @@ Page({
 
         return;
       }
+
+      // 保存业务层的原始 Route。
+      // Route Detail 会拿这个对象。
+      this._rawRoutes = routes;
 
       const preparedRoutes =
         this.prepareRoutes(routes);
@@ -105,13 +111,14 @@ Page({
         routeState: "success"
       });
     } catch (error) {
-      // 旧请求的 error 也不能覆盖新请求。
       if (
         requestId !==
         this._routeRequestId
       ) {
         return;
       }
+
+      this._rawRoutes = [];
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -141,14 +148,10 @@ Page({
       );
     }
 
-    // route-generation service
-    // 明确告诉我们这是正常的空结果。
     if (result.status === "empty") {
       return [];
     }
 
-    // 除 success / empty 外，
-    // 其他奇怪格式都视为异常。
     if (
       result.status !== "success" ||
       !result.route
@@ -188,9 +191,9 @@ Page({
         high: "热闹",
         unknown: "暂无数据",
 
-        // 暂时兼容旧 mock 数据。
+        // 兼容旧 mock 数据。
         quiet: "安静",
-        busy: "热闹"
+        busy: "较拥挤"
       };
 
       const routeTypeTextMap = {
@@ -228,9 +231,14 @@ Page({
 
         previewPolyline: [
           {
-            points: route.polyline,
-            color: "#20BFEA",
-            width: 5
+            points:
+              route.polyline,
+
+            color:
+              "#20BFEA",
+
+            width:
+              5
           }
         ]
       };
@@ -252,9 +260,51 @@ Page({
     const routeId =
       event.currentTarget.dataset.id;
 
+    const rawRoutes =
+      Array.isArray(this._rawRoutes)
+        ? this._rawRoutes
+        : [];
+
+    // 优先拿没有 UI 辅助字段的原始 Route。
+    let selectedRoute =
+      rawRoutes.find(
+        (route) =>
+          route.routeId === routeId
+      );
+
+    // 兼容开发 / 测试场景。
+    if (!selectedRoute) {
+      selectedRoute =
+        this.data.routes.find(
+          (route) =>
+            route.routeId === routeId
+        );
+    }
+
+    if (!selectedRoute) {
+      wx.showToast({
+        title: "无法打开这条路线",
+        icon: "none"
+      });
+
+      return;
+    }
+
     wx.navigateTo({
       url:
-        `/pages/route-detail/route-detail?id=${routeId}`
+        `/pages/route-detail/route-detail?id=${routeId}&from=routes`,
+
+      success(res) {
+        if (
+          res.eventChannel &&
+          typeof res.eventChannel.emit === "function"
+        ) {
+          res.eventChannel.emit(
+            "selectedRoute",
+            selectedRoute
+          );
+        }
+      }
     });
   },
 
@@ -263,7 +313,6 @@ Page({
       ...this.data.routes
     ];
 
-    // 当前 ticket 可能只有一条真实路线。
     if (newRoutes.length <= 1) {
       wx.showToast({
         title: "暂无其他路线",

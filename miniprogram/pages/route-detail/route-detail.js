@@ -15,63 +15,96 @@ Page({
     markers: []
   },
 
-  onLoad(options) {
+  onLoad(options = {}) {
     const routeId = options.id;
 
-    this.loadRoute(routeId);
+    // 正常从 Routes 页面进入时，
+    // 真实 Route 会通过 EventChannel 传过来。
+    if (
+      options.from === "routes" &&
+      typeof this.getOpenerEventChannel === "function"
+    ) {
+      const eventChannel =
+        this.getOpenerEventChannel();
+
+      if (
+        eventChannel &&
+        typeof eventChannel.on === "function"
+      ) {
+        eventChannel.on(
+          "selectedRoute",
+          (route) => {
+            if (
+              routeId &&
+              route &&
+              route.routeId &&
+              route.routeId !== routeId
+            ) {
+              this.showRouteError();
+              return;
+            }
+
+            this.loadRoute(route);
+          }
+        );
+
+        return;
+      }
+    }
+
+    // 兼容开发阶段直接通过 routeId
+    // 打开旧的 mock Route Detail。
+    const mockRoute = mockRoutes.find(
+      (item) => item.routeId === routeId
+    );
+
+    this.loadRoute(mockRoute);
   },
 
-  loadRoute(routeId) {
+  loadRoute(route) {
     this.setData({
       loading: true,
       error: false
     });
 
-    const route = mockRoutes.find(
-      (item) => item.routeId === routeId
-    );
-
-    if (
-      !route ||
-      !route.polyline ||
-      route.polyline.length < 2
-    ) {
-      this.setData({
-        loading: false,
-        error: true
-      });
-
+    if (!this.isValidRoute(route)) {
+      this.showRouteError();
       return;
     }
 
-    const preparedRoute = this.prepareRoute(route);
+    const preparedRoute =
+      this.prepareRoute(route);
 
-    const startPoint = route.polyline[0];
+    const polyline =
+      route.polyline;
+
+    const startPoint =
+      this.getRouteStartPoint(route);
 
     let endPoint =
-      route.polyline[route.polyline.length - 1];
+      this.getRouteEndPoint(route);
 
     /*
-     * Loop routes in our mock data currently end
-     * at the same coordinate as the start point.
-     *
-     * If that happens, use the previous point for
-     * the end marker so both markers remain visible.
+     * 旧 mock loop route 的终点与起点完全重合时，
+     * 使用倒数第二个 polyline point 作为终点 marker，
+     * 避免两个 marker 完全叠在一起。
      */
     if (
       startPoint.latitude === endPoint.latitude &&
       startPoint.longitude === endPoint.longitude &&
-      route.polyline.length >= 3
+      polyline.length >= 3
     ) {
       endPoint =
-        route.polyline[route.polyline.length - 2];
+        polyline[polyline.length - 2];
     }
 
     const middleIndex =
-      Math.floor(route.polyline.length / 2);
+      Math.floor(
+        polyline.length / 2
+      );
 
     const middlePoint =
-      route.polyline[middleIndex];
+      polyline[middleIndex];
 
     this.setData({
       route: preparedRoute,
@@ -79,14 +112,19 @@ Page({
       loading: false,
       error: false,
 
-      mapLatitude: middlePoint.latitude,
-      mapLongitude: middlePoint.longitude,
+      mapLatitude:
+        middlePoint.latitude,
 
-      mapPoints: route.polyline,
+      mapLongitude:
+        middlePoint.longitude,
+
+      // include-points 使用整条真实 polyline，
+      // 让地图自动覆盖完整路线。
+      mapPoints: polyline,
 
       mapPolyline: [
         {
-          points: route.polyline,
+          points: polyline,
           color: "#20BFEA",
           width: 6
         }
@@ -96,8 +134,11 @@ Page({
         {
           id: 1,
 
-          latitude: startPoint.latitude,
-          longitude: startPoint.longitude,
+          latitude:
+            startPoint.latitude,
+
+          longitude:
+            startPoint.longitude,
 
           width: 28,
           height: 36,
@@ -118,8 +159,11 @@ Page({
         {
           id: 2,
 
-          latitude: endPoint.latitude,
-          longitude: endPoint.longitude,
+          latitude:
+            endPoint.latitude,
+
+          longitude:
+            endPoint.longitude,
 
           width: 28,
           height: 36,
@@ -140,31 +184,117 @@ Page({
     });
   },
 
-  prepareRoute(route) {
-    let crowdText = "适中";
+  isValidPoint(point) {
+    return (
+      point &&
+      typeof point === "object" &&
+      !Array.isArray(point) &&
+      typeof point.latitude === "number" &&
+      typeof point.longitude === "number" &&
+      Number.isFinite(point.latitude) &&
+      Number.isFinite(point.longitude) &&
+      point.latitude >= -90 &&
+      point.latitude <= 90 &&
+      point.longitude >= -180 &&
+      point.longitude <= 180
+    );
+  },
 
-    if (route.crowdLevel === "quiet") {
-      crowdText = "安静";
-    } else if (route.crowdLevel === "busy") {
-      crowdText = "较拥挤";
+  isValidRoute(route) {
+    return (
+      route &&
+      typeof route === "object" &&
+      !Array.isArray(route) &&
+      Array.isArray(route.polyline) &&
+      route.polyline.length >= 2 &&
+      route.polyline.every(
+        (point) =>
+          this.isValidPoint(point)
+      )
+    );
+  },
+
+  getRouteStartPoint(route) {
+    if (
+      this.isValidPoint(
+        route.startPoint
+      )
+    ) {
+      return route.startPoint;
     }
 
-    const displayTags = route.tags.filter(
-      (tag) => tag !== "环形路线"
-    );
+    return route.polyline[0];
+  },
+
+  getRouteEndPoint(route) {
+    if (
+      this.isValidPoint(
+        route.endPoint
+      )
+    ) {
+      return route.endPoint;
+    }
+
+    return route.polyline[
+      route.polyline.length - 1
+    ];
+  },
+
+  showRouteError() {
+    this.setData({
+      route: null,
+      loading: false,
+      error: true,
+      mapPoints: [],
+      mapPolyline: [],
+      markers: []
+    });
+  },
+
+  prepareRoute(route) {
+    const crowdTextMap = {
+      low: "安静",
+      medium: "适中",
+      high: "热闹",
+      unknown: "暂无数据",
+
+      // 兼容旧 mock 数据。
+      quiet: "安静",
+      busy: "较拥挤"
+    };
+
+    const routeTypeTextMap = {
+      loop: "环形路线",
+      out_and_back: "往返路线",
+      point_to_point: "单程路线"
+    };
+
+    const displayTags =
+      Array.isArray(route.tags)
+        ? route.tags.filter(
+            (tag) =>
+              tag !== "环形路线"
+          )
+        : [];
 
     return {
       ...route,
 
       distanceKm:
-        (route.distanceMeters / 1000).toFixed(1),
+        (
+          route.distanceMeters /
+          1000
+        ).toFixed(1),
 
       routeTypeText:
-        route.routeType === "loop"
-          ? "环形路线"
-          : "单程路线",
+        routeTypeTextMap[
+          route.routeType
+        ] || "步行路线",
 
-      crowdText,
+      crowdText:
+        crowdTextMap[
+          route.crowdLevel
+        ] || "暂无数据",
 
       displayTags
     };
