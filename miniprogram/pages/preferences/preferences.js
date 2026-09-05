@@ -1,3 +1,9 @@
+const CROWD_PREFERENCE_MAP = {
+  "安静": "low",
+  "适中": "medium",
+  "热闹": "high"
+}
+
 Page({
   data: {
     currentPage: 0,
@@ -334,12 +340,13 @@ Page({
         showCancel: false
       })
 
-      return;
+      return
     }
 
     if (this.data.currentPage < 1) {
       this.setData({
-        currentPage: this.data.currentPage + 1
+        currentPage:
+          this.data.currentPage + 1
       })
     }
   },
@@ -356,41 +363,74 @@ Page({
 
 
   goToRoutes() {
-    if (this.data.questions[2].answer  == null) {
+    if (
+      this.data.questions[2].answer == null
+    ) {
       wx.showModal({
         title: "提示",
         content: "请先选择人流偏好",
         showCancel: false
       })
 
-      return;
-    } 
+      return
+    }
 
-    if (this.data.questions[3].answer.length != 4) {
+    if (
+      this.data.questions[3].answer.length !== 4
+    ) {
       wx.showModal({
         title: "提示",
         content: "请先对散步环境排序",
         showCancel: false
       })
 
-      return;
+      return
     }
-    console.log(
-      "final answers:",
-      this.data.questions.map(
-        question => ({
-          questionId:
-            question.questionId,
 
-          answer:
-            question.answer
-        })
-      )
+
+    const questions =
+      this.data.questions
+
+    const durationAnswer =
+      questions[0].answer
+
+
+    // 将 UI 中的问卷答案整理成
+    // 后续 route flow 使用的 preferences
+    const preferences = {
+      durationMinutes:
+        durationAnswer.hours * 60 +
+        durationAnswer.minutes,
+
+      routeType:
+        questions[1].answer,
+
+      crowdPreference:
+        CROWD_PREFERENCE_MAP[
+          questions[2].answer
+        ],
+
+      environmentPreferences:
+        [...questions[3].answer]
+    }
+
+
+    console.log(
+      "route preferences:",
+      preferences
     )
 
 
     wx.navigateTo({
-      url: "/pages/routes/routes"
+      url:
+        "/pages/routes/routes?from=preferences",
+
+      success(res) {
+        res.eventChannel.emit(
+          "routePreferences",
+          preferences
+        )
+      }
     })
   },
 

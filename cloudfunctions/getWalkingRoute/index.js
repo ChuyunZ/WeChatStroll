@@ -3,6 +3,7 @@ const axios = require('axios')
 
 const AMAP_API_KEY = process.env.AMAP_API_KEY
 const AMAP_WALKING_URL = 'https://restapi.amap.com/v5/direction/walking'
+const NORMAL_ROAD_WALK_TYPE = '0'
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
@@ -212,6 +213,92 @@ function parsePolyline(steps) {
   return polyline
 }
 
+function parseEnvironmentStats(steps) {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    const error = new Error('Walking route steps are missing or empty')
+
+    error.details = {
+      receivedType: typeof steps,
+      stepCount: Array.isArray(steps) ? steps.length : null
+    }
+
+    throw error
+  }
+
+  const walkTypeDistanceMeters = Object.create(null)
+
+  let totalStepDistanceMeters = 0
+  let analyzedDistanceMeters = 0
+  let unknownWalkTypeDistanceMeters = 0
+  let normalRoadDistanceMeters = 0
+
+  for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+    const step = steps[stepIndex]
+
+    if (!step || typeof step !== 'object' || Array.isArray(step)) {
+      const error = new Error('Walking route contains invalid step')
+
+      error.details = {
+        stepIndex,
+        receivedType: typeof step,
+        isArray: Array.isArray(step)
+      }
+
+      throw error
+    }
+
+    const stepDistanceMeters = parseNonNegativeNumber(
+      step.step_distance,
+      `walking route step distance at index ${stepIndex}`
+    )
+
+    totalStepDistanceMeters += stepDistanceMeters
+
+    const rawWalkType = step.navi?.walk_type
+
+    const walkType =
+      typeof rawWalkType === 'string'
+        ? rawWalkType.trim()
+        : typeof rawWalkType === 'number' && Number.isFinite(rawWalkType)
+          ? String(rawWalkType)
+          : ''
+
+    if (!walkType) {
+      unknownWalkTypeDistanceMeters += stepDistanceMeters
+      continue
+    }
+
+    analyzedDistanceMeters += stepDistanceMeters
+
+    walkTypeDistanceMeters[walkType] =
+      (walkTypeDistanceMeters[walkType] || 0) + stepDistanceMeters
+
+    if (walkType === NORMAL_ROAD_WALK_TYPE) {
+      normalRoadDistanceMeters += stepDistanceMeters
+    }
+  }
+
+  const normalRoadRatio =
+    totalStepDistanceMeters > 0
+      ? normalRoadDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  const walkTypeCoverageRatio =
+    totalStepDistanceMeters > 0
+      ? analyzedDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  return {
+    totalStepDistanceMeters,
+    analyzedDistanceMeters,
+    unknownWalkTypeDistanceMeters,
+    normalRoadDistanceMeters,
+    normalRoadRatio,
+    walkTypeCoverageRatio,
+    walkTypeDistanceMeters
+  }
+}
+
 exports.main = async (event, context) => {
   if (!AMAP_API_KEY) {
     return {
@@ -257,7 +344,7 @@ exports.main = async (event, context) => {
         key: AMAP_API_KEY,
         origin,
         destination: destinationLocation,
-        show_fields: 'cost,polyline'
+        show_fields: 'cost,polyline,navi'
       },
       timeout: 2000
     })
@@ -345,12 +432,15 @@ exports.main = async (event, context) => {
 
     const polyline = parsePolyline(path.steps)
 
+    const environmentStats = parseEnvironmentStats(path.steps)
+
     return {
       success: true,
       route: {
         distanceMeters,
         durationMinutes: Math.ceil(durationSeconds / 60),
-        polyline
+        polyline,
+        environmentStats
       }
     }
   } catch (error) {
