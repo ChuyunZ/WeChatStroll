@@ -245,6 +245,10 @@ Page({
       route: null,
       loading: false,
       error: true,
+
+      mapLatitude: 0,
+      mapLongitude: 0,
+
       mapPoints: [],
       mapPolyline: [],
       markers: []

@@ -586,7 +586,16 @@ describe(
         expect(
           page.data.markers
         ).toEqual([]);
+        
+        expect(
+        page.data.mapLatitude
+        ).toBe(0);
+
+        expect(
+        page.data.mapLongitude
+        ).toBe(0);
       }
+      
     );
 
 
