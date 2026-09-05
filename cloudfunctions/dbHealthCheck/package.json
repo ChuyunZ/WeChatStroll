@@ -1,0 +1,15 @@
+{
+  "name": "dbHealthCheck",
+  "version": "1.0.0",
+  "description": "CloudBase health check function",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "wx-server-sdk": "4.0.2"
+  },
+  "devDependencies": {
+    "jest": "latest"
+  }
+}

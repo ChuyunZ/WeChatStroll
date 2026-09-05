@@ -1,6 +1,6 @@
 # CloudBase Setup
 
-This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `healthCheck` cloud function.
+This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` cloud function.
 
 ## 1. CloudBase Environment
 
@@ -50,12 +50,12 @@ The test cloud function is:
 
 ```text
 cloudfunctions/
-└── healthCheck/
+└── cloudHealthCheck/
     ├── index.js
     └── package.json
 ```
 
-The `healthCheck` function returns:
+The `cloudHealthCheck` function returns:
 
 - a success status
 - a short message
@@ -76,7 +76,7 @@ Example response:
 In WeChat Developer Tools:
 
 1. Make sure the CloudBase environment is set to `cloud1`.
-2. Right-click the `healthCheck` cloud function.
+2. Right-click the `cloudHealthCheck` cloud function.
 3. Upload and deploy the function.
 4. Let the cloud environment install the dependencies defined in `package.json`.
 
@@ -94,7 +94,7 @@ The page calls the cloud function using:
 
 ```javascript
 const response = await wx.cloud.callFunction({
-  name: 'healthCheck'
+  name: 'cloudHealthCheck'
 })
 ```
 
