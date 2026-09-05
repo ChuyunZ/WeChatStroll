@@ -606,7 +606,6 @@ Authorization: Bearer <OAuth Token>
         "durationMinutes": 32,
         "distanceMeters": 2600,
         "routeType": "loop",
-        "returnsToStart": true,
         "crowdLevel": "medium",
         "tags": [
           "river",
@@ -654,10 +653,9 @@ Authorization: Bearer <OAuth Token>
         "durationMinutes": 32,
         "distanceMeters": 2600,
         "routeType": "loop",
-        "returnsToStart": true,
         "crowdLevel": "high",
         "tags": [
-          "shopping",
+          "shopping_mall",
           "cafe"
         ],
         "description": "A lively walking route through shopping streets and nearby cafes.",

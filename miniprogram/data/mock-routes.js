@@ -6,7 +6,7 @@ const mockRoutes = [
     distanceMeters: 2600,
     routeType: "loop",
     crowdLevel: "medium",
-    tags: ["河边", "树荫", "环形路线"],
+    tags: ["河边", "树荫"],
     description: "大部分路段沿河，途中有多个休息区域。",
     recommendationReason: "符合你希望安静散步约30分钟的偏好。",
     polyline: [
@@ -17,8 +17,18 @@ const mockRoutes = [
   { latitude: 31.23055, longitude: 121.47600 },
   { latitude: 31.22995, longitude: 121.47545 },
   { latitude: 31.22980, longitude: 121.47445 },
-  { latitude: 31.23040, longitude: 121.47370 }
-]
+  { latitude: 31.23040, longitude: 121.47370 },
+  ],
+  startPoint: {
+    name: "河边路线起点",
+    latitude: 31.23040,
+    longitude: 121.47370
+  },
+  endPoint: {
+    name: "河边路线起点",
+    latitude: 31.23040,
+    longitude: 121.47370
+  },
   },
   {
     routeId: "route_002",
@@ -39,7 +49,17 @@ const mockRoutes = [
   { latitude: 31.23085, longitude: 121.47470 },
   { latitude: 31.23110, longitude: 121.47355 },
   { latitude: 31.23200, longitude: 121.47250 }
-]
+  ],
+  startPoint: {
+    name: "城市探索路线起点",
+    latitude: 31.23200,
+    longitude: 121.47250
+  },
+  endPoint: {
+    name: "城市探索路线起点",
+    latitude: 31.23200,
+    longitude: 121.47250
+  },
   },
   {
     routeId: "route_003",
@@ -47,7 +67,7 @@ const mockRoutes = [
     durationMinutes: 24,
     distanceMeters: 1900,
     routeType: "loop",
-    crowdLevel: "quiet",
+    crowdLevel: "low",
     tags: ["公园", "安静", "休息点"],
     description: "路线较短，并经过多个可以休息的位置。",
     recommendationReason: "适合时间有限或当天比较疲劳的用户。",
@@ -60,7 +80,17 @@ const mockRoutes = [
   { latitude: 31.22945, longitude: 121.46995 },
   { latitude: 31.22895, longitude: 121.47055 },
   { latitude: 31.22880, longitude: 121.47150 }
-]
+  ],
+  startPoint: {
+    name: "公园路线起点",
+    latitude: 31.22880,
+    longitude: 121.47150
+  },
+  endPoint: {
+    name: "公园路线起点",
+    latitude: 31.22880,
+    longitude: 121.47150
+  },
   }
 ];
 
