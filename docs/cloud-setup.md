@@ -1,6 +1,6 @@
 # CloudBase Setup
 
-This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` cloud function.
+This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` and `dbHealthCheck` cloud functions.
 
 ## 1. CloudBase Environment
 
@@ -46,14 +46,21 @@ Cloud functions are stored under:
 cloudfunctions/
 ```
 
-The test cloud function is:
+The project includes two health-check cloud functions:
 
 ```text
 cloudfunctions/
-└── cloudHealthCheck/
+├── cloudHealthCheck/
+│   ├── index.js
+│   └── package.json
+└── dbHealthCheck/
     ├── index.js
+    ├── index.test.js
     └── package.json
 ```
+`cloudHealthCheck` verifies that Cloud Functions can run successfully in the configured CloudBase environment.
+
+`dbHealthCheck` verifies database connectivity by writing a temporary document, reading it back, and deleting it afterward.
 
 The `cloudHealthCheck` function returns:
 
@@ -71,18 +78,20 @@ Example response:
 }
 ```
 
-## 5. Deploying the Cloud Function
+## 5. Deploying the Health Check Functions
 
 In WeChat Developer Tools:
 
 1. Make sure the CloudBase environment is set to `cloud1`.
-2. Right-click the `cloudHealthCheck` cloud function.
-3. Upload and deploy the function.
-4. Let the cloud environment install the dependencies defined in `package.json`.
+2. Right-click `cloudHealthCheck` and upload and deploy the function.
+3. Right-click `dbHealthCheck` and upload and deploy the function.
+4. Let the cloud environment install the dependencies defined in each function's `package.json`.
 
-The function uses the `wx-server-sdk` package.
+Both functions use the `wx-server-sdk` package.
 
-## 6. Testing the Cloud Function
+## 6. Testing the Health Check Functions
+
+### 6.1 Cloud Function Health Check
 
 A test page is available at:
 
@@ -104,13 +113,23 @@ If the request succeeds, the page displays:
 - returned message
 - server timestamp
 
+### 6.2 Database Health Check
+
+`dbHealthCheck` verifies database connectivity by writing a temporary document to the `users` collection, reading the same document back, and deleting it afterward.
+
+A successful response indicates that database write, read, and delete operations are working.
+
+The function can be invoked directly from the CloudBase console during development.
+
 ## 7. Error Handling
 
-The cloud function call is wrapped in `try`, `catch`, and `finally`.
+The `cloudHealthCheck` call from the test page is wrapped in `try`, `catch`, and `finally`.
 
 If the cloud function call fails, the error is caught and displayed on the test page instead of causing the page to fail silently.
 
 The error handling was tested by temporarily calling a non-existent cloud function and confirming that the error state was displayed correctly.
+
+`dbHealthCheck` also handles database failures with `try/catch`. If an error occurs after the temporary document has been created, the function attempts to remove the document before returning an error response.
 
 ## 8. Secrets and API Keys
 
