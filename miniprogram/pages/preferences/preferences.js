@@ -61,14 +61,17 @@ Page({
         options: [
           {
             label: "安静",
+            value: "low",
             selected: false
           },
           {
             label: "适中",
+            value: "medium",
             selected: false
           },
           {
             label: "热闹",
+            value: "high",
             selected: false
           }
         ],
@@ -81,18 +84,22 @@ Page({
         options: [
           {
             label: "公园",
+            value: "park",
             rank: null
           },
           {
             label: "水边",
+            value: "waterside",
             rank: null
           },
           {
             label: "街道",
+            value: "street",
             rank: null
           },
           {
             label: "商街",
+            value: "shopping_area",
             rank: null
           }
         ],
@@ -165,9 +172,6 @@ Page({
     const selectedOption =
       options[optionIndex]
 
-
-    // Q2 保存 API value
-    // Q3 保存中文 label
     questions[questionIndex].answer =
       selectedOption.value
         ? selectedOption.value
@@ -179,10 +183,10 @@ Page({
     })
 
 
-    console.log(
-      "single answer:",
-      questions[questionIndex].answer
-    )
+    // console.log(
+    //   "single answer:",
+    //   questions[questionIndex].answer
+    // )
   },
 
 
@@ -306,7 +310,7 @@ Page({
 
     questions[3].answer =
       rankedOptions.map(
-        option => option.label
+        option => option.value
       )
 
 
@@ -315,10 +319,10 @@ Page({
     })
 
 
-    console.log(
-      "Q4 ranking:",
-      questions[3].answer
-    )
+    // console.log(
+    //   "Q4 ranking:",
+    //   questions[3].answer
+    // )
   },
 
 
@@ -354,6 +358,24 @@ Page({
     }
   },
 
+  buildNormalizedPreferences() {
+    const questions = this.data.questions
+
+    const durationMinutes = questions[0].answer.hours * 60 + questions[0].answer.minutes
+    const routeType = questions[1].answer
+    const crowdPreference = questions[2].answer
+    const environmentPreferences = questions[3].answer
+
+    const currentPreferences = {
+      durationMinutes: durationMinutes,
+      routeType: routeType,
+      crowdPreference: crowdPreference,
+      environmentPreferences: environmentPreferences
+    }
+    
+    return currentPreferences
+  },
+
 
   goToRoutes() {
     if (this.data.questions[2].answer  == null) {
@@ -364,7 +386,7 @@ Page({
       })
 
       return;
-    } 
+    }
 
     if (this.data.questions[3].answer.length != 4) {
       wx.showModal({
@@ -375,19 +397,29 @@ Page({
 
       return;
     }
+
+    // console.log(
+    //   "final answers:",
+    //   this.data.questions.map(
+    //     question => ({
+    //       questionId:
+    //         question.questionId,
+
+    //       answer:
+    //         question.answer
+    //     })
+    //   )
+    // )
+
+    const currentPreferences = this.buildNormalizedPreferences()
+
+    const app = getApp()
+    app.globalData.currentPreferences = currentPreferences
+
     console.log(
-      "final answers:",
-      this.data.questions.map(
-        question => ({
-          questionId:
-            question.questionId,
-
-          answer:
-            question.answer
-        })
-      )
+      "stored preferences:",
+      app.globalData.currentPreferences
     )
-
 
     wx.navigateTo({
       url: "/pages/routes/routes"

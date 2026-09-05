@@ -3,11 +3,25 @@ const { mockRoutes } = require("../../data/mock-routes");
 Page({
   data: {
     routes: [],
-    routeState: "loading"
+    routeState: "loading",
+    preferences: null
   },
 
   onLoad() {
-    this.loadRoutes();
+    const app = getApp()
+  
+    const currentPreferences = app.globalData.currentPreferences
+  
+    // console.log(
+    //   "Routes received preferences:",
+    //   currentPreferences
+    // )
+
+    this.setData({
+      preferences: currentPreferences
+    })
+
+    this.loadRoutes()
   },
 
   onUnload() {
@@ -16,6 +30,12 @@ Page({
   },
 
   async loadRoutes() {
+    // test the preferences are loaded
+    // console.log(
+    //   "loadRoutes preferences:",
+    //   this.data.preferences
+    // )
+
     // Give every route request a unique increasing ID.
     const requestId = (this._routeRequestId || 0) + 1;
     this._routeRequestId = requestId;
@@ -27,7 +47,7 @@ Page({
     });
 
     try {
-      const routes = await this.getRoutes();
+      const routes = await this.getRoutes(this.data.preferences);
 
       // A newer request has already started.
       // Ignore this stale response.
@@ -70,7 +90,13 @@ Page({
     }
   },
 
-  getRoutes() {
+  // TO BE UPDATED
+  getRoutes(preferences) {
+    // console.log(
+    //   "getRoutes preferences:",
+    //   preferences
+    // )
+    
     return new Promise((resolve) => {
       setTimeout(() => {
         resolve(mockRoutes);
@@ -78,6 +104,7 @@ Page({
     });
   },
 
+  // TO BE UPDATED
   prepareRoutes(routes) {
     return routes.map((route) => {
       const middleIndex = Math.floor(route.polyline.length / 2);

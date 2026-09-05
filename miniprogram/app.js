@@ -1,4 +1,8 @@
 App({
+  globalData: {
+    currentPreferences: null
+  },
+  
   onLaunch() {
     console.log('WeChatStroll launched')
 
