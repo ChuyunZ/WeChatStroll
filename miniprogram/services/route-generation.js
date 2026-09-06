@@ -1,5 +1,9 @@
 const locationService = require('./location')
 
+const {
+  getPoiSearchRadius
+} = require('./poi-search-radius')
+
 const POI_ENVIRONMENT_CATEGORY_MAP = {
   '公园': 'park',
   '水边': 'water',
@@ -176,13 +180,17 @@ async function callCloudFunction(
   return result
 }
 
-async function searchNearbyPois(location) {
+async function searchNearbyPois(
+  location,
+  radius
+) {
   const result =
     await callCloudFunction(
       'getNearbyPois',
       {
         longitude: location.longitude,
-        latitude: location.latitude
+        latitude: location.latitude,
+        radius
       },
       'POI_SEARCH_FAILED',
       'Unable to retrieve nearby places.'
@@ -419,8 +427,16 @@ async function generateFirstRoute(
     )
   }
 
+  const radius =
+    getPoiSearchRadius(
+      preferences.durationMinutes
+    )
+
   const poisByCategory =
-    await searchNearbyPois(location)
+    await searchNearbyPois(
+      location,
+      radius
+    )
 
   const selectedPoi =
     selectCandidatePoi(

@@ -275,4 +275,110 @@ describe('getNearbyPois', () => {
       badDistancePoi.distanceInMeters
     ).toBeNull()
   })
+
+  test('Case 7: Valid provided radius reaches AMap', async () => {
+    const axiosGetMock = jest.fn(async () => {
+      return createAMapSuccessResponse([])
+    })
+
+    axios.get = axiosGetMock
+
+    const result = await main({
+      longitude: 116.473168,
+      latitude: 39.993015,
+      radius: 1125
+    })
+
+    expect(result.success).toBe(true)
+    expect(axiosGetMock).toHaveBeenCalledTimes(3)
+
+    for (const call of axiosGetMock.mock.calls) {
+      expect(call[1].params.radius).toBe(1125)
+    }
+  })
+
+  test('Case 8: Missing radius uses default radius', async () => {
+    const axiosGetMock = jest.fn(async () => {
+      return createAMapSuccessResponse([])
+    })
+
+    axios.get = axiosGetMock
+
+    const result = await main({
+      longitude: 116.473168,
+      latitude: 39.993015
+    })
+
+    expect(result.success).toBe(true)
+
+    for (const call of axiosGetMock.mock.calls) {
+      expect(call[1].params.radius).toBe(3000)
+    }
+  })
+
+  test.each([
+    0,
+    -100,
+    NaN,
+    Infinity,
+    -Infinity,
+    15001,
+    999999,
+    '1125'
+  ])(
+    'Case 9: Invalid radius %p uses default radius',
+    async radius => {
+      const axiosGetMock = jest.fn(async () => {
+        return createAMapSuccessResponse([])
+      })
+
+      axios.get = axiosGetMock
+
+      const result = await main({
+        longitude: 116.473168,
+        latitude: 39.993015,
+        radius
+      })
+
+      expect(result.success).toBe(true)
+
+      for (const call of axiosGetMock.mock.calls) {
+        expect(call[1].params.radius).toBe(3000)
+      }
+    }
+  )
+
+  test('Case 10: Radius boundaries are accepted', async () => {
+    const minimumRadiusMock = jest.fn(async () => {
+      return createAMapSuccessResponse([])
+    })
+
+    axios.get = minimumRadiusMock
+
+    await main({
+      longitude: 116.473168,
+      latitude: 39.993015,
+      radius: 200
+    })
+
+    for (const call of minimumRadiusMock.mock.calls) {
+      expect(call[1].params.radius).toBe(200)
+    }
+
+    const maximumRadiusMock = jest.fn(async () => {
+      return createAMapSuccessResponse([])
+    })
+
+    axios.get = maximumRadiusMock
+
+    await main({
+      longitude: 116.473168,
+      latitude: 39.993015,
+      radius: 15000
+    })
+
+    for (const call of maximumRadiusMock.mock.calls) {
+      expect(call[1].params.radius).toBe(15000)
+    }
+  })
 })
