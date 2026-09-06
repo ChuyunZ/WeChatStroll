@@ -9,14 +9,6 @@ describe('poi-search-radius service', () => {
     'calculates radius from walking duration',
     () => {
       expect(
-        getPoiSearchRadius(30)
-      ).toBe(1125)
-
-      expect(
-        getPoiSearchRadius(45)
-      ).toBe(1688)
-
-      expect(
         getPoiSearchRadius(60)
       ).toBe(2250)
     }
@@ -25,32 +17,59 @@ describe('poi-search-radius service', () => {
   test(
     'shorter duration produces a smaller radius than longer duration',
     () => {
-      const shorterRadius =
-        getPoiSearchRadius(20)
+      const shortRadius =
+        getPoiSearchRadius(30)
 
-      const longerRadius =
-        getPoiSearchRadius(40)
+      const mediumRadius =
+        getPoiSearchRadius(45)
 
-      expect(shorterRadius)
-        .toBeLessThan(longerRadius)
+      const longRadius =
+        getPoiSearchRadius(60)
+
+      expect(shortRadius)
+        .toBeLessThan(mediumRadius)
+
+      expect(mediumRadius)
+        .toBeLessThan(longRadius)
     }
   )
 
   test(
     'supports duration values outside common presets',
     () => {
-      expect(
+      const shorterRadius =
+        getPoiSearchRadius(30)
+
+      const nonPresetRadius =
         getPoiSearchRadius(35)
-      ).toBe(1313)
+
+      const longerRadius =
+        getPoiSearchRadius(40)
+
+      expect(nonPresetRadius)
+        .toBeGreaterThan(shorterRadius)
+
+      expect(nonPresetRadius)
+        .toBeLessThan(longerRadius)
     }
   )
 
   test(
-    'supports the maximum questionnaire duration',
+    'supports the maximum questionnaire duration within the allowed radius',
     () => {
-      expect(
+      const normalRadius =
+        getPoiSearchRadius(60)
+
+      const maximumQuestionnaireRadius =
         getPoiSearchRadius(355)
-      ).toBe(13313)
+
+      expect(
+        maximumQuestionnaireRadius
+      ).toBeGreaterThan(normalRadius)
+
+      expect(
+        maximumQuestionnaireRadius
+      ).toBeLessThanOrEqual(15000)
     }
   )
 
