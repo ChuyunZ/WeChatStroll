@@ -6,12 +6,24 @@ cloud.init({
   timeout: 60000
 })
 
-const ai = cloud.ai()
-const model = ai.createModel("cloudbase")
-
-const aiClient = createAiClient(model)
+let aiClient
 
 exports.main = async () => {
+  try {
+    if (!aiClient) {
+      const ai = cloud.ai()
+      const model = ai.createModel("cloudbase")
+      aiClient = createAiClient(model)
+    }
+  }
+  catch (error) {
+    console.error("[AI Client] Configuration unavailable:", error.message)
+    return {
+      success: false,
+      error: "AI_CONFIG_UNAVAILABLE"
+    }
+  }
+
   const prompt = 'Return exactly: {"success":true}'
 
   return aiClient.request(prompt)
