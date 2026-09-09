@@ -85,7 +85,7 @@ exports.main = async (event, context) => {
             page_size: 6,
             sortrule: 'distance'
           },
-          timeout: 5000
+          timeout: 60000
         })
 
         const data = response.data

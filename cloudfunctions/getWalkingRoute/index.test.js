@@ -154,7 +154,7 @@ describe('getWalkingRoute', () => {
         destination: '121.470000,31.130000',
         show_fields: 'cost,polyline,navi'
       },
-      timeout: 2000
+      timeout: 60000
     })
   })
 

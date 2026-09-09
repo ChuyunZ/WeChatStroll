@@ -346,7 +346,7 @@ exports.main = async (event, context) => {
         destination: destinationLocation,
         show_fields: 'cost,polyline,navi'
       },
-      timeout: 2000
+      timeout: 60000
     })
 
     const data = response.data
