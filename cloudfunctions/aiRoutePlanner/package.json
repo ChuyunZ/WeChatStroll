@@ -1,0 +1,9 @@
+{
+  "name": "aiRoutePlanner",
+  "version": "1.0.0",
+  "description": "CloudBase AI integration for route planning",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "4.0.2"
+  }
+}
