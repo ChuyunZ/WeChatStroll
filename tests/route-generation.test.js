@@ -294,7 +294,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateFirstRoute runs the real pipeline and returns success',
+    'generateFirstRoute runs the real pipeline and passes duration-based radius',
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name }) => {
@@ -326,6 +326,7 @@ describe('route-generation service', () => {
       const result =
         await routeGenerationService
           .generateFirstRoute({
+            durationMinutes: 30,
             environmentPreferences: [
               '公园',
               '水边',
@@ -352,7 +353,8 @@ describe('route-generation service', () => {
           name: 'getNearbyPois',
           data: {
             longitude: 113.264939,
-            latitude: 23.129158
+            latitude: 23.129158,
+            radius: 1125
           }
         }
       )
@@ -375,6 +377,49 @@ describe('route-generation service', () => {
           }
         }
       )
+    }
+  )
+
+  test(
+    'generateFirstRoute uses default POI radius when duration is missing',
+    async () => {
+      wx.cloud.callFunction.mockResolvedValue({
+        result: {
+          success: true,
+          poisByCategory: {
+            park: [],
+            water: [],
+            shoppingStreet: []
+          }
+        }
+      })
+
+      const result =
+        await routeGenerationService
+          .generateFirstRoute({
+            environmentPreferences: [
+              '公园',
+              '水边',
+              '商街',
+              '街道'
+            ]
+          })
+
+      expect(result).toEqual({
+        status: 'empty',
+        reason: 'NO_VALID_POI'
+      })
+
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenCalledWith({
+        name: 'getNearbyPois',
+        data: {
+          longitude: 113.264939,
+          latitude: 23.129158,
+          radius: 3000
+        }
+      })
     }
   )
 

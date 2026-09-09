@@ -7,6 +7,10 @@ cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV
 })
 
+const DEFAULT_POI_SEARCH_RADIUS_METERS = 3000
+const MIN_POI_SEARCH_RADIUS_METERS = 200
+const MAX_POI_SEARCH_RADIUS_METERS = 15000
+
 const CATEGORY_TYPES = {
   park: [
     '110101', // 公园
@@ -27,6 +31,19 @@ const CATEGORY_TYPES = {
   ]
 }
 
+function getValidatedRadius(radius) {
+  if (
+    typeof radius !== 'number' ||
+    !Number.isFinite(radius) ||
+    radius < MIN_POI_SEARCH_RADIUS_METERS ||
+    radius > MAX_POI_SEARCH_RADIUS_METERS
+  ) {
+    return DEFAULT_POI_SEARCH_RADIUS_METERS
+  }
+
+  return Math.round(radius)
+}
+
 exports.main = async (event, context) => {
   if (!AMAP_API_KEY) {
     return {
@@ -38,7 +55,7 @@ exports.main = async (event, context) => {
     }
   }
 
-  const { longitude, latitude } = event || {}
+  const { longitude, latitude, radius } = event || {}
 
   if (longitude == null || latitude == null) {
     return {
@@ -71,7 +88,7 @@ exports.main = async (event, context) => {
 
   const AMAP_AROUND_URL = 'https://restapi.amap.com/v5/place/around'
   const location = `${longitude.toFixed(6)},${latitude.toFixed(6)}`
-  const radius = 3000
+  const searchRadius = getValidatedRadius(radius)
 
   try {
     const searches = Object.entries(CATEGORY_TYPES).map(
@@ -80,7 +97,7 @@ exports.main = async (event, context) => {
           params: {
             key: AMAP_API_KEY,
             location,
-            radius,
+            radius: searchRadius,
             types: typecodes.join('|'),
             page_size: 6,
             sortrule: 'distance'
