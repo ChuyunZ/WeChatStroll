@@ -1,4 +1,5 @@
 const { mockRoutes } = require("../../data/mock-routes");
+const { isValidGeoPoint } = require("../../utils/geo");
 
 Page({
   data: {
@@ -185,19 +186,7 @@ Page({
   },
 
   isValidPoint(point) {
-    return (
-      point &&
-      typeof point === "object" &&
-      !Array.isArray(point) &&
-      typeof point.latitude === "number" &&
-      typeof point.longitude === "number" &&
-      Number.isFinite(point.latitude) &&
-      Number.isFinite(point.longitude) &&
-      point.latitude >= -90 &&
-      point.latitude <= 90 &&
-      point.longitude >= -180 &&
-      point.longitude <= 180
-    );
+    return isValidGeoPoint(point);
   },
 
   isValidRoute(route) {
