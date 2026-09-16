@@ -2,6 +2,10 @@ const routeGenerationService = require(
   "../../services/route-generation"
 );
 
+const {
+  ROUTE_TYPES
+} = require("../../constants/route-types");
+
 function isValidRoutePlanningSession(session) {
   return (
     session &&
@@ -252,9 +256,9 @@ Page({
       };
 
       const routeTypeTextMap = {
-        loop: "环形路线",
-        out_and_back: "往返路线",
-        point_to_point: "单程路线"
+        [ROUTE_TYPES.LOOP]: "环形路线",
+        [ROUTE_TYPES.OUT_AND_BACK]: "往返路线",
+        [ROUTE_TYPES.POINT_TO_POINT]: "单程路线"
       };
 
       return {

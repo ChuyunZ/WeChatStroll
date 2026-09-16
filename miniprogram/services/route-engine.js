@@ -17,13 +17,15 @@ const {
   SEGMENT_FETCH_CONCURRENCY
 } = require('../config/route-planning')
 
+const {
+  ROUTE_TYPES
+} = require('../constants/route-types')
+
 const START_NODE_ID = 'START'
 
-const SUPPORTED_ROUTE_TYPES = new Set([
-  'point_to_point',
-  'loop',
-  'out_and_back'
-])
+const SUPPORTED_ROUTE_TYPES = new Set(
+  Object.values(ROUTE_TYPES)
+)
 
 function isNonNegativeFiniteNumber(value) {
   return (
@@ -240,14 +242,14 @@ function buildTraversalNodes(
   waypointNodes,
   routeType
 ) {
-  if (routeType === 'point_to_point') {
+  if (routeType === ROUTE_TYPES.POINT_TO_POINT) {
     return [
       startNode,
       ...waypointNodes
     ]
   }
 
-  if (routeType === 'loop') {
+  if (routeType === ROUTE_TYPES.LOOP) {
     return [
       startNode,
       ...waypointNodes,
@@ -311,7 +313,7 @@ function buildPrefetchEdgePairs(
     }
   }
 
-  if (routeType !== 'point_to_point') {
+  if (routeType !== ROUTE_TYPES.POINT_TO_POINT) {
     for (const waypoint of waypointNodes) {
       edgePairs.push([
         waypoint,
@@ -606,7 +608,7 @@ function copyPublicWaypoint(waypoint) {
 function createRoutePlanningSession({
   start,
   verifiedWaypointPool,
-  routeType = 'point_to_point',
+  routeType = ROUTE_TYPES.POINT_TO_POINT,
   segmentResolver = getWalkingSegment
 }) {
   if (!isValidGeoPoint(start)) {
@@ -1030,7 +1032,7 @@ function createRoutePlanningSession({
       segments,
       routeType,
       returnsToStart:
-        routeType !== 'point_to_point',
+        routeType !== ROUTE_TYPES.POINT_TO_POINT,
 
       routeOrder: {
         orderedWaypointIds:

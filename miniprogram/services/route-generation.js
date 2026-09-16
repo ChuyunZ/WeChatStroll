@@ -20,6 +20,10 @@ const {
   getPoiSearchRadius
 } = require('./poi-search-radius')
 
+const {
+  ROUTE_TYPES
+} = require('../constants/route-types')
+
 const POI_ENVIRONMENT_CATEGORY_MAP = {
   '公园': 'park',
   '水边': 'water',
@@ -198,12 +202,12 @@ function buildGeneratedRoute({
     typeof walkingRoute.routeType === 'string' &&
     walkingRoute.routeType.trim() !== ''
       ? walkingRoute.routeType
-      : 'point_to_point'
+      : ROUTE_TYPES.POINT_TO_POINT
 
   const returnsToStart =
     typeof walkingRoute.returnsToStart === 'boolean'
       ? walkingRoute.returnsToStart
-      : routeType !== 'point_to_point'
+      : routeType !== ROUTE_TYPES.POINT_TO_POINT
 
   const endPoint =
     returnsToStart
@@ -306,7 +310,7 @@ function getRequestedRouteType(
     preferences.routeType.trim() !== ''
   )
     ? preferences.routeType.trim()
-    : 'point_to_point'
+    : ROUTE_TYPES.POINT_TO_POINT
 }
 
 async function generateFirstRoute(

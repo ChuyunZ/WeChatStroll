@@ -1,3 +1,7 @@
+const {
+  ROUTE_TYPES
+} = require('../../constants/route-types')
+
 const CROWD_PREFERENCE_MAP = {
   "安静": "low",
   "适中": "medium",
@@ -40,21 +44,21 @@ Page({
         options: [
           {
             label: "环线",
-            value: "loop",
+            value: ROUTE_TYPES.LOOP,
             description: "从起点出发，绕一圈后回到起点",
             image: "/images/route-loop.png",
             selected: false
           },
           {
             label: "往返",
-            value: "out_and_back",
+            value: ROUTE_TYPES.OUT_AND_BACK,
             description: "到达一个地点后，再沿大致相同路线返回",
             image: "/images/route-out-and-back.png",
             selected: false
           },
           {
             label: "单程",
-            value: "point_to_point",
+            value: ROUTE_TYPES.POINT_TO_POINT,
             description: "从一个地点出发，在另一个地点结束",
             image: "/images/route-point-to-point.png",
             selected: false
