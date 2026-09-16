@@ -377,7 +377,68 @@ describe(
         })
       }
     )
+    test(
+      'drops inconsistent environment stats instead of producing invalid aggregate ratios',
+      async () => {
+        const resolver = jest.fn(
+          async (fromNode, toNode) => {
+            const segment = createSuccessfulSegment(
+              fromNode,
+              toNode
+            )
 
+            if (
+              fromNode.nodeId === 'A' &&
+              toNode.nodeId === 'B'
+            ) {
+              segment.environmentStats = {
+                totalStepDistanceMeters: 1,
+                analyzedDistanceMeters: 100,
+                unknownWalkTypeDistanceMeters: 0,
+                normalRoadDistanceMeters: 100,
+                normalRoadRatio: 1,
+                walkTypeCoverageRatio: 1,
+
+                walkTypeDistanceMeters: {
+                  '0': 100
+                }
+              }
+            }
+
+            return segment
+          }
+        )
+
+        const session = createSession({
+          segmentResolver: resolver
+        })
+
+        const result =
+          await session.buildRouteForOrder({
+            allowedWaypointIds:
+              ALL_WAYPOINT_IDS,
+
+            orderedWaypointIds: [
+              'A',
+              'B'
+            ]
+          })
+
+        expect(result.success).toBe(true)
+
+        expect(
+          result.segments[1]
+        ).not.toHaveProperty(
+          'environmentStats'
+        )
+
+        expect(
+          result
+        ).not.toHaveProperty(
+          'environmentStats'
+        )
+      }
+    )
     test(
       'builds a loop route with a real final edge back to start',
       async () => {

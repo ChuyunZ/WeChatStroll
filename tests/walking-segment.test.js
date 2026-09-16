@@ -467,4 +467,72 @@ describe('walking-segment', () => {
       )
     }
   )
+  test(
+  'drops inconsistent environment stats while keeping the segment valid',
+  async () => {
+    global.wx = {
+      cloud: {
+        callFunction: async () => {
+          const result =
+            createSuccessfulWalkingResult()
+
+          result.route.environmentStats = {
+            totalStepDistanceMeters: 1,
+            analyzedDistanceMeters: 100,
+            unknownWalkTypeDistanceMeters: 0,
+            normalRoadDistanceMeters: 100,
+            normalRoadRatio: 1,
+            walkTypeCoverageRatio: 1,
+
+            walkTypeDistanceMeters: {
+              '0': 100
+            }
+          }
+
+          return {
+            result
+          }
+        }
+      }
+    }
+
+    const result =
+      await getWalkingSegment(
+        {
+          latitude: 31.2304,
+          longitude: 121.4737
+        },
+        {
+          latitude: 31.231,
+          longitude: 121.4745
+        }
+      )
+
+    expect(result.success).toBe(true)
+
+    expect(result).toEqual({
+      success: true,
+
+      distanceMeters: 820,
+      durationSeconds: 661,
+
+      polyline: [
+        {
+          latitude: 31.2304,
+          longitude: 121.4737
+        },
+        {
+          latitude: 31.231,
+          longitude: 121.4745
+        }
+      ]
+    })
+
+    expect(
+      result
+    ).not.toHaveProperty(
+      'environmentStats'
+    )
+  }
+)
 })

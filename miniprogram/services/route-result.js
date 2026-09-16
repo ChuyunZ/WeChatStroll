@@ -12,6 +12,9 @@ const {
   getNodeId
 } = require('./route-graph')
 
+const NORMAL_ROAD_WALK_TYPE = '0'
+const NUMBER_TOLERANCE = 1e-6
+
 function isNonNegativeFiniteNumber(value) {
   return (
     typeof value === 'number' &&
@@ -26,6 +29,19 @@ function isValidRatio(value) {
     Number.isFinite(value) &&
     value >= 0 &&
     value <= 1
+  )
+}
+
+function areNearlyEqual(left, right) {
+  const scale = Math.max(
+    1,
+    Math.abs(left),
+    Math.abs(right)
+  )
+
+  return (
+    Math.abs(left - right) <=
+    NUMBER_TOLERANCE * scale
   )
 }
 
@@ -95,13 +111,84 @@ function copyEnvironmentStats(environmentStats) {
   }
 
   const copiedWalkTypeDistanceMeters = {}
+  let analyzedWalkTypeDistanceMeters = 0
 
-  for (const [walkType, distanceMeters] of Object.entries(walkTypeDistanceMeters)) {
+  for (const [walkType, distanceMeters] of Object.entries(
+    walkTypeDistanceMeters
+  )) {
     if (!isNonNegativeFiniteNumber(distanceMeters)) {
       return null
     }
 
     copiedWalkTypeDistanceMeters[walkType] = distanceMeters
+    analyzedWalkTypeDistanceMeters += distanceMeters
+  }
+
+  /*
+   * Environment statistics come from one set of walking steps,
+   * so their component values must also agree with each other.
+   */
+  if (
+    !areNearlyEqual(
+      analyzedDistanceMeters + unknownWalkTypeDistanceMeters,
+      totalStepDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  if (
+    !areNearlyEqual(
+      analyzedWalkTypeDistanceMeters,
+      analyzedDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  const expectedNormalRoadDistanceMeters =
+    copiedWalkTypeDistanceMeters[NORMAL_ROAD_WALK_TYPE] || 0
+
+  if (
+    !areNearlyEqual(
+      normalRoadDistanceMeters,
+      expectedNormalRoadDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  if (
+    normalRoadDistanceMeters > analyzedDistanceMeters &&
+    !areNearlyEqual(
+      normalRoadDistanceMeters,
+      analyzedDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  const expectedNormalRoadRatio =
+    totalStepDistanceMeters > 0
+      ? normalRoadDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  const expectedWalkTypeCoverageRatio =
+    totalStepDistanceMeters > 0
+      ? analyzedDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  if (
+    !areNearlyEqual(
+      normalRoadRatio,
+      expectedNormalRoadRatio
+    ) ||
+    !areNearlyEqual(
+      walkTypeCoverageRatio,
+      expectedWalkTypeCoverageRatio
+    )
+  ) {
+    return null
   }
 
   return {

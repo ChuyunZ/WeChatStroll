@@ -7,6 +7,9 @@ const {
   callCloudFunction
 } = require('./cloud-function-client')
 
+const NORMAL_ROAD_WALK_TYPE = '0'
+const NUMBER_TOLERANCE = 1e-6
+
 function isNonNegativeFiniteNumber(value) {
   return (
     typeof value === 'number' &&
@@ -21,6 +24,19 @@ function isValidRatio(value) {
     Number.isFinite(value) &&
     value >= 0 &&
     value <= 1
+  )
+}
+
+function areNearlyEqual(left, right) {
+  const scale = Math.max(
+    1,
+    Math.abs(left),
+    Math.abs(right)
+  )
+
+  return (
+    Math.abs(left - right) <=
+    NUMBER_TOLERANCE * scale
   )
 }
 
@@ -44,18 +60,10 @@ function normalizeEnvironmentStats(environmentStats) {
   } = environmentStats
 
   if (
-    !isNonNegativeFiniteNumber(
-      totalStepDistanceMeters
-    ) ||
-    !isNonNegativeFiniteNumber(
-      analyzedDistanceMeters
-    ) ||
-    !isNonNegativeFiniteNumber(
-      unknownWalkTypeDistanceMeters
-    ) ||
-    !isNonNegativeFiniteNumber(
-      normalRoadDistanceMeters
-    ) ||
+    !isNonNegativeFiniteNumber(totalStepDistanceMeters) ||
+    !isNonNegativeFiniteNumber(analyzedDistanceMeters) ||
+    !isNonNegativeFiniteNumber(unknownWalkTypeDistanceMeters) ||
+    !isNonNegativeFiniteNumber(normalRoadDistanceMeters) ||
     !isValidRatio(normalRoadRatio) ||
     !isValidRatio(walkTypeCoverageRatio) ||
     !walkTypeDistanceMeters ||
@@ -66,21 +74,70 @@ function normalizeEnvironmentStats(environmentStats) {
   }
 
   const normalizedWalkTypeDistances = {}
+  let analyzedWalkTypeDistanceMeters = 0
 
-  for (
-    const [walkType, distanceMeters]
-    of Object.entries(walkTypeDistanceMeters)
-  ) {
-    if (
-      !isNonNegativeFiniteNumber(
-        distanceMeters
-      )
-    ) {
+  for (const [walkType, distanceMeters] of Object.entries(
+    walkTypeDistanceMeters
+  )) {
+    if (!isNonNegativeFiniteNumber(distanceMeters)) {
       return null
     }
 
-    normalizedWalkTypeDistances[walkType] =
-      distanceMeters
+    normalizedWalkTypeDistances[walkType] = distanceMeters
+    analyzedWalkTypeDistanceMeters += distanceMeters
+  }
+
+  if (
+    !areNearlyEqual(
+      analyzedDistanceMeters + unknownWalkTypeDistanceMeters,
+      totalStepDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  if (
+    !areNearlyEqual(
+      analyzedWalkTypeDistanceMeters,
+      analyzedDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  const expectedNormalRoadDistanceMeters =
+    normalizedWalkTypeDistances[NORMAL_ROAD_WALK_TYPE] || 0
+
+  if (
+    !areNearlyEqual(
+      normalRoadDistanceMeters,
+      expectedNormalRoadDistanceMeters
+    )
+  ) {
+    return null
+  }
+
+  const expectedNormalRoadRatio =
+    totalStepDistanceMeters > 0
+      ? normalRoadDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  const expectedWalkTypeCoverageRatio =
+    totalStepDistanceMeters > 0
+      ? analyzedDistanceMeters / totalStepDistanceMeters
+      : 0
+
+  if (
+    !areNearlyEqual(
+      normalRoadRatio,
+      expectedNormalRoadRatio
+    ) ||
+    !areNearlyEqual(
+      walkTypeCoverageRatio,
+      expectedWalkTypeCoverageRatio
+    )
+  ) {
+    return null
   }
 
   return {
@@ -90,8 +147,7 @@ function normalizeEnvironmentStats(environmentStats) {
     normalRoadDistanceMeters,
     normalRoadRatio,
     walkTypeCoverageRatio,
-    walkTypeDistanceMeters:
-      normalizedWalkTypeDistances
+    walkTypeDistanceMeters: normalizedWalkTypeDistances
   }
 }
 
@@ -105,12 +161,8 @@ function normalizeWalkingRoute(route) {
   }
 
   if (
-    !isNonNegativeFiniteNumber(
-      route.distanceMeters
-    ) ||
-    !isNonNegativeFiniteNumber(
-      route.durationSeconds
-    ) ||
+    !isNonNegativeFiniteNumber(route.distanceMeters) ||
+    !isNonNegativeFiniteNumber(route.durationSeconds) ||
     !Array.isArray(route.polyline) ||
     route.polyline.length < 2 ||
     !route.polyline.every(isValidGeoPoint)
@@ -118,24 +170,15 @@ function normalizeWalkingRoute(route) {
     return null
   }
 
-  const environmentStats =
-    normalizeEnvironmentStats(
-      route.environmentStats
-    )
+  const environmentStats = normalizeEnvironmentStats(
+    route.environmentStats
+  )
 
   return {
     success: true,
-
-    distanceMeters:
-      route.distanceMeters,
-
-    durationSeconds:
-      route.durationSeconds,
-
-    polyline:
-      route.polyline.map(
-        copyGeoPoint
-      ),
+    distanceMeters: route.distanceMeters,
+    durationSeconds: route.durationSeconds,
+    polyline: route.polyline.map(copyGeoPoint),
 
     ...(environmentStats
       ? {
@@ -155,8 +198,7 @@ async function getWalkingSegment(
   ) {
     return {
       success: false,
-      error:
-        'INVALID_WALKING_SEGMENT_INPUT'
+      error: 'INVALID_WALKING_SEGMENT_INPUT'
     }
   }
 
@@ -166,25 +208,18 @@ async function getWalkingSegment(
     result = await callCloudFunction(
       'getWalkingRoute',
       {
-        start:
-          copyGeoPoint(fromPoint),
-
-        destination:
-          copyGeoPoint(toPoint)
+        start: copyGeoPoint(fromPoint),
+        destination: copyGeoPoint(toPoint)
       },
       {
-        fallbackCode:
-          'WALKING_ROUTE_FAILED',
-
-        fallbackMessage:
-          'Unable to retrieve walking route.'
+        fallbackCode: 'WALKING_ROUTE_FAILED',
+        fallbackMessage: 'Unable to retrieve walking route.'
       }
     )
   } catch (error) {
     return {
       success: false,
-      error:
-        'WALKING_SEGMENT_FAILED',
+      error: 'WALKING_SEGMENT_FAILED',
 
       causeCode:
         typeof error.code === 'string'
@@ -193,16 +228,14 @@ async function getWalkingSegment(
     }
   }
 
-  const normalizedRoute =
-    normalizeWalkingRoute(
-      result.route
-    )
+  const normalizedRoute = normalizeWalkingRoute(
+    result.route
+  )
 
   if (!normalizedRoute) {
     return {
       success: false,
-      error:
-        'INVALID_WALKING_SEGMENT_RESPONSE'
+      error: 'INVALID_WALKING_SEGMENT_RESPONSE'
     }
   }
 
