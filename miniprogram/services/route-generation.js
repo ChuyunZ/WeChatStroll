@@ -144,11 +144,36 @@ async function callCloudFunction(
         data
       })
   } catch (error) {
-    throw createRouteGenerationError(
-      fallbackCode,
-      fallbackMessage,
-      error
-    )
+        const result =
+      response && response.result
+
+    if (
+      !result ||
+      result.success !== true
+    ) {
+      const resultError =
+        result && result.error
+
+      const errorCode =
+        typeof resultError === 'string'
+          ? resultError
+          : resultError &&
+            resultError.code
+            ? resultError.code
+            : fallbackCode
+
+      const errorMessage =
+        resultError &&
+        typeof resultError === 'object' &&
+        resultError.message
+          ? resultError.message
+          : fallbackMessage
+
+      throw createRouteGenerationError(
+        errorCode,
+        errorMessage
+      )
+    }
   }
 
   const result =
@@ -288,6 +313,30 @@ async function requestWalkingRoute(
   return result.route
 }
 
+
+async function requestWaypointPlan(
+  location,
+  preferences,
+  nearbyPois
+) {
+  const result =
+    await callCloudFunction(
+      'aiRoutePlanner',
+      {
+        startPoint: {
+          latitude: location.latitude,
+          longitude: location.longitude
+        },
+        preferences,
+        nearbyPois
+      },
+      'AI_ROUTE_PLANNING_FAILED',
+      'Unable to generate waypoint plan.'
+    )
+
+  return result.plan
+}
+
 function buildRecommendationReason(
   selectedPoi,
   preferences = {}
@@ -422,6 +471,9 @@ async function generateFirstRoute(
   const poisByCategory =
     await searchNearbyPois(location)
 
+  const poiCandidates =
+    buildPoiCandidates(poisByCategory)
+
   const selectedPoi =
     selectCandidatePoi(
       poisByCategory,
@@ -455,9 +507,28 @@ async function generateFirstRoute(
   }
 }
 
+function buildPoiCandidates(poisByCategory) {
+  const flattenPois = []
+  for (const category in poisByCategory) {
+    for (const element of poisByCategory[category]) {
+      flattenPois.push({
+        poiId: element.poiId,
+        name: element.name,
+        category: element.category,
+        latitude: element.latitude,
+        longitude: element.longitude,
+        distanceInMeters:element.distanceInMeters
+      })
+    }
+  }
+
+  return flattenPois
+}
+
 module.exports = {
   generateFirstRoute,
   selectCandidatePoi,
   selectNearestPoi,
-  buildGeneratedRoute
+  buildGeneratedRoute,
+  buildPoiCandidates
 }

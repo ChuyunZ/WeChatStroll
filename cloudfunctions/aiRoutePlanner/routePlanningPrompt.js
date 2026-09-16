@@ -80,9 +80,14 @@ function isValidNearbyPois(nearbyPois) {
       !Number.isFinite(poi.longitude) ||
       poi.longitude < -180 ||
       poi.longitude > 180 ||
-      typeof poi.distanceMeters !== "number" ||
-      !Number.isFinite(poi.distanceMeters) ||
-      poi.distanceMeters < 0
+      (
+        poi.distanceInMeters !== null &&
+        (
+          typeof poi.distanceInMeters !== "number" ||
+          !Number.isFinite(poi.distanceInMeters) ||
+          poi.distanceInMeters < 0
+        )
+      )
     ) {
       return false
     }
@@ -139,7 +144,7 @@ function buildRoutePlanningPrompt(input) {
     category: poi.category,
     latitude: poi.latitude,
     longitude: poi.longitude,
-    distanceMeters: poi.distanceMeters
+    distanceInMeters: poi.distanceInMeters
   }))
 
   const prompt = [

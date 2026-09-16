@@ -27,7 +27,7 @@ const validInput = {
       category: "park",
       latitude: 45.501,
       longitude: -73.57,
-      distanceMeters: 350
+      distanceInMeters: 350
     },
     {
       poiId: "poi-2",
@@ -35,7 +35,7 @@ const validInput = {
       category: "water",
       latitude: 45.503,
       longitude: -73.572,
-      distanceMeters: 600
+      distanceInMeters: 600
     }
   ]
 }
