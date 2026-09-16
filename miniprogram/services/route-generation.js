@@ -144,36 +144,11 @@ async function callCloudFunction(
         data
       })
   } catch (error) {
-        const result =
-      response && response.result
-
-    if (
-      !result ||
-      result.success !== true
-    ) {
-      const resultError =
-        result && result.error
-
-      const errorCode =
-        typeof resultError === 'string'
-          ? resultError
-          : resultError &&
-            resultError.code
-            ? resultError.code
-            : fallbackCode
-
-      const errorMessage =
-        resultError &&
-        typeof resultError === 'object' &&
-        resultError.message
-          ? resultError.message
-          : fallbackMessage
-
-      throw createRouteGenerationError(
-        errorCode,
-        errorMessage
-      )
-    }
+    throw createRouteGenerationError(
+      fallbackCode,
+      fallbackMessage,
+      error
+    )
   }
 
   const result =
@@ -183,18 +158,26 @@ async function callCloudFunction(
     !result ||
     result.success !== true
   ) {
-    throw createRouteGenerationError(
-      result &&
-      result.error &&
-      result.error.code
-        ? result.error.code
-        : fallbackCode,
+    const resultError =
+      result && result.error
 
-      result &&
-      result.error &&
-      result.error.message
-        ? result.error.message
+    const errorCode =
+      typeof resultError === 'string'
+        ? resultError
+        : resultError && resultError.code
+          ? resultError.code
+          : fallbackCode
+
+    const errorMessage =
+      resultError &&
+      typeof resultError === 'object' &&
+      resultError.message
+        ? resultError.message
         : fallbackMessage
+
+    throw createRouteGenerationError(
+      errorCode,
+      errorMessage
     )
   }
 
@@ -312,7 +295,6 @@ async function requestWalkingRoute(
 
   return result.route
 }
-
 
 async function requestWaypointPlan(
   location,
@@ -455,7 +437,30 @@ function buildGeneratedRoute({
   }
 }
 
-async function generateFirstRoute(
+function buildPoiCandidates(poisByCategory) {
+  const flattenPois = []
+
+  for (const category in poisByCategory) {
+    if (!Array.isArray(poisByCategory[category])) {
+      continue
+    }
+
+    for (const element of poisByCategory[category]) {
+      flattenPois.push({
+        poiId: element.poiId,
+        name: element.name,
+        category: element.category,
+        latitude: element.latitude,
+        longitude: element.longitude,
+        distanceInMeters: element.distanceInMeters
+      })
+    }
+  }
+
+  return flattenPois
+}
+
+async function generateWaypointPlan(
   preferences = {}
 ) {
   const location =
@@ -471,8 +476,45 @@ async function generateFirstRoute(
   const poisByCategory =
     await searchNearbyPois(location)
 
-  const poiCandidates =
+  const nearbyPois =
     buildPoiCandidates(poisByCategory)
+
+  if (nearbyPois.length === 0) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_POI'
+    }
+  }
+
+  const plan =
+    await requestWaypointPlan(
+      location,
+      preferences,
+      nearbyPois
+    )
+
+  return {
+    status: 'success',
+    plan,
+    nearbyPois
+  }
+}
+
+async function generateFirstRoute(
+  preferences = {}
+) {
+  const location =
+    await locationService.getCurrentLocation()
+
+  if (!isValidPoint(location)) {
+    throw createRouteGenerationError(
+      'INVALID_LOCATION',
+      'Current location has an invalid format.'
+    )
+  }
+
+  const poisByCategory =
+    await searchNearbyPois(location)
 
   const selectedPoi =
     selectCandidatePoi(
@@ -507,26 +549,9 @@ async function generateFirstRoute(
   }
 }
 
-function buildPoiCandidates(poisByCategory) {
-  const flattenPois = []
-  for (const category in poisByCategory) {
-    for (const element of poisByCategory[category]) {
-      flattenPois.push({
-        poiId: element.poiId,
-        name: element.name,
-        category: element.category,
-        latitude: element.latitude,
-        longitude: element.longitude,
-        distanceInMeters:element.distanceInMeters
-      })
-    }
-  }
-
-  return flattenPois
-}
-
 module.exports = {
   generateFirstRoute,
+  generateWaypointPlan,
   selectCandidatePoi,
   selectNearestPoi,
   buildGeneratedRoute,
