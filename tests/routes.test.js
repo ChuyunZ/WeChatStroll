@@ -101,6 +101,34 @@ function createEventChannel() {
 }
 
 
+function createRoutePlanningSessionMock() {
+  return {
+    registerVerifiedWaypoints:
+      jest.fn(),
+
+    prefetchSegments:
+      jest.fn(),
+
+    buildRouteForOrder:
+      jest.fn()
+  };
+}
+
+
+function createSuccessfulRouteLoadResult({
+  routes = [
+    GENERATED_ROUTE
+  ],
+  routePlanningSession =
+    createRoutePlanningSessionMock()
+} = {}) {
+  return {
+    routes,
+    routePlanningSession
+  };
+}
+
+
 function loadRoutesPage({
   eventChannel = null
 } = {}) {
@@ -241,6 +269,11 @@ describe(
         ).not.toHaveBeenCalled();
 
 
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
+
+
         eventChannel
           .handlers
           .routePreferences(
@@ -285,6 +318,11 @@ describe(
 
 
         expect(
+          page._routePlanningSession
+        ).toBeNull();
+
+
+        expect(
           page.loadRoutes
         ).toHaveBeenCalledTimes(
           1
@@ -294,7 +332,7 @@ describe(
 
 
     test(
-      "getRoutes passes preferences to route generation and wraps a success route in an array",
+      "getRoutes passes preferences to route generation and returns the route with its planning session",
       async () => {
         const preferences = {
           durationMinutes: 30,
@@ -313,6 +351,9 @@ describe(
           ]
         };
 
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
 
         page._routePreferences =
           preferences;
@@ -325,11 +366,13 @@ describe(
               "success",
 
             route:
-              GENERATED_ROUTE
+              GENERATED_ROUTE,
+
+            routePlanningSession
           });
 
 
-        const routes =
+        const result =
           await page.getRoutes();
 
 
@@ -342,16 +385,20 @@ describe(
 
 
         expect(
-          routes
-        ).toEqual([
-          GENERATED_ROUTE
-        ]);
+          result
+        ).toEqual({
+          routes: [
+            GENERATED_ROUTE
+          ],
+
+          routePlanningSession
+        });
       }
     );
 
 
     test(
-      "getRoutes converts an explicit empty generation result to an empty array",
+      "getRoutes converts an explicit empty generation result to an empty route load result",
       async () => {
         routeGenerationServiceMock
           .generateFirstRoute
@@ -364,13 +411,41 @@ describe(
           });
 
 
-        const routes =
+        const result =
           await page.getRoutes();
 
 
         expect(
-          routes
-        ).toEqual([]);
+          result
+        ).toEqual({
+          routes: [],
+          routePlanningSession: null
+        });
+      }
+    );
+
+
+    test(
+      "getRoutes rejects a success result without a valid planning session",
+      async () => {
+        routeGenerationServiceMock
+          .generateFirstRoute
+          .mockResolvedValue({
+            status:
+              "success",
+
+            route:
+              GENERATED_ROUTE,
+
+            routePlanningSession: {}
+          });
+
+
+        await expect(
+          page.getRoutes()
+        ).rejects.toThrow(
+          "Invalid route generation result"
+        );
       }
     );
 
@@ -396,10 +471,16 @@ describe(
 
 
     test(
-      "loadRoutes starts in loading state",
+      "loadRoutes starts in loading state and clears the previous planning session",
       async () => {
         const deferred =
           createDeferred();
+
+        const oldSession =
+          createRoutePlanningSessionMock();
+
+        const newSession =
+          createRoutePlanningSessionMock();
 
 
         page.data.routeState =
@@ -407,6 +488,12 @@ describe(
 
         page.data.routes =
           mockRoutes;
+
+        page._rawRoutes =
+          mockRoutes;
+
+        page._routePlanningSession =
+          oldSession;
 
 
         page.getRoutes =
@@ -437,24 +524,48 @@ describe(
         ).toEqual([]);
 
 
-        deferred.resolve(
-          mockRoutes
-        );
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
+
+
+        deferred.resolve({
+          routes:
+            mockRoutes,
+
+          routePlanningSession:
+            newSession
+        });
 
 
         await loadPromise;
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
+        );
       }
     );
 
 
     test(
-      "loadRoutes sets success and stores raw routes when routes exist",
+      "loadRoutes sets success and stores both raw routes and the planning session",
       async () => {
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+
         page.getRoutes =
           jest.fn()
-            .mockResolvedValue([
-              GENERATED_ROUTE
-            ]);
+            .mockResolvedValue({
+              routes: [
+                GENERATED_ROUTE
+              ],
+
+              routePlanningSession
+            });
 
 
         await page.loadRoutes();
@@ -477,23 +588,71 @@ describe(
         ).toEqual([
           GENERATED_ROUTE
         ]);
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          routePlanningSession
+        );
       }
     );
 
 
     test(
-      "loadRoutes sets empty and clears raw routes when no routes exist",
+      "loadRoutes keeps the planning session out of serialized page data",
+      async () => {
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockResolvedValue({
+              routes: [
+                GENERATED_ROUTE
+              ],
+
+              routePlanningSession
+            });
+
+
+        await page.loadRoutes();
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          routePlanningSession
+        );
+
+
+        expect(
+          page.data
+        ).not.toHaveProperty(
+          "routePlanningSession"
+        );
+      }
+    );
+
+
+    test(
+      "loadRoutes sets empty and clears raw routes and planning session when no routes exist",
       async () => {
         page._rawRoutes = [
           GENERATED_ROUTE
         ];
 
+        page._routePlanningSession =
+          createRoutePlanningSessionMock();
+
 
         page.getRoutes =
           jest.fn()
-            .mockResolvedValue(
-              []
-            );
+            .mockResolvedValue({
+              routes: [],
+              routePlanningSession: null
+            });
 
 
         await page.loadRoutes();
@@ -514,12 +673,17 @@ describe(
         expect(
           page._rawRoutes
         ).toEqual([]);
+
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
       }
     );
 
 
     test(
-      "loadRoutes sets error and clears raw routes when request fails",
+      "loadRoutes sets error and clears raw routes and planning session when request fails",
       async () => {
         const consoleErrorSpy =
           jest
@@ -535,6 +699,9 @@ describe(
         page._rawRoutes = [
           GENERATED_ROUTE
         ];
+
+        page._routePlanningSession =
+          createRoutePlanningSessionMock();
 
 
         page.getRoutes =
@@ -564,6 +731,59 @@ describe(
         expect(
           page._rawRoutes
         ).toEqual([]);
+
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
+
+
+        expect(
+          consoleErrorSpy
+        ).toHaveBeenCalled();
+      }
+    );
+
+
+    test(
+      "loadRoutes rejects malformed route load results",
+      async () => {
+        const consoleErrorSpy =
+          jest
+            .spyOn(
+              console,
+              "error"
+            )
+            .mockImplementation(
+              () => {}
+            );
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockResolvedValue([
+              GENERATED_ROUTE
+            ]);
+
+
+        await page.loadRoutes();
+
+
+        expect(
+          page.data.routeState
+        ).toBe(
+          "error"
+        );
+
+
+        expect(
+          page._rawRoutes
+        ).toEqual([]);
+
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
 
 
         expect(
@@ -672,7 +892,7 @@ describe(
 
 
     test(
-      "stale success cannot overwrite a newer success",
+      "stale success cannot overwrite a newer success or its planning session",
       async () => {
         const firstRequest =
           createDeferred();
@@ -701,6 +921,13 @@ describe(
         ];
 
 
+        const oldSession =
+          createRoutePlanningSessionMock();
+
+        const newSession =
+          createRoutePlanningSessionMock();
+
+
         page.getRoutes =
           jest.fn()
             .mockImplementationOnce(
@@ -721,9 +948,13 @@ describe(
           page.loadRoutes();
 
 
-        secondRequest.resolve(
-          newRoutes
-        );
+        secondRequest.resolve({
+          routes:
+            newRoutes,
+
+          routePlanningSession:
+            newSession
+        });
 
 
         await newLoadPromise;
@@ -745,9 +976,20 @@ describe(
         );
 
 
-        firstRequest.resolve(
-          oldRoutes
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
         );
+
+
+        firstRequest.resolve({
+          routes:
+            oldRoutes,
+
+          routePlanningSession:
+            oldSession
+        });
 
 
         await oldLoadPromise;
@@ -774,12 +1016,19 @@ describe(
         ).toBe(
           "最新请求路线"
         );
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
+        );
       }
     );
 
 
     test(
-      "stale error cannot overwrite a newer success",
+      "stale error cannot overwrite a newer success or clear its planning session",
       async () => {
         const firstRequest =
           createDeferred();
@@ -796,6 +1045,10 @@ describe(
               "最新请求路线"
           }
         ];
+
+
+        const newSession =
+          createRoutePlanningSessionMock();
 
 
         page.getRoutes =
@@ -818,9 +1071,13 @@ describe(
           page.loadRoutes();
 
 
-        secondRequest.resolve(
-          newRoutes
-        );
+        secondRequest.resolve({
+          routes:
+            newRoutes,
+
+          routePlanningSession:
+            newSession
+        });
 
 
         await newLoadPromise;
@@ -839,6 +1096,13 @@ describe(
             .title
         ).toBe(
           "最新请求路线"
+        );
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
         );
 
 
@@ -872,6 +1136,13 @@ describe(
           page._rawRoutes[0].title
         ).toBe(
           "最新请求路线"
+        );
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
         );
       }
     );
@@ -984,8 +1255,15 @@ describe(
 
 
     test(
-      "showOtherRoutes rotates the route order when multiple routes exist",
+      "showOtherRoutes rotates the route order when multiple routes exist without replacing the planning session",
       () => {
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+        page._routePlanningSession =
+          routePlanningSession;
+
+
         page.data.routes = [
           {
             routeId:
@@ -1021,6 +1299,13 @@ describe(
               "route-a"
           }
         ]);
+
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          routePlanningSession
+        );
 
 
         expect(
@@ -1066,10 +1351,30 @@ describe(
 
 
     test(
-      "onUnload invalidates an in-flight route request",
+      "onUnload clears the planning session",
+      () => {
+        page._routePlanningSession =
+          createRoutePlanningSessionMock();
+
+
+        page.onUnload();
+
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
+      }
+    );
+
+
+    test(
+      "onUnload invalidates an in-flight route request and prevents its session from being restored",
       async () => {
         const deferred =
           createDeferred();
+
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
 
 
         page.getRoutes =
@@ -1093,9 +1398,12 @@ describe(
         page.onUnload();
 
 
-        deferred.resolve(
-          mockRoutes
-        );
+        deferred.resolve({
+          routes:
+            mockRoutes,
+
+          routePlanningSession
+        });
 
 
         await loadPromise;
@@ -1106,6 +1414,11 @@ describe(
         ).toHaveBeenCalledTimes(
           1
         );
+
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
       }
     );
 

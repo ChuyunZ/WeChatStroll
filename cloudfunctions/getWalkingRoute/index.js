@@ -438,7 +438,7 @@ exports.main = async (event, context) => {
       success: true,
       route: {
         distanceMeters,
-        durationMinutes: Math.ceil(durationSeconds / 60),
+        durationSeconds,
         polyline,
         environmentStats
       }
