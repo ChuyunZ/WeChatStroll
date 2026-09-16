@@ -1,6 +1,22 @@
 const locationService = require('./location')
 
 const {
+  createCodedError: createRouteGenerationError
+} = require('../utils/errors')
+
+const {
+  isValidGeoPoint: isValidPoint
+} = require('../utils/geo')
+
+const {
+  callCloudFunction
+} = require('./cloud-function-client')
+
+const {
+  createRoutePlanningSession
+} = require('./route-engine')
+
+const {
   getPoiSearchRadius
 } = require('./poi-search-radius')
 
@@ -16,42 +32,13 @@ const CATEGORY_LABELS = {
   shoppingStreet: '商街'
 }
 
-function createRouteGenerationError(
-  code,
-  message,
-  originalError = null
-) {
-  const error = new Error(message)
-  error.code = code
-
-  if (originalError) {
-    error.originalError = originalError
-  }
-
-  return error
-}
-
-function isValidPoint(point) {
-  return (
-    point &&
-    typeof point === 'object' &&
-    !Array.isArray(point) &&
-    typeof point.latitude === 'number' &&
-    typeof point.longitude === 'number' &&
-    Number.isFinite(point.latitude) &&
-    Number.isFinite(point.longitude) &&
-    point.latitude >= -90 &&
-    point.latitude <= 90 &&
-    point.longitude >= -180 &&
-    point.longitude <= 180
-  )
-}
-
 function isValidPoi(poi) {
   return (
     poi &&
     typeof poi === 'object' &&
     !Array.isArray(poi) &&
+    typeof poi.poiId === 'string' &&
+    poi.poiId.trim() !== '' &&
     typeof poi.name === 'string' &&
     poi.name.trim() !== '' &&
     isValidPoint(poi)
@@ -133,53 +120,6 @@ function selectCandidatePoi(
   return selectNearestPoi(allPois)
 }
 
-async function callCloudFunction(
-  name,
-  data,
-  fallbackCode,
-  fallbackMessage
-) {
-  let response
-
-  try {
-    response =
-      await wx.cloud.callFunction({
-        name,
-        data
-      })
-  } catch (error) {
-    throw createRouteGenerationError(
-      fallbackCode,
-      fallbackMessage,
-      error
-    )
-  }
-
-  const result =
-    response && response.result
-
-  if (
-    !result ||
-    result.success !== true
-  ) {
-    throw createRouteGenerationError(
-      result &&
-      result.error &&
-      result.error.code
-        ? result.error.code
-        : fallbackCode,
-
-      result &&
-      result.error &&
-      result.error.message
-        ? result.error.message
-        : fallbackMessage
-    )
-  }
-
-  return result
-}
-
 async function searchNearbyPois(
   location,
   radius
@@ -192,8 +132,11 @@ async function searchNearbyPois(
         latitude: location.latitude,
         radius
       },
-      'POI_SEARCH_FAILED',
-      'Unable to retrieve nearby places.'
+      {
+        fallbackCode: 'POI_SEARCH_FAILED',
+        fallbackMessage:
+          'Unable to retrieve nearby places.'
+      }
     )
 
   if (
@@ -208,92 +151,6 @@ async function searchNearbyPois(
   }
 
   return result.poisByCategory
-}
-
-function isValidEnvironmentStats(
-  environmentStats
-) {
-  return (
-    environmentStats &&
-    typeof environmentStats === 'object' &&
-    !Array.isArray(environmentStats) &&
-
-    typeof environmentStats.normalRoadRatio
-      === 'number' &&
-
-    Number.isFinite(
-      environmentStats.normalRoadRatio
-    ) &&
-
-    environmentStats.normalRoadRatio >= 0 &&
-    environmentStats.normalRoadRatio <= 1 &&
-
-    typeof environmentStats.walkTypeCoverageRatio
-      === 'number' &&
-
-    Number.isFinite(
-      environmentStats.walkTypeCoverageRatio
-    ) &&
-
-    environmentStats.walkTypeCoverageRatio >= 0 &&
-    environmentStats.walkTypeCoverageRatio <= 1
-  )
-}
-
-function isValidWalkingRoute(route) {
-  return (
-    route &&
-    typeof route === 'object' &&
-    !Array.isArray(route) &&
-
-    typeof route.distanceMeters === 'number' &&
-    Number.isFinite(route.distanceMeters) &&
-    route.distanceMeters >= 0 &&
-
-    typeof route.durationMinutes === 'number' &&
-    Number.isFinite(route.durationMinutes) &&
-    route.durationMinutes >= 0 &&
-
-    Array.isArray(route.polyline) &&
-    route.polyline.length >= 2 &&
-    route.polyline.every(isValidPoint) &&
-
-    isValidEnvironmentStats(
-      route.environmentStats
-    )
-  )
-}
-
-async function requestWalkingRoute(
-  start,
-  destination
-) {
-  const result =
-    await callCloudFunction(
-      'getWalkingRoute',
-      {
-        start: {
-          latitude: start.latitude,
-          longitude: start.longitude
-        },
-
-        destination: {
-          latitude: destination.latitude,
-          longitude: destination.longitude
-        }
-      },
-      'WALKING_ROUTE_FAILED',
-      'Unable to generate walking route.'
-    )
-
-  if (!isValidWalkingRoute(result.route)) {
-    throw createRouteGenerationError(
-      'INVALID_WALKING_ROUTE',
-      'Walking route response has an invalid format.'
-    )
-  }
-
-  return result.route
 }
 
 function buildRecommendationReason(
@@ -337,6 +194,41 @@ function buildGeneratedRoute({
     selectedPoi.category ||
     '散步地点'
 
+  const routeType =
+    typeof walkingRoute.routeType === 'string' &&
+    walkingRoute.routeType.trim() !== ''
+      ? walkingRoute.routeType
+      : 'point_to_point'
+
+  const returnsToStart =
+    typeof walkingRoute.returnsToStart === 'boolean'
+      ? walkingRoute.returnsToStart
+      : routeType !== 'point_to_point'
+
+  const endPoint =
+    returnsToStart
+      ? {
+          name: '当前位置',
+          latitude: location.latitude,
+          longitude: location.longitude
+        }
+      : {
+          name: selectedPoi.name,
+          latitude: selectedPoi.latitude,
+          longitude: selectedPoi.longitude
+        }
+
+  const description =
+    returnsToStart
+      ? (
+          `从当前位置步行前往` +
+          `${selectedPoi.name}并返回起点的真实路线。`
+        )
+      : (
+          `从当前位置步行前往` +
+          `${selectedPoi.name}的真实路线。`
+        )
+
   return {
     routeId:
       `generated_` +
@@ -352,11 +244,9 @@ function buildGeneratedRoute({
     distanceMeters:
       walkingRoute.distanceMeters,
 
-    routeType:
-      'point_to_point',
+    routeType,
 
-    returnsToStart:
-      false,
+    returnsToStart,
 
     crowdLevel:
       'unknown',
@@ -365,9 +255,7 @@ function buildGeneratedRoute({
       categoryLabel
     ],
 
-    description:
-      `从当前位置步行前往` +
-      `${selectedPoi.name}的真实路线。`,
+    description,
 
     recommendationReason:
       buildRecommendationReason(
@@ -381,11 +269,7 @@ function buildGeneratedRoute({
       longitude: location.longitude
     },
 
-    endPoint: {
-      name: selectedPoi.name,
-      latitude: selectedPoi.latitude,
-      longitude: selectedPoi.longitude
-    },
+    endPoint,
 
     polyline:
       walkingRoute.polyline,
@@ -412,6 +296,17 @@ function buildGeneratedRoute({
     environmentStats:
       walkingRoute.environmentStats
   }
+}
+
+function getRequestedRouteType(
+  preferences = {}
+) {
+  return (
+    typeof preferences.routeType === 'string' &&
+    preferences.routeType.trim() !== ''
+  )
+    ? preferences.routeType.trim()
+    : 'point_to_point'
 }
 
 async function generateFirstRoute(
@@ -451,11 +346,53 @@ async function generateFirstRoute(
     }
   }
 
+  const routeType =
+    getRequestedRouteType(preferences)
+
+  const routePlanningSession =
+    createRoutePlanningSession({
+      start: location,
+      verifiedWaypointPool: [
+        selectedPoi
+      ],
+      routeType
+    })
+
   const walkingRoute =
-    await requestWalkingRoute(
-      location,
-      selectedPoi
+    await routePlanningSession
+      .buildRouteForOrder({
+        allowedWaypointIds: [
+          selectedPoi.poiId
+        ],
+        orderedWaypointIds: [
+          selectedPoi.poiId
+        ],
+        source: 'recommended'
+      })
+
+  if (!walkingRoute.success) {
+    const failedSegment =
+      walkingRoute.failedSegment
+
+    if (
+      failedSegment &&
+      failedSegment.error ===
+        'INVALID_WALKING_SEGMENT_RESPONSE'
+    ) {
+      throw createRouteGenerationError(
+        'INVALID_WALKING_ROUTE',
+        'Walking route response has an invalid format.'
+      )
+    }
+
+    throw createRouteGenerationError(
+      failedSegment &&
+      failedSegment.causeCode
+        ? failedSegment.causeCode
+        : 'WALKING_ROUTE_FAILED',
+      'Unable to generate walking route.'
     )
+  }
 
   const route =
     buildGeneratedRoute({
@@ -467,7 +404,8 @@ async function generateFirstRoute(
 
   return {
     status: 'success',
-    route
+    route,
+    routePlanningSession
   }
 }
 

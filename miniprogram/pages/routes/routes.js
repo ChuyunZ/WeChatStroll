@@ -2,6 +2,16 @@ const routeGenerationService = require(
   "../../services/route-generation"
 );
 
+function isValidRoutePlanningSession(session) {
+  return (
+    session &&
+    typeof session === "object" &&
+    typeof session.registerVerifiedWaypoints === "function" &&
+    typeof session.prefetchSegments === "function" &&
+    typeof session.buildRouteForOrder === "function"
+  );
+}
+
 Page({
   data: {
     routes: [],
@@ -11,6 +21,7 @@ Page({
   onLoad(options = {}) {
     this._routePreferences = {};
     this._rawRoutes = [];
+    this._routePlanningSession = null;
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -52,6 +63,10 @@ Page({
     // 页面关闭后，让仍在运行的旧请求失效。
     this._routeRequestId =
       (this._routeRequestId || 0) + 1;
+
+    // Planning Session 只属于当前这一次规划流程。
+    // 页面真正销毁后，不再保留其中的 Map / Promise / closure 状态。
+    this._routePlanningSession = null;
   },
 
   async loadRoutes() {
@@ -59,6 +74,10 @@ Page({
       (this._routeRequestId || 0) + 1;
 
     this._routeRequestId = requestId;
+
+    // 新的 first-route 请求代表新的 Planning Session。
+    // 旧 session 不能跨新规划请求继续复用。
+    this._routePlanningSession = null;
 
     // 新请求开始后，
     // 清除上一批原始 Route。
@@ -70,7 +89,7 @@ Page({
     });
 
     try {
-      const routes =
+      const routeLoadResult =
         await this.getRoutes();
 
       // 新请求已经开始，
@@ -82,14 +101,22 @@ Page({
         return;
       }
 
-      if (!Array.isArray(routes)) {
+      if (
+        !routeLoadResult ||
+        typeof routeLoadResult !== "object" ||
+        !Array.isArray(routeLoadResult.routes)
+      ) {
         throw new Error(
           "Invalid route data"
         );
       }
 
+      const routes =
+        routeLoadResult.routes;
+
       if (routes.length === 0) {
         this._rawRoutes = [];
+        this._routePlanningSession = null;
 
         this.setData({
           routes: [],
@@ -99,9 +126,24 @@ Page({
         return;
       }
 
+      if (
+        !isValidRoutePlanningSession(
+          routeLoadResult.routePlanningSession
+        )
+      ) {
+        throw new Error(
+          "Invalid route planning session"
+        );
+      }
+
       // 保存业务层的原始 Route。
       // Route Detail 会拿这个对象。
       this._rawRoutes = routes;
+
+      // Session 是运行时对象，里面包含函数、Map、Promise 和 closure。
+      // 因此只保存在 Page 实例的私有字段里，不放进 data。
+      this._routePlanningSession =
+        routeLoadResult.routePlanningSession;
 
       const preparedRoutes =
         this.prepareRoutes(routes);
@@ -119,6 +161,7 @@ Page({
       }
 
       this._rawRoutes = [];
+      this._routePlanningSession = null;
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -149,22 +192,34 @@ Page({
     }
 
     if (result.status === "empty") {
-      return [];
+      return {
+        routes: [],
+        routePlanningSession: null
+      };
     }
 
     if (
       result.status !== "success" ||
-      !result.route
+      !result.route ||
+      !isValidRoutePlanningSession(
+        result.routePlanningSession
+      )
     ) {
       throw new Error(
         "Invalid route generation result"
       );
     }
 
-    // 当前 ticket 只生成第一条真实路线。
-    return [
-      result.route
-    ];
+    // 当前 ticket 只生成第一条真实路线，
+    // 但同时把同一个 Planning Session 交给页面持有。
+    // 后续 Route 2 / Route 3 / Route N 应继续复用它。
+    return {
+      routes: [
+        result.route
+      ],
+      routePlanningSession:
+        result.routePlanningSession
+    };
   },
 
   prepareRoutes(routes) {
