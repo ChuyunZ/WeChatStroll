@@ -71,3 +71,6 @@ async function generateWaypointPlan(
     plan: planResult.data
   }
 }
+
+exports.generateWaypointPlan =
+  generateWaypointPlan
