@@ -3,6 +3,11 @@ const {
 } = require("./routePlanningPrompt")
 
 const validInput = {
+  startPoint: {
+    latitude: 45.5,
+    longitude: -73.57
+  },
+
   preferences: {
     durationMinutes: 45,
     routeType: "loop",
@@ -46,6 +51,18 @@ describe("route planning prompt", () => {
 
     expect(prompt).toContain(
       "SYSTEM / PLANNING RULES"
+    )
+
+    expect(prompt).toContain(
+      "START POINT"
+    )
+
+    expect(prompt).toContain(
+      '"latitude": 45.5'
+    )
+
+    expect(prompt).toContain(
+      '"longitude": -73.57'
     )
 
     expect(prompt).toContain(
@@ -105,6 +122,37 @@ describe("route planning prompt", () => {
     expect(prompt).toContain(
       '{"waypoints":[{"poiId":"verified-poi-id"}]}'
     )
+  })
+
+  test("rejects missing start point", () => {
+    const input = {
+      ...validInput
+    }
+
+    delete input.startPoint
+
+    const result =
+      buildRoutePlanningPrompt(input)
+
+    expect(result).toEqual({
+      success: false,
+      error: "INVALID_AI_ROUTE_INPUT"
+    })
+  })
+
+  test("rejects invalid start point", () => {
+    const result = buildRoutePlanningPrompt({
+      ...validInput,
+      startPoint: {
+        latitude: 100,
+        longitude: -73.57
+      }
+    })
+
+    expect(result).toEqual({
+      success: false,
+      error: "INVALID_AI_ROUTE_INPUT"
+    })
   })
 
   test("rejects invalid preferences", () => {
