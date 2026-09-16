@@ -566,7 +566,9 @@ Authorization: Bearer <OAuth Token>
 
 ## POST /route/recommend
 
-Returns up to three routes for current user, get preferences from getUserPreferences().
+Returns route recommendations for the current user using preferences from getUserPreferences().
+
+The route-planning engine does not hardcode a maximum recommendation count. Any product-level limit on how many recommendations a user may receive or switch between is enforced outside the route engine.
 
 ### URL Params
 
@@ -935,7 +937,9 @@ None
 
 ## generateRoutes()
 
-Generate up to three routes based on current user preferences.
+Generate route recommendations based on current user preferences.
+
+The route-planning session supports Route 1, Route 2, ... Route N without a hardcoded recommendation count. Any future Free, VIP, or other product-level recommendation limit belongs to the product or entitlement layer rather than the route engine.
 
 ### Input
 
