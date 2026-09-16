@@ -22,6 +22,22 @@ function isNonEmptyString(value) {
   )
 }
 
+function isValidPoint(point) {
+  return (
+    point &&
+    typeof point === "object" &&
+    !Array.isArray(point) &&
+    typeof point.latitude === "number" &&
+    Number.isFinite(point.latitude) &&
+    point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    typeof point.longitude === "number" &&
+    Number.isFinite(point.longitude) &&
+    point.longitude >= -180 &&
+    point.longitude <= 180
+  )
+}
+
 function isValidPreferences(preferences) {
   if (
     !preferences ||
@@ -88,6 +104,7 @@ function buildRoutePlanningPrompt(input) {
     !input ||
     typeof input !== "object" ||
     Array.isArray(input) ||
+    !isValidPoint(input.startPoint) ||
     !isValidPreferences(input.preferences) ||
     !isValidNearbyPois(input.nearbyPois)
   ) {
@@ -95,6 +112,11 @@ function buildRoutePlanningPrompt(input) {
       success: false,
       error: "INVALID_AI_ROUTE_INPUT"
     }
+  }
+
+  const startPoint = {
+    latitude: input.startPoint.latitude,
+    longitude: input.startPoint.longitude
   }
 
   const preferences = {
@@ -134,8 +156,12 @@ function buildRoutePlanningPrompt(input) {
     "Never invent walking distances or walking durations.",
     "AMap and the application's route engine are the source of truth for real-world route facts.",
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
+    "Use the supplied START POINT as the user's actual starting location when ordering waypoint candidates.",
     "Prefer candidate POIs that reasonably match the user's normalized preferences.",
     "Return waypoint IDs in the order they should be visited.",
+    "",
+    "START POINT",
+    JSON.stringify(startPoint, null, 2),
     "",
     "USER PREFERENCES",
     JSON.stringify(preferences, null, 2),
