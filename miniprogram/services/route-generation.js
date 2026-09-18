@@ -545,34 +545,105 @@ async function generateRoutes(
   const routeType = getRequestedRouteType(preferences)
 
   // Create a session using start point, all nearbyPois and route type
-  const session = createRoutePlanningSession({
-    start: location,
-    verifiedWaypointPool: nearbyPois,
-    routeType
-  })
+  const candidatePoiIds =
+    new Set(
+      plan.candidates.flatMap(
+        candidate =>
+          candidate.waypoints.map(
+            waypoint => waypoint.poiId
+          )
+      )
+    )
+
+  const verifiedWaypointPool =
+    nearbyPois.filter(
+      poi =>
+        candidatePoiIds.has(poi.poiId)
+    )
+
+  const session =
+    createRoutePlanningSession({
+      start: location,
+      verifiedWaypointPool,
+      routeType
+    })
+
+  // const routes = []
+
+  // for (const [candidateIndex, candidate] of plan.candidates.entries()) {
+  //   if (routes.length >= 3) {
+  //     break
+  //   }
+      
+  //   // Convert AI result candidates to a form for route-engine.js
+  //   const waypointIds = candidate.waypoints.map(waypoint => waypoint.poiId)
+
+  //   // Order waypoint and generate route for each set of waypoint, using cache/AMap for each segment 
+  //   const walkingRoute = await session.buildRouteForOrder({
+  //     allowedWaypointIds: waypointIds,
+  //     orderedWaypointIds: waypointIds,
+  //     source: 'ai'})
+
+  //   if (!walkingRoute || walkingRoute.success !== true) {
+  //     continue
+  //   }
+
+  //   const route = buildGeneratedRouteFromAiCandidate({location, walkingRoute, candidateIndex})
+    
+  //   routes.push(route)
+  // }
+
+  const candidateCache =
+    createWaypointCandidateCache(
+      plan.candidates
+    )
 
   const routes = []
 
-  for (const [candidateIndex, candidate] of plan.candidates.entries()) {
+  const unusedCandidates =
+    candidateCache.getUnusedCandidates()
+
+  for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
     if (routes.length >= 3) {
       break
     }
-      
-    // Convert AI result candidates to a form for route-engine.js
-    const waypointIds = candidate.waypoints.map(waypoint => waypoint.poiId)
 
-    // Order waypoint and generate route for each set of waypoint, using cache/AMap for each segment 
-    const walkingRoute = await session.buildRouteForOrder({
-      allowedWaypointIds: waypointIds,
-      orderedWaypointIds: waypointIds,
-      source: 'ai'})
+    candidateCache.markBuilding(
+      candidate.candidateId
+    )
 
-    if (!walkingRoute || walkingRoute.success !== true) {
+    const walkingRoute =
+      await session.buildRouteForOrder({
+        allowedWaypointIds:
+          candidate.waypointIds,
+        orderedWaypointIds:
+          candidate.waypointIds,
+        source: 'ai'
+      })
+
+    if (
+      !walkingRoute ||
+      walkingRoute.success !== true
+    ) {
+      candidateCache.markFailed(
+        candidate.candidateId
+      )
+
       continue
     }
 
-    const route = buildGeneratedRouteFromAiCandidate({location, walkingRoute, candidateIndex})
-    
+    const route =
+      buildGeneratedRouteFromAiCandidate({
+        location,
+        walkingRoute,
+        candidateIndex
+      })
+
+    candidateCache.markSuccess(
+      candidate.candidateId,
+      route
+    )
+
     routes.push(route)
   }
 
@@ -586,7 +657,8 @@ async function generateRoutes(
   return {
     status: 'success',
     routes,
-    routePlanningSession: session
+    routePlanningSession: session,
+    waypointCandidateCache: candidateCache
   }
 }
 

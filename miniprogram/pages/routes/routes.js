@@ -16,6 +16,18 @@ function isValidRoutePlanningSession(session) {
   );
 }
 
+function isValidWaypointCandidateCache(cache) {
+  return (
+    cache &&
+    typeof cache === "object" &&
+    typeof cache.getUnusedCandidates === "function" &&
+    typeof cache.markBuilding === "function" &&
+    typeof cache.markSuccess === "function" &&
+    typeof cache.markFailed === "function" &&
+    typeof cache.getSuccessfulRoutes === "function"
+  );
+}
+
 Page({
   data: {
     routes: [],
@@ -26,6 +38,7 @@ Page({
     this._routePreferences = {};
     this._rawRoutes = [];
     this._routePlanningSession = null;
+    this._waypointCandidateCache = null;
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -71,6 +84,8 @@ Page({
     // Planning Session 只属于当前这一次规划流程。
     // 页面真正销毁后，不再保留其中的 Map / Promise / closure 状态。
     this._routePlanningSession = null;
+
+    this._waypointCandidateCache = null;
   },
 
   async loadRoutes() {
@@ -140,6 +155,16 @@ Page({
         );
       }
 
+      if (
+        !isValidWaypointCandidateCache(
+          routeLoadResult.waypointCandidateCache
+        )
+      ) {
+        throw new Error(
+          "Invalid waypoint candidate cache"
+        );
+      }
+
       // 保存业务层的原始 Route。
       // Route Detail 会拿这个对象。
       this._rawRoutes = routes;
@@ -148,6 +173,9 @@ Page({
       // 因此只保存在 Page 实例的私有字段里，不放进 data。
       this._routePlanningSession =
         routeLoadResult.routePlanningSession;
+      
+      this._waypointCandidateCache =
+        routeLoadResult.waypointCandidateCache;
 
       const preparedRoutes =
         this.prepareRoutes(routes);
@@ -166,6 +194,7 @@ Page({
 
       this._rawRoutes = [];
       this._routePlanningSession = null;
+      this._waypointCandidateCache = null;
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -207,6 +236,9 @@ Page({
       !Array.isArray(result.routes) ||
       !isValidRoutePlanningSession(
         result.routePlanningSession
+      ) ||
+      !isValidWaypointCandidateCache(
+        result.waypointCandidateCache
       )
     ) {
       throw new Error(
@@ -217,7 +249,9 @@ Page({
     return {
       routes: result.routes,
       routePlanningSession:
-        result.routePlanningSession
+        result.routePlanningSession,
+      waypointCandidateCache:
+        result.waypointCandidateCache
     }
   },
 
