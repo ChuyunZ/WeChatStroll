@@ -1,7 +1,11 @@
 const {
   MIN_WAYPOINTS,
-  MAX_WAYPOINTS
+  MAX_WAYPOINTS,
+  MIN_ROUTE_CANDIDATES,
+  MAX_ROUTE_CANDIDATES
 } = require("./routePlanContract")
+
+MAX_DISPLAY_ROUTES = 3
 
 const VALID_ROUTE_TYPES = new Set([
   "loop",
@@ -151,35 +155,70 @@ function buildRoutePlanningPrompt(input) {
     "SYSTEM / PLANNING RULES",
     "",
     "You are a walking-route waypoint planner.",
-    `Select between ${MIN_WAYPOINTS} and ${MAX_WAYPOINTS} waypoint POIs.`,
+  
+    `Generate between ${MIN_ROUTE_CANDIDATES} and ${MAX_ROUTE_CANDIDATES} distinct route candidates.`,
+  
+    `Each route candidate must contain between ${MIN_WAYPOINTS} and ${MAX_WAYPOINTS} waypoint POIs.`,
+  
+    "Aim to generate 5 route candidates when the verified POI pool and all planning constraints make this possible.",
+  
+    "Return fewer candidates if generating 5 valid candidates is not possible.",
+  
     "Only select POIs from the VERIFIED POI CANDIDATES supplied below.",
-    "Do not select the same POI more than once.",
-    "For loop routes, do not repeat a waypoint to represent returning to the start; the route engine will handle the return to the starting point.",
+  
     "Never invent new POIs or POI IDs.",
+  
+    "Within a route candidate, do not select the same POI more than once.",
+  
+    "Route candidates must be meaningfully different from one another.",
+  
+    "For every pair of route candidates, neither candidate's POI set may be a subset of or equal to the other candidate's POI set.",
+  
+    "Two candidates containing the same POI set are invalid even if their waypoint visit order is different.",
+  
+    "When possible, vary POI selection and environment categories across route candidates while still respecting the user's preferences.",
+  
+    "For loop routes, do not repeat a waypoint to represent returning to the start; the route engine will handle the return to the starting point.",
+  
     "Never invent or modify coordinates.",
+  
     "Never invent road names.",
+  
     "Never invent walking distances or walking durations.",
+  
     "AMap and the application's route engine are the source of truth for real-world route facts.",
+  
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
+  
     "Use the supplied START POINT as the user's actual starting location when ordering waypoint candidates.",
+  
     "Prefer candidate POIs that reasonably match the user's normalized preferences.",
-    "Return waypoint IDs in the order they should be visited.",
+  
+    "Within each route candidate, return waypoint IDs in the order they should be visited.",
+  
     "",
     "START POINT",
     JSON.stringify(startPoint, null, 2),
+  
     "",
     "USER PREFERENCES",
     JSON.stringify(preferences, null, 2),
+  
     "",
     "VERIFIED POI CANDIDATES",
     JSON.stringify(nearbyPois, null, 2),
+  
     "",
     "EXPECTED OUTPUT FORMAT",
     "",
+  
     "Return JSON only.",
+  
     "Do not return Markdown, code fences, explanations, coordinates, distances, durations, or road instructions.",
+  
     "",
-    '{"waypoints":[{"poiId":"verified-poi-id"}]}'
+  
+    '{"candidates":[{"waypoints":[{"poiId":"verified-poi-id-1"}]},{"waypoints":[{"poiId":"verified-poi-id-2"}]}]}'
   ].join("\n")
 
   return {

@@ -224,7 +224,11 @@ describe('waypoint generation service', () => {
         return {
           result: {
             success: false,
-            error: 'INVALID_AI_ROUTE_PLAN'
+            error: {
+              code: 'INVALID_AI_ROUTE_PLAN',
+              message:
+                'AI returned an invalid route plan.'
+            }
           }
         }
       }

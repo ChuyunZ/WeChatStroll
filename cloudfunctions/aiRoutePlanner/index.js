@@ -22,14 +22,21 @@ exports.main = async (event) => {
     console.error("[AI Client] Configuration unavailable:", error.message)
     return {
       success: false,
-      error: "AI_CONFIG_UNAVAILABLE"
+      error: {
+        code: "AI_CONFIG_UNAVAILABLE",
+        message:
+          "AI service configuration is unavailable."
+      }
     }
   }
 
-  return generateWaypointPlan(
-    event,
-    aiClient
-  )
+  const result =
+    await generateWaypointPlan(
+      event,
+      aiClient
+    )
+
+  return normalizeErrorResponse(result)
 }
 
 async function generateWaypointPlan(
@@ -69,6 +76,44 @@ async function generateWaypointPlan(
   return {
     success: true,
     plan: planResult.data
+  }
+}
+
+
+function normalizeErrorResponse(result) {
+  if (
+    !result ||
+    result.success === true ||
+    typeof result.error !== "string"
+  ) {
+    return result
+  }
+
+  const errorMessages = {
+    INVALID_AI_ROUTE_INPUT:
+      "Route planning input is invalid.",
+
+    INVALID_AI_REQUEST:
+      "AI request is invalid.",
+
+    EMPTY_AI_RESPONSE:
+      "AI returned an empty response.",
+
+    AI_REQUEST_FAILED:
+      "Unable to request an AI route plan.",
+
+    INVALID_AI_ROUTE_PLAN:
+      "AI returned an invalid route plan."
+  }
+
+  return {
+    success: false,
+    error: {
+      code: result.error,
+      message:
+        errorMessages[result.error] ||
+        "Unable to generate waypoint plan."
+    }
   }
 }
 

@@ -182,7 +182,7 @@ Page({
   async getRoutes() {
     const result =
       await routeGenerationService
-        .generateFirstRoute(
+        .generateRoutes(
           this._routePreferences || {}
         );
 
@@ -204,7 +204,7 @@ Page({
 
     if (
       result.status !== "success" ||
-      !result.route ||
+      !Array.isArray(result.routes) ||
       !isValidRoutePlanningSession(
         result.routePlanningSession
       )
@@ -214,16 +214,11 @@ Page({
       );
     }
 
-    // 当前 ticket 只生成第一条真实路线，
-    // 但同时把同一个 Planning Session 交给页面持有。
-    // 后续 Route 2 / Route 3 / Route N 应继续复用它。
     return {
-      routes: [
-        result.route
-      ],
+      routes: result.routes,
       routePlanningSession:
         result.routePlanningSession
-    };
+    }
   },
 
   prepareRoutes(routes) {

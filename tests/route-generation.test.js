@@ -842,4 +842,166 @@ describe('route-generation service', () => {
       ).not.toHaveBeenCalled()
     }
   )
+
+  test(
+    'generateRoutes builds up to three real routes from AI candidates',
+    async () => {
+      wx.cloud.callFunction.mockImplementation(
+        async ({ name, data }) => {
+          if (name === 'getNearbyPois') {
+            return {
+              result: {
+                success: true,
+                poisByCategory:
+                  createPoisByCategory()
+              }
+            }
+          }
+  
+          if (name === 'aiRoutePlanner') {
+            return {
+              result: {
+                success: true,
+                plan: {
+                  candidates: [
+                    {
+                      waypoints: [
+                        { poiId: 'park-1' }
+                      ]
+                    },
+                    {
+                      waypoints: [
+                        { poiId: 'water-1' }
+                      ]
+                    },
+                    {
+                      waypoints: [
+                        { poiId: 'shopping-1' }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+  
+          if (name === 'getWalkingRoute') {
+            return {
+              result: {
+                success: true,
+                route:
+                  createWalkingRouteBetween(
+                    data.start,
+                    data.destination
+                  )
+              }
+            }
+          }
+  
+          throw new Error(
+            `Unexpected Cloud Function: ${name}`
+          )
+        }
+      )
+  
+      const result =
+        await routeGenerationService
+          .generateRoutes({
+            routeType: 'point_to_point'
+          })
+  
+      expect(result.status).toBe('success')
+  
+      expect(result.routes).toHaveLength(3)
+  
+      expect(
+        result.routes.map(
+          route =>
+            route.pointsOfInterest[0].name
+        )
+      ).toEqual([
+        '人民公园',
+        '测试水边',
+        '测试商街'
+      ])
+  
+      expect(
+        typeof result
+          .routePlanningSession
+          .buildRouteForOrder
+      ).toBe('function')
+    }
+  )
+
+  test(
+    'generateRoutes stops after three successful routes',
+    async () => {
+      const extraPoi = {
+        ...PARK_POI,
+        poiId: 'park-2',
+        name: '第二公园',
+        latitude: 23.128,
+        longitude: 113.266
+      }
+  
+      wx.cloud.callFunction.mockImplementation(
+        async ({ name, data }) => {
+          if (name === 'getNearbyPois') {
+            return {
+              result: {
+                success: true,
+                poisByCategory: {
+                  ...createPoisByCategory(),
+                  park: [
+                    PARK_POI,
+                    extraPoi
+                  ]
+                }
+              }
+            }
+          }
+  
+          if (name === 'aiRoutePlanner') {
+            return {
+              result: {
+                success: true,
+                plan: {
+                  candidates: [
+                    { waypoints: [{ poiId: 'park-1' }] },
+                    { waypoints: [{ poiId: 'water-1' }] },
+                    { waypoints: [{ poiId: 'shopping-1' }] },
+                    { waypoints: [{ poiId: 'park-2' }] }
+                  ]
+                }
+              }
+            }
+          }
+  
+          if (name === 'getWalkingRoute') {
+            return {
+              result: {
+                success: true,
+                route:
+                  createWalkingRouteBetween(
+                    data.start,
+                    data.destination
+                  )
+              }
+            }
+          }
+  
+          throw new Error(
+            `Unexpected Cloud Function: ${name}`
+          )
+        }
+      )
+  
+      const result =
+        await routeGenerationService
+          .generateRoutes()
+  
+      expect(result.status).toBe('success')
+      expect(result.routes).toHaveLength(3)
+    }
+  )
 })

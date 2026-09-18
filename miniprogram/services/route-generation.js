@@ -157,92 +157,6 @@ async function searchNearbyPois(
   return result.poisByCategory
 }
 
-function isValidEnvironmentStats(
-  environmentStats
-) {
-  return (
-    environmentStats &&
-    typeof environmentStats === 'object' &&
-    !Array.isArray(environmentStats) &&
-
-    typeof environmentStats.normalRoadRatio
-      === 'number' &&
-
-    Number.isFinite(
-      environmentStats.normalRoadRatio
-    ) &&
-
-    environmentStats.normalRoadRatio >= 0 &&
-    environmentStats.normalRoadRatio <= 1 &&
-
-    typeof environmentStats.walkTypeCoverageRatio
-      === 'number' &&
-
-    Number.isFinite(
-      environmentStats.walkTypeCoverageRatio
-    ) &&
-
-    environmentStats.walkTypeCoverageRatio >= 0 &&
-    environmentStats.walkTypeCoverageRatio <= 1
-  )
-}
-
-function isValidWalkingRoute(route) {
-  return (
-    route &&
-    typeof route === 'object' &&
-    !Array.isArray(route) &&
-
-    typeof route.distanceMeters === 'number' &&
-    Number.isFinite(route.distanceMeters) &&
-    route.distanceMeters >= 0 &&
-
-    typeof route.durationMinutes === 'number' &&
-    Number.isFinite(route.durationMinutes) &&
-    route.durationMinutes >= 0 &&
-
-    Array.isArray(route.polyline) &&
-    route.polyline.length >= 2 &&
-    route.polyline.every(isValidPoint) &&
-
-    isValidEnvironmentStats(
-      route.environmentStats
-    )
-  )
-}
-
-async function requestWalkingRoute(
-  start,
-  destination
-) {
-  const result =
-    await callCloudFunction(
-      'getWalkingRoute',
-      {
-        start: {
-          latitude: start.latitude,
-          longitude: start.longitude
-        },
-
-        destination: {
-          latitude: destination.latitude,
-          longitude: destination.longitude
-        }
-      },
-      'WALKING_ROUTE_FAILED',
-      'Unable to generate walking route.'
-    )
-
-  if (!isValidWalkingRoute(result.route)) {
-    throw createRouteGenerationError(
-      'INVALID_WALKING_ROUTE',
-      'Walking route response has an invalid format.'
-    )
-  }
-
-  return result.route
-}
-
 async function requestWaypointPlan(
   location,
   preferences,
@@ -259,8 +173,12 @@ async function requestWaypointPlan(
         preferences,
         nearbyPois
       },
-      'AI_ROUTE_PLANNING_FAILED',
-      'Unable to generate waypoint plan.'
+      {
+        fallbackCode:
+          'AI_ROUTE_PLANNING_FAILED',
+        fallbackMessage:
+          'Unable to generate waypoint plan.'
+      }
     )
 
   return result.plan
@@ -411,6 +329,17 @@ function buildGeneratedRoute({
   }
 }
 
+function getRequestedRouteType(
+  preferences = {}
+) {
+  return (
+    typeof preferences.routeType === 'string' &&
+    preferences.routeType.trim() !== ''
+  )
+    ? preferences.routeType.trim()
+    : ROUTE_TYPES.POINT_TO_POINT
+}
+
 function buildPoiCandidates(poisByCategory) {
   const flattenPois = []
 
@@ -447,8 +376,13 @@ async function generateWaypointPlan(
     )
   }
 
+  const radius =
+    getPoiSearchRadius(
+      preferences.durationMinutes
+    )
+
   const poisByCategory =
-    await searchNearbyPois(location)
+    await searchNearbyPois(location, radius)
 
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
@@ -469,8 +403,190 @@ async function generateWaypointPlan(
 
   return {
     status: 'success',
-    plan,
-    nearbyPois
+    plan, // candidates
+    nearbyPois,
+    location
+  }
+}
+
+// Convert results from route-engine to UI format 
+function buildGeneratedRouteFromAiCandidate({
+  location,
+  walkingRoute,
+  candidateIndex
+}) {
+  const waypoints =
+    Array.isArray(walkingRoute.waypoints)
+      ? walkingRoute.waypoints
+      : []
+
+  const waypointNames =
+    waypoints
+      .map(waypoint => waypoint.name)
+      .filter(
+        name =>
+          typeof name === 'string' &&
+          name.trim() !== ''
+      )
+
+  const waypointText =
+    waypointNames.join('、')
+
+  const lastWaypoint =
+    waypoints[waypoints.length - 1]
+
+  const returnsToStart =
+    walkingRoute.returnsToStart === true
+
+  const endPoint =
+    returnsToStart
+      ? {
+          name: '当前位置',
+          latitude: location.latitude,
+          longitude: location.longitude
+        }
+      : {
+          name: lastWaypoint.name,
+          latitude: lastWaypoint.latitude,
+          longitude: lastWaypoint.longitude
+        }
+
+  return {
+    routeId:
+      `generated_ai_${candidateIndex + 1}_${Date.now()}`,
+
+    title:
+      `途经${waypointText}的散步路线`,
+
+    durationMinutes:
+      walkingRoute.durationMinutes,
+
+    distanceMeters:
+      walkingRoute.distanceMeters,
+
+    routeType:
+      walkingRoute.routeType,
+
+    returnsToStart,
+
+    crowdLevel:
+      'unknown',
+
+    tags: [],
+
+    description:
+      returnsToStart
+        ? `从当前位置出发，途经${waypointText}并返回起点的真实路线。`
+        : `从当前位置出发，途经${waypointText}的真实路线。`,
+
+    recommendationReason:
+      '根据你的散步偏好推荐这条路线。',
+
+    startPoint: {
+      name: '当前位置',
+      latitude: location.latitude,
+      longitude: location.longitude
+    },
+
+    endPoint,
+
+    polyline:
+      walkingRoute.polyline,
+
+    pointsOfInterest:
+      waypoints.map(
+        waypoint => ({
+          name: waypoint.name,
+          type:
+            waypoint.category ||
+            'unknown',
+          latitude:
+            waypoint.latitude,
+          longitude:
+            waypoint.longitude
+        })
+      ),
+
+    updatedAt:
+      new Date().toISOString(),
+
+    environmentStats:
+      walkingRoute.environmentStats
+  }
+}
+
+// AI waypoint candidates -> walking routes
+async function generateRoutes(
+  preferences = {}
+) {
+  const waypointResult = await generateWaypointPlan(preferences)
+
+  if (waypointResult.status === 'empty') {
+    return waypointResult
+  }
+
+  const {
+    location,
+    nearbyPois,
+    plan
+  } = waypointResult
+
+  if (
+    !plan ||
+    !Array.isArray(plan.candidates) ||
+    plan.candidates.length === 0
+  ) {
+    throw createRouteGenerationError(
+      'INVALID_AI_ROUTE_PLAN',
+      'AI route plan has no valid candidates.'
+    )
+  }
+
+  const routeType = getRequestedRouteType(preferences)
+
+  // Create a session using start point, all nearbyPois and route type
+  const session = createRoutePlanningSession({
+    start: location,
+    verifiedWaypointPool: nearbyPois,
+    routeType
+  })
+
+  const routes = []
+
+  for (const [candidateIndex, candidate] of plan.candidates.entries()) {
+    if (routes.length >= 3) {
+      break
+    }
+      
+    // Convert AI result candidates to a form for route-engine.js
+    const waypointIds = candidate.waypoints.map(waypoint => waypoint.poiId)
+
+    // Order waypoint and generate route for each set of waypoint, using cache/AMap for each segment 
+    const walkingRoute = await session.buildRouteForOrder({
+      allowedWaypointIds: waypointIds,
+      orderedWaypointIds: waypointIds,
+      source: 'ai'})
+
+    if (!walkingRoute || walkingRoute.success !== true) {
+      continue
+    }
+
+    const route = buildGeneratedRouteFromAiCandidate({location, walkingRoute, candidateIndex})
+    
+    routes.push(route)
+  }
+
+  if (routes.length === 0) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_ROUTE'
+    }
+  }
+  
+  return {
+    status: 'success',
+    routes,
+    routePlanningSession: session
   }
 }
 
@@ -580,5 +696,6 @@ module.exports = {
   selectCandidatePoi,
   selectNearestPoi,
   buildGeneratedRoute,
-  buildPoiCandidates
+  buildPoiCandidates,
+  generateRoutes
 }

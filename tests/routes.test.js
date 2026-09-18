@@ -137,7 +137,7 @@ function loadRoutesPage({
   pageDefinition = null;
 
   routeGenerationServiceMock = {
-    generateFirstRoute:
+    generateRoutes:
       jest.fn()
   };
 
@@ -360,7 +360,7 @@ describe(
 
 
         routeGenerationServiceMock
-          .generateFirstRoute
+          .generateRoutes
           .mockResolvedValue({
             status:
               "success",
@@ -378,7 +378,7 @@ describe(
 
         expect(
           routeGenerationServiceMock
-            .generateFirstRoute
+            .generateRoutes
         ).toHaveBeenCalledWith(
           preferences
         );
@@ -401,7 +401,7 @@ describe(
       "getRoutes converts an explicit empty generation result to an empty route load result",
       async () => {
         routeGenerationServiceMock
-          .generateFirstRoute
+          .generateRoutes
           .mockResolvedValue({
             status:
               "empty",
@@ -429,7 +429,7 @@ describe(
       "getRoutes rejects a success result without a valid planning session",
       async () => {
         routeGenerationServiceMock
-          .generateFirstRoute
+          .generateRoutes
           .mockResolvedValue({
             status:
               "success",
@@ -454,7 +454,7 @@ describe(
       "getRoutes rejects an invalid route generation result",
       async () => {
         routeGenerationServiceMock
-          .generateFirstRoute
+          .generateRoutes
           .mockResolvedValue({
             status:
               "unexpected"
@@ -531,7 +531,7 @@ describe(
 
         deferred.resolve({
           routes:
-            mockRoutes,
+            [mockRoutes],
 
           routePlanningSession:
             newSession
@@ -1400,7 +1400,7 @@ describe(
 
         deferred.resolve({
           routes:
-            mockRoutes,
+            [mockRoutes],
 
           routePlanningSession
         });

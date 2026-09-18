@@ -51,9 +51,13 @@ describe("AI waypoint planner integration", () => {
         success: true,
         data: {
           text: JSON.stringify({
-            waypoints: [
-              { poiId: "park-1" },
-              { poiId: "water-1" }
+            candidates: [
+              {
+                waypoints: [
+                  { poiId: 'park-1' },
+                  { poiId: 'water-1' }
+                ]
+              }
             ]
           })
         }
@@ -69,9 +73,13 @@ describe("AI waypoint planner integration", () => {
     expect(result).toEqual({
       success: true,
       plan: {
-        waypoints: [
-          { poiId: "park-1" },
-          { poiId: "water-1" }
+        candidates: [
+          {
+            waypoints: [
+              { poiId: 'park-1' },
+              { poiId: 'water-1' }
+            ]
+          }
         ]
       }
     })
@@ -108,8 +116,12 @@ describe("AI waypoint planner integration", () => {
         success: true,
         data: {
           text: JSON.stringify({
-            waypoints: [
-              { poiId: "invented-poi" }
+            candidates: [
+              {
+                waypoints: [
+                  { poiId: 'invented-poi' }
+                ]
+              }
             ]
           })
         }

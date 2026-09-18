@@ -109,20 +109,23 @@ describe("route planning prompt", () => {
     )
   })
 
-  test("requires JSON-only waypoint output", () => {
-    const result =
-      buildRoutePlanningPrompt(validInput)
-
-    const prompt = result.data.prompt
-
-    expect(prompt).toContain(
-      "Return JSON only."
-    )
-
-    expect(prompt).toContain(
-      '{"waypoints":[{"poiId":"verified-poi-id"}]}'
-    )
-  })
+  test(
+    "requires JSON-only multi-candidate waypoint output",
+    () => {
+      const result =
+        buildRoutePlanningPrompt(validInput)
+  
+      const prompt = result.data.prompt
+  
+      expect(prompt).toContain(
+        "Return JSON only."
+      )
+  
+      expect(prompt).toContain(
+        '{"candidates":[{"waypoints":[{"poiId":"verified-poi-id-1"}]},{"waypoints":[{"poiId":"verified-poi-id-2"}]}]}'
+      )
+    }
+  )
 
   test("rejects missing start point", () => {
     const input = {
@@ -209,7 +212,33 @@ describe("route planning prompt", () => {
 
     const prompt = result.data.prompt
     expect(prompt).toContain(
-      "Do not select the same POI more than once."
+      "Within a route candidate, do not select the same POI more than once."
     )
   })
+
+  test(
+    "requires diverse route candidates without subset relationships",
+    () => {
+      const result =
+        buildRoutePlanningPrompt(validInput)
+  
+      const prompt = result.data.prompt
+  
+      expect(prompt).toContain(
+        "Generate between 1 and 5 distinct route candidates."
+      )
+  
+      expect(prompt).toContain(
+        "Aim to generate 5 route candidates"
+      )
+  
+      expect(prompt).toContain(
+        "neither candidate's POI set may be a subset of or equal to the other candidate's POI set."
+      )
+  
+      expect(prompt).toContain(
+        "same POI set are invalid even if their waypoint visit order is different."
+      )
+    }
+  )
 })
