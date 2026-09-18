@@ -1,3 +1,7 @@
+const {
+  createCodedError
+} = require('../utils/errors')
+
 const LOCATION_SCOPE = 'scope.userLocation'
 const DEFAULT_TIMEOUT = 10000
 
@@ -5,18 +9,6 @@ const ERROR_CODES = {
   PERMISSION_DENIED: 'PERMISSION_DENIED',
   LOCATION_TIMEOUT: 'LOCATION_TIMEOUT',
   LOCATION_FAILED: 'LOCATION_FAILED'
-}
-
-function createLocationError(code, message, originalError = null) {
-  const error = new Error(message)
-
-  error.code = code
-
-  if (originalError) {
-    error.originalError = originalError
-  }
-
-  return error
 }
 
 function getLocationPermission() {
@@ -28,7 +20,7 @@ function getLocationPermission() {
 
       fail: (err) => {
         reject(
-          createLocationError(
+          createCodedError(
             ERROR_CODES.LOCATION_FAILED,
             'Unable to check location permission.',
             err
@@ -55,7 +47,7 @@ function requestLocationPermission() {
 
             if (permission === false) {
               reject(
-                createLocationError(
+                createCodedError(
                   ERROR_CODES.PERMISSION_DENIED,
                   'Location permission was denied.',
                   err
@@ -66,7 +58,7 @@ function requestLocationPermission() {
             }
 
             reject(
-              createLocationError(
+              createCodedError(
                 ERROR_CODES.LOCATION_FAILED,
                 'Unable to request location permission.',
                 err
@@ -76,7 +68,7 @@ function requestLocationPermission() {
 
           fail: () => {
             reject(
-              createLocationError(
+              createCodedError(
                 ERROR_CODES.LOCATION_FAILED,
                 'Unable to request location permission.',
                 err
@@ -97,7 +89,7 @@ async function ensureLocationPermission() {
   }
 
   if (permission === false) {
-    throw createLocationError(
+    throw createCodedError(
       ERROR_CODES.PERMISSION_DENIED,
       'Location permission was denied.'
     )
@@ -118,7 +110,7 @@ function requestCurrentLocation(timeout = DEFAULT_TIMEOUT) {
       finished = true
 
       reject(
-        createLocationError(
+        createCodedError(
           ERROR_CODES.LOCATION_TIMEOUT,
           'Location request timed out.'
         )
@@ -151,7 +143,7 @@ function requestCurrentLocation(timeout = DEFAULT_TIMEOUT) {
         clearTimeout(timer)
 
         reject(
-          createLocationError(
+          createCodedError(
             ERROR_CODES.LOCATION_FAILED,
             'Unable to get current location.',
             err
@@ -184,7 +176,7 @@ function openLocationSettings() {
 
       fail: (err) => {
         reject(
-          createLocationError(
+          createCodedError(
             ERROR_CODES.LOCATION_FAILED,
             'Unable to open Settings.',
             err

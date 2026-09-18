@@ -1,6 +1,7 @@
 # WeChatStroll MVP Scope
 
 This document defines the agreed MVP scope, feature priorities, non-goals, and technical boundaries for WeChatStroll.
+
 ## Goal
 
 Define the scope of the first usable version of WeChatStroll.
@@ -24,7 +25,7 @@ The core MVP should support the following flow:
 5. AI selects and combines suitable POIs into waypoint plans
 6. Map service calculates real walkable routes between the selected waypoints
 7. System validates route duration and distance
-8. System returns up to three suitable route recommendations
+8. System returns suitable route recommendations
 9. User selects one route
 10. User views the route details and route on the map
 11. User starts the walk
@@ -77,13 +78,17 @@ The AI must only select from POIs returned by the map service.
 
 ### Route Recommendations
 
-- Return up to three suitable route recommendations
+- Support multiple suitable route recommendations within one planning session
 - Show estimated duration
 - Show distance
 - Show environment type
 - Show main POIs
 - Allow the user to select a route
 - Display selected route on the map
+
+The route-planning session and route engine must support Route 1, Route 2, ... Route N without hardcoding a maximum recommendation count.
+
+Any product-level limit on how many recommendations a user may view or switch between, including future Free or VIP limits, belongs to the product or entitlement layer rather than the route engine.
 
 ### Walking Session
 

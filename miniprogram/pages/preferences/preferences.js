@@ -1,8 +1,14 @@
+const {
+  ROUTE_TYPES
+} = require('../../constants/route-types')
+
 const CROWD_PREFERENCE_MAP = {
   "安静": "low",
   "适中": "medium",
   "热闹": "high"
 }
+
+const MIN_WALKING_DURATION_MINUTES = 15
 
 Page({
   data: {
@@ -38,21 +44,21 @@ Page({
         options: [
           {
             label: "环线",
-            value: "loop",
+            value: ROUTE_TYPES.LOOP,
             description: "从起点出发，绕一圈后回到起点",
             image: "/images/route-loop.png",
             selected: false
           },
           {
             label: "往返",
-            value: "out_and_back",
+            value: ROUTE_TYPES.OUT_AND_BACK,
             description: "到达一个地点后，再沿大致相同路线返回",
             image: "/images/route-out-and-back.png",
             selected: false
           },
           {
             label: "单程",
-            value: "point_to_point",
+            value: ROUTE_TYPES.POINT_TO_POINT,
             description: "从一个地点出发，在另一个地点结束",
             image: "/images/route-point-to-point.png",
             selected: false
@@ -113,16 +119,38 @@ Page({
   // =========================
 
   onTimeChange(e) {
-    const hourIndex = e.detail.value[0]
-    const minuteIndex = e.detail.value[1]
+    let hourIndex = e.detail.value[0]
+    let minuteIndex = e.detail.value[1]
 
-    const hours =
+    let hours =
       this.data.hourOptions[hourIndex]
 
-    const minutes =
+    let minutes =
       Number(
         this.data.minuteOptions[minuteIndex]
       )
+
+    const durationMinutes =
+      hours * 60 + minutes
+
+    if (
+      durationMinutes <
+      MIN_WALKING_DURATION_MINUTES
+    ) {
+      hours = 0
+      minutes =
+        MIN_WALKING_DURATION_MINUTES
+
+      hourIndex =
+        this.data.hourOptions.indexOf(0)
+
+      minuteIndex =
+        this.data.minuteOptions.indexOf(
+          String(
+            MIN_WALKING_DURATION_MINUTES
+          ).padStart(2, "0")
+        )
+    }
 
     this.setData({
       timePickerValue: [
@@ -257,7 +285,6 @@ Page({
         clickedOption.rank
 
       clickedOption.rank = null
-
 
       // 原本排在它后面的
       // 全部向前补一位
@@ -394,13 +421,30 @@ Page({
     const durationAnswer =
       questions[0].answer
 
+    const durationMinutes =
+      durationAnswer.hours * 60 +
+      durationAnswer.minutes
+
+
+    if (
+      durationMinutes <
+      MIN_WALKING_DURATION_MINUTES
+    ) {
+      wx.showModal({
+        title: "提示",
+        content:
+          `散步时长至少需要 ${MIN_WALKING_DURATION_MINUTES} 分钟`,
+        showCancel: false
+      })
+
+      return
+    }
+
 
     // 将 UI 中的问卷答案整理成
     // 后续 route flow 使用的 preferences
     const preferences = {
-      durationMinutes:
-        durationAnswer.hours * 60 +
-        durationAnswer.minutes,
+      durationMinutes: durationMinutes,
 
       routeType:
         questions[1].answer,

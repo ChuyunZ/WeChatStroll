@@ -1,10 +1,14 @@
+const {
+  ROUTE_TYPES
+} = require("../constants/route-types");
+
 const mockRoutes = [
   {
     routeId: "route_001",
     title: "河边放松路线",
     durationMinutes: 32,
     distanceMeters: 2600,
-    routeType: "loop",
+    routeType: ROUTE_TYPES.LOOP,
     crowdLevel: "medium",
     tags: ["河边", "树荫"],
     description: "大部分路段沿河，途中有多个休息区域。",
@@ -35,7 +39,7 @@ const mockRoutes = [
     title: "城市探索路线",
     durationMinutes: 42,
     distanceMeters: 3400,
-    routeType: "loop",
+    routeType: ROUTE_TYPES.LOOP,
     crowdLevel: "medium",
     tags: ["街区", "咖啡店", "城市建筑"],
     description: "路线会经过商业街区和数个城市地标。",
@@ -66,7 +70,7 @@ const mockRoutes = [
     title: "公园轻松路线",
     durationMinutes: 24,
     distanceMeters: 1900,
-    routeType: "loop",
+    routeType: ROUTE_TYPES.LOOP,
     crowdLevel: "low",
     tags: ["公园", "安静", "休息点"],
     description: "路线较短，并经过多个可以休息的位置。",

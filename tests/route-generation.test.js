@@ -47,7 +47,7 @@ const SHOPPING_POI = {
 
 const WALKING_ROUTE = {
   distanceMeters: 279,
-  durationMinutes: 4,
+  durationSeconds: 240,
 
   polyline: [
     {
@@ -78,6 +78,30 @@ function createPoisByCategory() {
     park: [PARK_POI],
     water: [WATER_POI],
     shoppingStreet: [SHOPPING_POI]
+  }
+}
+
+function createWalkingRouteBetween(
+  start,
+  destination,
+  {
+    distanceMeters = 100,
+    durationSeconds = 60
+  } = {}
+) {
+  return {
+    distanceMeters,
+    durationSeconds,
+    polyline: [
+      {
+        latitude: start.latitude,
+        longitude: start.longitude
+      },
+      {
+        latitude: destination.latitude,
+        longitude: destination.longitude
+      }
+    ]
   }
 }
 
@@ -220,7 +244,10 @@ describe('route-generation service', () => {
         routeGenerationService.buildGeneratedRoute({
           location: TEST_LOCATION,
           selectedPoi: PARK_POI,
-          walkingRoute: WALKING_ROUTE,
+          walkingRoute: {
+            ...WALKING_ROUTE,
+            durationMinutes: 4
+          },
           preferences: {
             environmentPreferences: [
               '公园',
@@ -255,6 +282,10 @@ describe('route-generation service', () => {
       expect(route.tags).toEqual([
         '公园'
       ])
+
+      expect(route.description).toBe(
+        '从当前位置步行前往人民公园的真实路线。'
+      )
 
       expect(route.startPoint).toEqual({
         name: '当前位置',
@@ -294,7 +325,143 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateFirstRoute runs the real pipeline and returns success',
+    'buildGeneratedRoute represents returning route types with the start location as the endpoint',
+    () => {
+      const route =
+        routeGenerationService.buildGeneratedRoute({
+          location: TEST_LOCATION,
+          selectedPoi: PARK_POI,
+          walkingRoute: {
+            ...WALKING_ROUTE,
+            durationMinutes: 8,
+            routeType: 'out_and_back',
+            returnsToStart: true,
+            polyline: [
+              TEST_LOCATION,
+              {
+                latitude: PARK_POI.latitude,
+                longitude: PARK_POI.longitude
+              },
+              TEST_LOCATION
+            ]
+          }
+        })
+
+      expect(route.routeType).toBe(
+        'out_and_back'
+      )
+
+      expect(route.returnsToStart).toBe(true)
+
+      expect(route.endPoint).toEqual({
+        name: '当前位置',
+        latitude: TEST_LOCATION.latitude,
+        longitude: TEST_LOCATION.longitude
+      })
+
+      expect(route.description).toBe(
+        '从当前位置步行前往人民公园并返回起点的真实路线。'
+      )
+    }
+  )
+
+  test(
+    'generateFirstRoute runs the real pipeline and passes duration-based radius',
+    async () => {
+      wx.cloud.callFunction.mockImplementation(
+        async ({ name }) => {
+          if (name === 'getNearbyPois') {
+            return {
+              result: {
+                success: true,
+                poisByCategory:
+                  createPoisByCategory()
+              }
+            }
+          }
+
+          if (name === 'getWalkingRoute') {
+            return {
+              result: {
+                success: true,
+                route: WALKING_ROUTE
+              }
+            }
+          }
+
+          throw new Error(
+            `Unexpected Cloud Function: ${name}`
+          )
+        }
+      )
+
+      const result =
+        await routeGenerationService
+          .generateFirstRoute({
+            durationMinutes: 30,
+            environmentPreferences: [
+              '公园',
+              '水边',
+              '商街',
+              '街道'
+            ]
+          })
+
+      expect(result.status).toBe('success')
+
+      expect(result.route.endPoint.name).toBe(
+        '人民公园'
+      )
+
+      expect(result.route.routeType).toBe(
+        'point_to_point'
+      )
+
+      expect(result.route.returnsToStart).toBe(
+        false
+      )
+
+      expect(
+        locationService.getCurrentLocation
+      ).toHaveBeenCalledTimes(1)
+
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenNthCalledWith(
+        1,
+        {
+          name: 'getNearbyPois',
+          data: {
+            longitude: 113.264939,
+            latitude: 23.129158,
+            radius: 1125
+          }
+        }
+      )
+
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenNthCalledWith(
+        2,
+        {
+          name: 'getWalkingRoute',
+          data: {
+            start: {
+              latitude: 23.129158,
+              longitude: 113.264939
+            },
+            destination: {
+              latitude: 23.127159,
+              longitude: 113.264345
+            }
+          }
+        }
+      )
+    }
+  )
+
+  test(
+    'generateFirstRoute returns the live planning session with the first route cache still available',
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name }) => {
@@ -327,6 +494,205 @@ describe('route-generation service', () => {
         await routeGenerationService
           .generateFirstRoute({
             environmentPreferences: [
+              '公园'
+            ]
+          })
+
+      expect(result.status).toBe('success')
+
+      expect(
+        typeof result
+          .routePlanningSession
+          .registerVerifiedWaypoints
+      ).toBe('function')
+
+      expect(
+        typeof result
+          .routePlanningSession
+          .prefetchSegments
+      ).toBe('function')
+
+      expect(
+        typeof result
+          .routePlanningSession
+          .buildRouteForOrder
+      ).toBe('function')
+
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenCalledTimes(2)
+
+      const rebuiltRoute =
+        await result
+          .routePlanningSession
+          .buildRouteForOrder({
+            allowedWaypointIds: [
+              PARK_POI.poiId
+            ],
+            orderedWaypointIds: [
+              PARK_POI.poiId
+            ],
+            source: 'revisited'
+          })
+
+      expect(rebuiltRoute.success).toBe(true)
+
+      expect(
+        rebuiltRoute.routeOrder.source
+      ).toBe('revisited')
+
+      /*
+       * getNearbyPois + the original START→park
+       * request are the only cloud calls.
+       * Rebuilding the same route uses the
+       * planning session's existing L1 cache.
+       */
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenCalledTimes(2)
+    }
+  )
+
+  test(
+    'generateFirstRoute passes the requested loop route type through the engine',
+    async () => {
+      wx.cloud.callFunction.mockImplementation(
+        async ({ name, data }) => {
+          if (name === 'getNearbyPois') {
+            return {
+              result: {
+                success: true,
+                poisByCategory:
+                  createPoisByCategory()
+              }
+            }
+          }
+
+          if (name === 'getWalkingRoute') {
+            return {
+              result: {
+                success: true,
+                route:
+                  createWalkingRouteBetween(
+                    data.start,
+                    data.destination
+                  )
+              }
+            }
+          }
+
+          throw new Error(
+            `Unexpected Cloud Function: ${name}`
+          )
+        }
+      )
+
+      const result =
+        await routeGenerationService
+          .generateFirstRoute({
+            routeType: 'loop',
+            environmentPreferences: [
+              '公园'
+            ]
+          })
+
+      expect(result.status).toBe('success')
+
+      expect(result.route.routeType).toBe(
+        'loop'
+      )
+
+      expect(result.route.returnsToStart).toBe(
+        true
+      )
+
+      expect(result.route.endPoint).toEqual({
+        name: '当前位置',
+        latitude: TEST_LOCATION.latitude,
+        longitude: TEST_LOCATION.longitude
+      })
+
+      expect(result.route.description).toBe(
+        '从当前位置步行前往人民公园并返回起点的真实路线。'
+      )
+
+      /*
+       * One POI loop:
+       * START→park→START
+       *
+       * Plus the initial getNearbyPois call.
+       */
+      expect(
+        wx.cloud.callFunction
+      ).toHaveBeenCalledTimes(3)
+
+      const walkingCalls =
+        wx.cloud.callFunction.mock.calls
+          .map(([request]) => request)
+          .filter(
+            request =>
+              request.name ===
+              'getWalkingRoute'
+          )
+
+      expect(walkingCalls).toHaveLength(2)
+
+      /*
+       * Segment resolution is concurrent,
+       * so the test checks membership rather
+       * than depending on provider-call order.
+       */
+      expect(walkingCalls).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'getWalkingRoute',
+            data: {
+              start: {
+                latitude: TEST_LOCATION.latitude,
+                longitude: TEST_LOCATION.longitude
+              },
+              destination: {
+                latitude: PARK_POI.latitude,
+                longitude: PARK_POI.longitude
+              }
+            }
+          },
+          {
+            name: 'getWalkingRoute',
+            data: {
+              start: {
+                latitude: PARK_POI.latitude,
+                longitude: PARK_POI.longitude
+              },
+              destination: {
+                latitude: TEST_LOCATION.latitude,
+                longitude: TEST_LOCATION.longitude
+              }
+            }
+          }
+        ])
+      )
+    }
+  )
+
+  test(
+    'generateFirstRoute uses default POI radius when duration is missing',
+    async () => {
+      wx.cloud.callFunction.mockResolvedValue({
+        result: {
+          success: true,
+          poisByCategory: {
+            park: [],
+            water: [],
+            shoppingStreet: []
+          }
+        }
+      })
+
+      const result =
+        await routeGenerationService
+          .generateFirstRoute({
+            environmentPreferences: [
               '公园',
               '水边',
               '商街',
@@ -334,47 +700,21 @@ describe('route-generation service', () => {
             ]
           })
 
-      expect(result.status).toBe('success')
-
-      expect(result.route.endPoint.name).toBe(
-        '人民公园'
-      )
-
-      expect(
-        locationService.getCurrentLocation
-      ).toHaveBeenCalledTimes(1)
+      expect(result).toEqual({
+        status: 'empty',
+        reason: 'NO_VALID_POI'
+      })
 
       expect(
         wx.cloud.callFunction
-      ).toHaveBeenNthCalledWith(
-        1,
-        {
-          name: 'getNearbyPois',
-          data: {
-            longitude: 113.264939,
-            latitude: 23.129158
-          }
+      ).toHaveBeenCalledWith({
+        name: 'getNearbyPois',
+        data: {
+          longitude: 113.264939,
+          latitude: 23.129158,
+          radius: 3000
         }
-      )
-
-      expect(
-        wx.cloud.callFunction
-      ).toHaveBeenNthCalledWith(
-        2,
-        {
-          name: 'getWalkingRoute',
-          data: {
-            start: {
-              latitude: 23.129158,
-              longitude: 113.264939
-            },
-            destination: {
-              latitude: 23.127159,
-              longitude: 113.264345
-            }
-          }
-        }
-      )
+      })
     }
   )
 

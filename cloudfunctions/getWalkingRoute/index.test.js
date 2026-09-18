@@ -95,7 +95,8 @@ describe('getWalkingRoute', () => {
     expect(result.success).toBe(true)
 
     expect(result.route.distanceMeters).toBe(2400)
-    expect(result.route.durationMinutes).toBe(32)
+    expect(result.route.durationSeconds).toBe(1920)
+    expect(result.route).not.toHaveProperty('durationMinutes')
 
     expect(result.route.polyline).toEqual([
       {
@@ -434,7 +435,7 @@ describe('getWalkingRoute', () => {
     expectWalkingRouteFailure(result)
   })
 
-  test('Case 20: Duration rounds up to whole minutes', async () => {
+  test('Case 20: Duration preserves exact seconds', async () => {
     axios.get = async () => {
       const response = createAMapRouteResponse()
 
@@ -446,7 +447,8 @@ describe('getWalkingRoute', () => {
     const result = await main(createValidEvent())
 
     expect(result.success).toBe(true)
-    expect(result.route.durationMinutes).toBe(33)
+    expect(result.route.durationSeconds).toBe(1921)
+    expect(result.route).not.toHaveProperty('durationMinutes')
   })
 
   test(
