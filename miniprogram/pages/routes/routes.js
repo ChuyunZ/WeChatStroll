@@ -97,6 +97,7 @@ Page({
     // 新的 first-route 请求代表新的 Planning Session。
     // 旧 session 不能跨新规划请求继续复用。
     this._routePlanningSession = null;
+    this._waypointCandidateCache = null;
 
     // 新请求开始后，
     // 清除上一批原始 Route。
@@ -136,6 +137,7 @@ Page({
       if (routes.length === 0) {
         this._rawRoutes = [];
         this._routePlanningSession = null;
+        this._waypointCandidateCache = null;
 
         this.setData({
           routes: [],
@@ -227,7 +229,8 @@ Page({
     if (result.status === "empty") {
       return {
         routes: [],
-        routePlanningSession: null
+        routePlanningSession: null,
+        waypointCandidateCache: null
       };
     }
 
