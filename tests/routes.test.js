@@ -365,8 +365,9 @@ describe(
             status:
               "success",
 
-            route:
-              GENERATED_ROUTE,
+            routes: [
+              GENERATED_ROUTE
+            ],
 
             routePlanningSession
           });
@@ -434,8 +435,9 @@ describe(
             status:
               "success",
 
-            route:
-              GENERATED_ROUTE,
+            routes: [
+              GENERATED_ROUTE
+            ],
 
             routePlanningSession: {}
           });
@@ -531,7 +533,7 @@ describe(
 
         deferred.resolve({
           routes:
-            [mockRoutes],
+            mockRoutes,
 
           routePlanningSession:
             newSession
@@ -1400,7 +1402,7 @@ describe(
 
         deferred.resolve({
           routes:
-            [mockRoutes],
+            mockRoutes,
 
           routePlanningSession
         });
