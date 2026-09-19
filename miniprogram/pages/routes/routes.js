@@ -39,6 +39,7 @@ Page({
     this._rawRoutes = [];
     this._routePlanningSession = null;
     this._waypointCandidateCache = null;
+    this._routeLocation = null;
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -179,6 +180,8 @@ Page({
       this._waypointCandidateCache =
         routeLoadResult.waypointCandidateCache;
 
+      this._routeLocation = routeLoadResult.location;
+
       const preparedRoutes =
         this.prepareRoutes(routes);
 
@@ -197,6 +200,7 @@ Page({
       this._rawRoutes = [];
       this._routePlanningSession = null;
       this._waypointCandidateCache = null;
+      this._routeLocation = null;
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -254,7 +258,8 @@ Page({
       routePlanningSession:
         result.routePlanningSession,
       waypointCandidateCache:
-        result.waypointCandidateCache
+        result.waypointCandidateCache,
+      location: result.location
     }
   },
 
@@ -399,28 +404,63 @@ Page({
     });
   },
 
-  showOtherRoutes() {
-    const newRoutes = [
-      ...this.data.routes
-    ];
+  async showOtherRoutes() {
+    const unusedCandidates = this._waypointCandidateCache.getUnusedCandidates();
 
-    if (newRoutes.length <= 1) {
+    if (unusedCandidates.length === 0) {
       wx.showToast({
-        title: "暂无其他路线",
+        title: "暂无更多路线",
         icon: "none"
       });
-
+    
       return;
     }
 
-    const firstRoute =
-      newRoutes.shift();
+    let routeReplaced = false;
+    for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
+      this._waypointCandidateCache.markBuilding(candidate.candidateId);
+    
+      const walkingRoute = await this._routePlanningSession.buildRouteForOrder({
+            allowedWaypointIds: candidate.waypointIds,
+            orderedWaypointIds: candidate.waypointIds,
+            source: "ai"});
+    
+      if (!walkingRoute || walkingRoute.success !== true) {
+        this._waypointCandidateCache.markFailed(candidate.candidateId);
+        continue;
+      }
 
-    newRoutes.push(firstRoute);
+      const route = routeGenerationService.buildGeneratedRouteFromAiCandidate(
+        {location: this._routeLocation,
+          walkingRoute,
+          candidateIndex
+        })
 
-    this.setData({
-      routes: newRoutes
-    });
+      this._waypointCandidateCache.markSuccess(candidate.candidateId, route)
+
+      const newRawRoutes = [...this._rawRoutes]
+      
+      // 删掉第一条
+      newRawRoutes.shift()
+      newRawRoutes.push(route)
+      this._rawRoutes = newRawRoutes
+
+      routeReplaced = true;
+      break;
+    }
+
+    if (!routeReplaced) {
+      wx.showToast({
+        title: "暂无更多路线",
+        icon: "none"
+      });
+    
+      return;
+    }
+
+    const preparedRoutes = this.prepareRoutes(this._rawRoutes);
+
+    this.setData({routes: preparedRoutes});
 
     wx.showToast({
       title: "已更换路线",

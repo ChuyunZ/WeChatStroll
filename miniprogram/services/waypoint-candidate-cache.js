@@ -2,6 +2,7 @@ const {
   createWaypointCandidateCache
 } = require('./waypoint-candidate-cache')
 
+// Create a cache for candidate waypoints
 function createWaypointCandidateCache(
   candidates = []
 ) {
@@ -25,6 +26,7 @@ function createWaypointCandidateCache(
         )
       : []
 
+  // 在 entries 这个 cache array 里，找到指定 candidateId 对应的那一条记录
   function findEntry(candidateId) {
     return entries.find(
       entry =>

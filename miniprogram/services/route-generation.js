@@ -24,6 +24,10 @@ const {
   ROUTE_TYPES
 } = require('../constants/route-types')
 
+const {
+  createWaypointCandidateCache
+} = require("./waypoint-candidate-cache");
+
 const POI_ENVIRONMENT_CATEGORY_MAP = {
   '公园': 'park',
   '水边': 'water',
@@ -545,8 +549,7 @@ async function generateRoutes(
   const routeType = getRequestedRouteType(preferences)
 
   // Create a session using start point, all nearbyPois and route type
-  const candidatePoiIds =
-    new Set(
+  const candidatePoiIds = new Set(
       plan.candidates.flatMap(
         candidate =>
           candidate.waypoints.map(
@@ -555,94 +558,48 @@ async function generateRoutes(
       )
     )
 
-  const verifiedWaypointPool =
-    nearbyPois.filter(
+  const verifiedWaypointPool = nearbyPois.filter(
       poi =>
         candidatePoiIds.has(poi.poiId)
     )
 
-  const session =
-    createRoutePlanningSession({
+  const session = createRoutePlanningSession({
       start: location,
       verifiedWaypointPool,
       routeType
     })
 
-  // const routes = []
-
-  // for (const [candidateIndex, candidate] of plan.candidates.entries()) {
-  //   if (routes.length >= 3) {
-  //     break
-  //   }
-      
-  //   // Convert AI result candidates to a form for route-engine.js
-  //   const waypointIds = candidate.waypoints.map(waypoint => waypoint.poiId)
-
-  //   // Order waypoint and generate route for each set of waypoint, using cache/AMap for each segment 
-  //   const walkingRoute = await session.buildRouteForOrder({
-  //     allowedWaypointIds: waypointIds,
-  //     orderedWaypointIds: waypointIds,
-  //     source: 'ai'})
-
-  //   if (!walkingRoute || walkingRoute.success !== true) {
-  //     continue
-  //   }
-
-  //   const route = buildGeneratedRouteFromAiCandidate({location, walkingRoute, candidateIndex})
-    
-  //   routes.push(route)
-  // }
-
-  const candidateCache =
-    createWaypointCandidateCache(
-      plan.candidates
-    )
+  const candidateCache = createWaypointCandidateCache(plan.candidates)
 
   const routes = []
 
-  const unusedCandidates =
-    candidateCache.getUnusedCandidates()
+  const unusedCandidates = candidateCache.getUnusedCandidates()
 
   for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
     if (routes.length >= 3) {
       break
     }
 
-    candidateCache.markBuilding(
-      candidate.candidateId
-    )
+    candidateCache.markBuilding(candidate.candidateId)
 
-    const walkingRoute =
-      await session.buildRouteForOrder({
-        allowedWaypointIds:
-          candidate.waypointIds,
-        orderedWaypointIds:
-          candidate.waypointIds,
+    const walkingRoute = await session.buildRouteForOrder({
+        allowedWaypointIds: candidate.waypointIds,
+        orderedWaypointIds: candidate.waypointIds,
         source: 'ai'
       })
 
-    if (
-      !walkingRoute ||
-      walkingRoute.success !== true
-    ) {
-      candidateCache.markFailed(
-        candidate.candidateId
-      )
-
+    if (!walkingRoute || walkingRoute.success !== true) {
+      candidateCache.markFailed(candidate.candidateId)
       continue
     }
 
-    const route =
-      buildGeneratedRouteFromAiCandidate({
-        location,
+    const route = buildGeneratedRouteFromAiCandidate(
+      {location,
         walkingRoute,
         candidateIndex
       })
 
-    candidateCache.markSuccess(
-      candidate.candidateId,
-      route
-    )
+    candidateCache.markSuccess(candidate.candidateId, route)
 
     routes.push(route)
   }
@@ -656,8 +613,13 @@ async function generateRoutes(
   
   return {
     status: 'success',
+    location,
     routes,
-    routePlanningSession: session,
+
+    // 以后如果还要生成新 route 继续用同一个 start / waypoint pool / segment cache
+    routePlanningSession: session, 
+
+    // 记住哪些 AI candidate 已经用过 哪些 success / failed / unused
     waypointCandidateCache: candidateCache
   }
 }
@@ -769,5 +731,6 @@ module.exports = {
   selectNearestPoi,
   buildGeneratedRoute,
   buildPoiCandidates,
-  generateRoutes
+  generateRoutes,
+  buildGeneratedRouteFromAiCandidate
 }
