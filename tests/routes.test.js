@@ -5,6 +5,11 @@ const {
 const ROUTE_GENERATION_PATH =
   "../miniprogram/services/route-generation";
 
+const ROUTE_LOCATION = {
+  latitude: 23.129158,
+  longitude: 113.264939
+};
+
 const GENERATED_ROUTE = {
   routeId: "generated_park-1_123",
   title: "前往人民公园的散步路线",
@@ -115,16 +120,48 @@ function createRoutePlanningSessionMock() {
 }
 
 
+function createWaypointCandidateCacheMock({
+  unusedCandidates = []
+} = {}) {
+  return {
+    getUnusedCandidates:
+      jest.fn(
+        () => unusedCandidates
+      ),
+
+    markBuilding:
+      jest.fn(),
+
+    markSuccess:
+      jest.fn(),
+
+    markFailed:
+      jest.fn(),
+
+    getSuccessfulRoutes:
+      jest.fn(
+        () => []
+      )
+  };
+}
+
+
 function createSuccessfulRouteLoadResult({
   routes = [
     GENERATED_ROUTE
   ],
   routePlanningSession =
-    createRoutePlanningSessionMock()
+    createRoutePlanningSessionMock(),
+  waypointCandidateCache =
+    createWaypointCandidateCacheMock(),
+  location =
+    ROUTE_LOCATION
 } = {}) {
   return {
     routes,
-    routePlanningSession
+    routePlanningSession,
+    waypointCandidateCache,
+    location
   };
 }
 
@@ -138,6 +175,9 @@ function loadRoutesPage({
 
   routeGenerationServiceMock = {
     generateRoutes:
+      jest.fn(),
+
+    buildGeneratedRouteFromAiCandidate:
       jest.fn()
   };
 
@@ -332,7 +372,7 @@ describe(
 
 
     test(
-      "getRoutes passes preferences to route generation and returns the route with its planning session",
+      "getRoutes passes preferences to route generation and returns routes with runtime planning state",
       async () => {
         const preferences = {
           durationMinutes: 30,
@@ -354,6 +394,9 @@ describe(
         const routePlanningSession =
           createRoutePlanningSessionMock();
 
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock();
+
 
         page._routePreferences =
           preferences;
@@ -369,7 +412,10 @@ describe(
               GENERATED_ROUTE
             ],
 
-            routePlanningSession
+            routePlanningSession,
+            waypointCandidateCache,
+            location:
+              ROUTE_LOCATION
           });
 
 
@@ -392,11 +438,13 @@ describe(
             GENERATED_ROUTE
           ],
 
-          routePlanningSession
+          routePlanningSession,
+          waypointCandidateCache,
+          location:
+            ROUTE_LOCATION
         });
       }
     );
-
 
     test(
       "getRoutes converts an explicit empty generation result to an empty route load result",
@@ -420,7 +468,8 @@ describe(
           result
         ).toEqual({
           routes: [],
-          routePlanningSession: null
+          routePlanningSession: null,
+          waypointCandidateCache: null
         });
       }
     );
@@ -484,6 +533,9 @@ describe(
         const newSession =
           createRoutePlanningSessionMock();
 
+        const newCandidateCache =
+          createWaypointCandidateCacheMock();
+
 
         page.data.routeState =
           "success";
@@ -536,7 +588,13 @@ describe(
             mockRoutes,
 
           routePlanningSession:
-            newSession
+            newSession,
+
+          waypointCandidateCache:
+            newCandidateCache,
+
+          location:
+            ROUTE_LOCATION
         });
 
 
@@ -553,21 +611,23 @@ describe(
 
 
     test(
-      "loadRoutes sets success and stores both raw routes and the planning session",
+      "loadRoutes sets success and stores raw routes with runtime planning state",
       async () => {
         const routePlanningSession =
           createRoutePlanningSessionMock();
 
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock();
+
 
         page.getRoutes =
           jest.fn()
-            .mockResolvedValue({
-              routes: [
-                GENERATED_ROUTE
-              ],
-
-              routePlanningSession
-            });
+            .mockResolvedValue(
+              createSuccessfulRouteLoadResult({
+                routePlanningSession,
+                waypointCandidateCache
+              })
+            );
 
 
         await page.loadRoutes();
@@ -597,6 +657,20 @@ describe(
         ).toBe(
           routePlanningSession
         );
+
+
+        expect(
+          page._waypointCandidateCache
+        ).toBe(
+          waypointCandidateCache
+        );
+
+
+        expect(
+          page._routeLocation
+        ).toEqual(
+          ROUTE_LOCATION
+        );
       }
     );
 
@@ -610,13 +684,11 @@ describe(
 
         page.getRoutes =
           jest.fn()
-            .mockResolvedValue({
-              routes: [
-                GENERATED_ROUTE
-              ],
-
-              routePlanningSession
-            });
+            .mockResolvedValue(
+              createSuccessfulRouteLoadResult({
+                routePlanningSession
+              })
+            );
 
 
         await page.loadRoutes();
@@ -929,6 +1001,12 @@ describe(
         const newSession =
           createRoutePlanningSessionMock();
 
+        const oldCandidateCache =
+          createWaypointCandidateCacheMock();
+
+        const newCandidateCache =
+          createWaypointCandidateCacheMock();
+
 
         page.getRoutes =
           jest.fn()
@@ -955,7 +1033,13 @@ describe(
             newRoutes,
 
           routePlanningSession:
-            newSession
+            newSession,
+
+          waypointCandidateCache:
+            newCandidateCache,
+
+          location:
+            ROUTE_LOCATION
         });
 
 
@@ -990,7 +1074,13 @@ describe(
             oldRoutes,
 
           routePlanningSession:
-            oldSession
+            oldSession,
+
+          waypointCandidateCache:
+            oldCandidateCache,
+
+          location:
+            ROUTE_LOCATION
         });
 
 
@@ -1052,6 +1142,9 @@ describe(
         const newSession =
           createRoutePlanningSessionMock();
 
+        const newCandidateCache =
+          createWaypointCandidateCacheMock();
+
 
         page.getRoutes =
           jest.fn()
@@ -1078,7 +1171,13 @@ describe(
             newRoutes,
 
           routePlanningSession:
-            newSession
+            newSession,
+
+          waypointCandidateCache:
+            newCandidateCache,
+
+          location:
+            ROUTE_LOCATION
         });
 
 
@@ -1257,57 +1356,150 @@ describe(
 
 
     test(
-      "showOtherRoutes rotates the route order when multiple routes exist without replacing the planning session",
-      () => {
+      "showOtherRoutes replaces the first displayed route with the next successful cached candidate",
+      async () => {
+        const candidate = {
+          candidateId:
+            "candidate-4",
+
+          waypointIds: [
+            "poi-4"
+          ]
+        };
+
         const routePlanningSession =
           createRoutePlanningSessionMock();
 
-        page._routePlanningSession =
-          routePlanningSession;
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock({
+            unusedCandidates: [
+              candidate
+            ]
+          });
 
+        const replacementRoute = {
+          ...GENERATED_ROUTE,
 
-        page.data.routes = [
+          routeId:
+            "generated_ai_1_456",
+
+          title:
+            "新的候选路线"
+        };
+
+        const originalRoutes = [
           {
+            ...GENERATED_ROUTE,
             routeId:
               "route-a"
           },
           {
+            ...GENERATED_ROUTE,
             routeId:
               "route-b"
           },
           {
+            ...GENERATED_ROUTE,
             routeId:
               "route-c"
           }
         ];
 
+        const walkingRoute = {
+          success: true
+        };
 
-        page.showOtherRoutes();
+
+        routePlanningSession
+          .buildRouteForOrder
+          .mockResolvedValue(
+            walkingRoute
+          );
+
+        routeGenerationServiceMock
+          .buildGeneratedRouteFromAiCandidate
+          .mockReturnValue(
+            replacementRoute
+          );
+
+        page._routePlanningSession =
+          routePlanningSession;
+
+        page._waypointCandidateCache =
+          waypointCandidateCache;
+
+        page._routeLocation =
+          ROUTE_LOCATION;
+
+        page._rawRoutes =
+          originalRoutes;
+
+
+        await page.showOtherRoutes();
 
 
         expect(
-          page.data.routes
+          waypointCandidateCache
+            .markBuilding
+        ).toHaveBeenCalledWith(
+          "candidate-4"
+        );
+
+
+        expect(
+          routePlanningSession
+            .buildRouteForOrder
+        ).toHaveBeenCalledWith({
+          allowedWaypointIds: [
+            "poi-4"
+          ],
+          orderedWaypointIds: [
+            "poi-4"
+          ],
+          source: "ai"
+        });
+
+
+        expect(
+          routeGenerationServiceMock
+            .buildGeneratedRouteFromAiCandidate
+        ).toHaveBeenCalledWith({
+          location:
+            ROUTE_LOCATION,
+          walkingRoute,
+          candidateIndex: 0
+        });
+
+
+        expect(
+          waypointCandidateCache
+            .markSuccess
+        ).toHaveBeenCalledWith(
+          "candidate-4",
+          replacementRoute
+        );
+
+
+        expect(
+          page._rawRoutes.map(
+            route => route.routeId
+          )
         ).toEqual([
-          {
-            routeId:
-              "route-b"
-          },
-          {
-            routeId:
-              "route-c"
-          },
-          {
-            routeId:
-              "route-a"
-          }
+          "route-b",
+          "route-c",
+          "generated_ai_1_456"
         ]);
 
 
         expect(
-          page._routePlanningSession
-        ).toBe(
-          routePlanningSession
-        );
+          page.data.routes.map(
+            route => route.routeId
+          )
+        ).toEqual([
+          "route-b",
+          "route-c",
+          "generated_ai_1_456"
+        ]);
 
 
         expect(
@@ -1324,14 +1516,153 @@ describe(
 
 
     test(
-      "showOtherRoutes reports no alternatives when only one route exists",
-      () => {
-        page.data.routes = [
+      "showOtherRoutes skips a failed cached candidate and uses the next successful one",
+      async () => {
+        const failedCandidate = {
+          candidateId:
+            "candidate-4",
+
+          waypointIds: [
+            "poi-4"
+          ]
+        };
+
+        const successfulCandidate = {
+          candidateId:
+            "candidate-5",
+
+          waypointIds: [
+            "poi-5"
+          ]
+        };
+
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock({
+            unusedCandidates: [
+              failedCandidate,
+              successfulCandidate
+            ]
+          });
+
+        const replacementRoute = {
+          ...GENERATED_ROUTE,
+
+          routeId:
+            "generated_ai_2_789"
+        };
+
+
+        routePlanningSession
+          .buildRouteForOrder
+          .mockResolvedValueOnce({
+            success: false
+          })
+          .mockResolvedValueOnce({
+            success: true
+          });
+
+        routeGenerationServiceMock
+          .buildGeneratedRouteFromAiCandidate
+          .mockReturnValue(
+            replacementRoute
+          );
+
+        page._routePlanningSession =
+          routePlanningSession;
+
+        page._waypointCandidateCache =
+          waypointCandidateCache;
+
+        page._routeLocation =
+          ROUTE_LOCATION;
+
+        page._rawRoutes = [
           GENERATED_ROUTE
         ];
 
 
-        page.showOtherRoutes();
+        await page.showOtherRoutes();
+
+
+        expect(
+          waypointCandidateCache
+            .markFailed
+        ).toHaveBeenCalledWith(
+          "candidate-4"
+        );
+
+
+        expect(
+          waypointCandidateCache
+            .markSuccess
+        ).toHaveBeenCalledWith(
+          "candidate-5",
+          replacementRoute
+        );
+
+
+        expect(
+          routePlanningSession
+            .buildRouteForOrder
+        ).toHaveBeenCalledTimes(
+          2
+        );
+      }
+    );
+
+
+    test(
+      "showOtherRoutes reports no more routes when all unused candidates fail",
+      async () => {
+        const candidate = {
+          candidateId:
+            "candidate-4",
+
+          waypointIds: [
+            "poi-4"
+          ]
+        };
+
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock({
+            unusedCandidates: [
+              candidate
+            ]
+          });
+
+
+        routePlanningSession
+          .buildRouteForOrder
+          .mockResolvedValue({
+            success: false
+          });
+
+        page._routePlanningSession =
+          routePlanningSession;
+
+        page._waypointCandidateCache =
+          waypointCandidateCache;
+
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
+
+
+        await page.showOtherRoutes();
+
+
+        expect(
+          waypointCandidateCache
+            .markFailed
+        ).toHaveBeenCalledWith(
+          "candidate-4"
+        );
 
 
         expect(
@@ -1343,7 +1674,7 @@ describe(
           wx.showToast
         ).toHaveBeenCalledWith({
           title:
-            "暂无其他路线",
+            "暂无更多路线",
 
           icon:
             "none"
@@ -1353,10 +1684,54 @@ describe(
 
 
     test(
-      "onUnload clears the planning session",
+      "showOtherRoutes reports no more routes without calling AI when the candidate cache is exhausted",
+      async () => {
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock();
+
+
+        page._waypointCandidateCache =
+          waypointCandidateCache;
+
+
+        await page.showOtherRoutes();
+
+
+        expect(
+          routeGenerationServiceMock
+            .generateRoutes
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          routeGenerationServiceMock
+            .buildGeneratedRouteFromAiCandidate
+        ).not.toHaveBeenCalled();
+
+
+        expect(
+          wx.showToast
+        ).toHaveBeenCalledWith({
+          title:
+            "暂无更多路线",
+
+          icon:
+            "none"
+        });
+      }
+    );
+
+    test(
+      "onUnload clears runtime planning state",
       () => {
         page._routePlanningSession =
           createRoutePlanningSessionMock();
+
+        page._waypointCandidateCache =
+          createWaypointCandidateCacheMock();
+
+        page._routeLocation =
+          ROUTE_LOCATION;
 
 
         page.onUnload();
@@ -1364,6 +1739,16 @@ describe(
 
         expect(
           page._routePlanningSession
+        ).toBeNull();
+
+
+        expect(
+          page._waypointCandidateCache
+        ).toBeNull();
+
+
+        expect(
+          page._routeLocation
         ).toBeNull();
       }
     );
