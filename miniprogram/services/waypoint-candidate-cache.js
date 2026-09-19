@@ -1,7 +1,3 @@
-const {
-  createWaypointCandidateCache
-} = require('./waypoint-candidate-cache')
-
 // Create a cache for candidate waypoints
 function createWaypointCandidateCache(
   candidates = []
