@@ -428,6 +428,15 @@ Page({
   },
 
   async showOtherRoutes() {
+    const requestId =
+      this._routeRequestId;
+
+    const routePlanningSession =
+      this._routePlanningSession;
+
+    const waypointCandidateCache =
+      this._waypointCandidateCache;
+
     const unusedCandidates = this._waypointCandidateCache.getUnusedCandidates();
 
     if (unusedCandidates.length === 0) {
@@ -448,6 +457,14 @@ Page({
             orderedWaypointIds: candidate.waypointIds,
             source: "ai"});
     
+      if (
+        requestId !== this._routeRequestId ||
+        routePlanningSession !== this._routePlanningSession ||
+        waypointCandidateCache !== this._waypointCandidateCache
+      ) {
+        return;
+      }
+
       if (!walkingRoute || walkingRoute.success !== true) {
         this._waypointCandidateCache.markFailed(candidate.candidateId);
         continue;
