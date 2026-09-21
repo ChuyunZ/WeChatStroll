@@ -140,6 +140,34 @@ describe("AI waypoint planner integration", () => {
     })
   })
 
+  test.each([
+    null,
+    undefined,
+    []
+  ])(
+    "returns invalid input for a non-object event: %p",
+    async (event) => {
+      const client = {
+        request: jest.fn()
+      }
+
+      const result =
+        await generateWaypointPlan(
+          event,
+          client
+        )
+
+      expect(result).toEqual({
+        success: false,
+        error: "INVALID_AI_ROUTE_INPUT"
+      })
+
+      expect(
+        client.request
+      ).not.toHaveBeenCalled()
+    }
+  )
+
   test("does not call AI when planner input is invalid", async () => {
     const client = {
       request: jest.fn()
