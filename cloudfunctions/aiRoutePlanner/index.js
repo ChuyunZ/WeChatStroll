@@ -43,11 +43,18 @@ async function generateWaypointPlan(
   event,
   client
 ) {
+  const normalizedEvent =
+    event &&
+    typeof event === "object" &&
+    !Array.isArray(event)
+      ? event
+      : {}
+
   const promptResult =
     buildRoutePlanningPrompt({
-      startPoint: event.startPoint,
-      preferences: event.preferences,
-      nearbyPois: event.nearbyPois
+      startPoint: normalizedEvent.startPoint,
+      preferences: normalizedEvent.preferences,
+      nearbyPois: normalizedEvent.nearbyPois
     })
 
   if (!promptResult.success) {
@@ -66,7 +73,7 @@ async function generateWaypointPlan(
   const planResult =
     parseAndValidateRoutePlan(
       aiResult.data.text,
-      event.nearbyPois
+      normalizedEvent.nearbyPois
     )
 
   if (!planResult.success) {
