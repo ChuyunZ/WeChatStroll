@@ -13,10 +13,10 @@ const validInput = {
     routeType: "loop",
     crowdPreference: "low",
     environmentPreferences: [
-      "park",
-      "water",
-      "street",
-      "shopping_mall"
+      "公园",
+      "水边",
+      "街道",
+      "商街"
     ]
   },
 
@@ -172,6 +172,54 @@ describe("route planning prompt", () => {
       error: "INVALID_AI_ROUTE_INPUT"
     })
   })
+
+  test(
+    "rejects duplicate environment preferences",
+    () => {
+      const result =
+        buildRoutePlanningPrompt({
+          ...validInput,
+          preferences: {
+            ...validInput.preferences,
+            environmentPreferences: [
+              "公园",
+              "水边",
+              "街道",
+              "街道"
+            ]
+          }
+        })
+
+      expect(result).toEqual({
+        success: false,
+        error: "INVALID_AI_ROUTE_INPUT"
+      })
+    }
+  )
+
+  test(
+    "rejects unsupported environment preferences",
+    () => {
+      const result =
+        buildRoutePlanningPrompt({
+          ...validInput,
+          preferences: {
+            ...validInput.preferences,
+            environmentPreferences: [
+              "公园",
+              "水边",
+              "街道",
+              "海滩"
+            ]
+          }
+        })
+
+      expect(result).toEqual({
+        success: false,
+        error: "INVALID_AI_ROUTE_INPUT"
+      })
+    }
+  )
 
   test("rejects missing nearby POIs", () => {
     const result = buildRoutePlanningPrompt({
