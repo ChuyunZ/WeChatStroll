@@ -338,7 +338,7 @@ describe(
 
 
     test(
-      "onLoad directly loads routes with empty preferences when not opened from Preferences",
+      "onLoad uses development default preferences when not opened from Preferences",
       () => {
         page.loadRoutes =
           jest.fn();
@@ -349,7 +349,17 @@ describe(
 
         expect(
           page._routePreferences
-        ).toEqual({});
+        ).toEqual({
+          durationMinutes: 30,
+          routeType: "loop",
+          crowdPreference: "medium",
+          environmentPreferences: [
+            "公园",
+            "水边",
+            "街道",
+            "商街"
+          ]
+        });
 
 
         expect(
