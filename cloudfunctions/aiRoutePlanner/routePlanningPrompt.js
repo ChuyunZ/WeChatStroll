@@ -18,6 +18,13 @@ const VALID_CROWD_PREFERENCES = new Set([
   "high"
 ])
 
+const VALID_ENVIRONMENT_PREFERENCES = new Set([
+  "公园",
+  "水边",
+  "街道",
+  "商街"
+])
+
 function isNonEmptyString(value) {
   return (
     typeof value === "string" &&
@@ -50,7 +57,26 @@ function isValidPreferences(preferences) {
     return false
   }
 
-  if (!Number.isFinite(preferences.durationMinutes) || preferences.durationMinutes <= 0 || !VALID_ROUTE_TYPES.has(preferences.routeType) || !VALID_CROWD_PREFERENCES.has(preferences.crowdPreference) || !Array.isArray(preferences.environmentPreferences) || preferences.environmentPreferences.length !== 4 || !preferences.environmentPreferences.every(isNonEmptyString)) {
+  if (
+    !Number.isFinite(preferences.durationMinutes) ||
+    preferences.durationMinutes <= 0 ||
+    !VALID_ROUTE_TYPES.has(preferences.routeType) ||
+    !VALID_CROWD_PREFERENCES.has(preferences.crowdPreference) ||
+    !Array.isArray(preferences.environmentPreferences) ||
+    preferences.environmentPreferences.length !==
+      VALID_ENVIRONMENT_PREFERENCES.size ||
+    !preferences.environmentPreferences.every(
+      environment =>
+        isNonEmptyString(environment) &&
+        VALID_ENVIRONMENT_PREFERENCES.has(
+          environment
+        )
+    ) ||
+    new Set(
+      preferences.environmentPreferences
+    ).size !==
+      preferences.environmentPreferences.length
+  ) {
     return false
   }
 
