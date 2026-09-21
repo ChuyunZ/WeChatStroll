@@ -5,7 +5,6 @@ const {
   MAX_ROUTE_CANDIDATES
 } = require("./routePlanContract")
 
-MAX_DISPLAY_ROUTES = 3
 
 const VALID_ROUTE_TYPES = new Set([
   "loop",
