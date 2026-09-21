@@ -6,6 +6,18 @@ const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
 
+const DEV_DEFAULT_PREFERENCES = {
+  durationMinutes: 30,
+  routeType: ROUTE_TYPES.LOOP,
+  crowdPreference: "medium",
+  environmentPreferences: [
+    "公园",
+    "水边",
+    "街道",
+    "商街"
+  ]
+};
+
 function isValidRoutePlanningSession(session) {
   return (
     session &&
@@ -73,7 +85,15 @@ Page({
     }
 
     // 开发阶段直接打开 Routes 时，
-    // 允许使用默认空 preferences。
+    // 使用一组完整的默认 preferences。
+    this._routePreferences = {
+      ...DEV_DEFAULT_PREFERENCES,
+      environmentPreferences: [
+        ...DEV_DEFAULT_PREFERENCES
+          .environmentPreferences
+      ]
+    };
+
     this.loadRoutes();
   },
 
