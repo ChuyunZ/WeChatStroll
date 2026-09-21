@@ -1732,6 +1732,203 @@ describe(
     );
 
     test(
+      "showOtherRoutes ignores an in-flight route after page unload",
+      async () => {
+        const deferred =
+          createDeferred();
+
+        const candidate = {
+          candidateId:
+            "candidate-4",
+
+          waypointIds: [
+            "poi-4"
+          ]
+        };
+
+        const routePlanningSession =
+          createRoutePlanningSessionMock();
+
+        const waypointCandidateCache =
+          createWaypointCandidateCacheMock({
+            unusedCandidates: [
+              candidate
+            ]
+          });
+
+
+        routePlanningSession
+          .buildRouteForOrder
+          .mockReturnValue(
+            deferred.promise
+          );
+
+        page._routeRequestId = 1;
+
+        page._routePlanningSession =
+          routePlanningSession;
+
+        page._waypointCandidateCache =
+          waypointCandidateCache;
+
+        page._routeLocation =
+          ROUTE_LOCATION;
+
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
+
+
+        const showOtherRoutesPromise =
+          page.showOtherRoutes();
+
+
+        page.onUnload();
+
+        deferred.resolve({
+          success: true
+        });
+
+
+        await showOtherRoutesPromise;
+
+
+        expect(
+          waypointCandidateCache
+            .markSuccess
+        ).not.toHaveBeenCalled();
+
+        expect(
+          waypointCandidateCache
+            .markFailed
+        ).not.toHaveBeenCalled();
+
+        expect(
+          routeGenerationServiceMock
+            .buildGeneratedRouteFromAiCandidate
+        ).not.toHaveBeenCalled();
+
+        expect(
+          page._routePlanningSession
+        ).toBeNull();
+
+        expect(
+          page._waypointCandidateCache
+        ).toBeNull();
+      }
+    );
+
+
+    test(
+      "showOtherRoutes ignores an in-flight route after a newer route load replaces its planning state",
+      async () => {
+        const deferred =
+          createDeferred();
+
+        const candidate = {
+          candidateId:
+            "candidate-4",
+
+          waypointIds: [
+            "poi-4"
+          ]
+        };
+
+        const oldSession =
+          createRoutePlanningSessionMock();
+
+        const oldCandidateCache =
+          createWaypointCandidateCacheMock({
+            unusedCandidates: [
+              candidate
+            ]
+          });
+
+        const newSession =
+          createRoutePlanningSessionMock();
+
+        const newCandidateCache =
+          createWaypointCandidateCacheMock();
+
+
+        oldSession
+          .buildRouteForOrder
+          .mockReturnValue(
+            deferred.promise
+          );
+
+        page._routeRequestId = 1;
+
+        page._routePlanningSession =
+          oldSession;
+
+        page._waypointCandidateCache =
+          oldCandidateCache;
+
+        page._routeLocation =
+          ROUTE_LOCATION;
+
+        page._rawRoutes = [
+          GENERATED_ROUTE
+        ];
+
+
+        const showOtherRoutesPromise =
+          page.showOtherRoutes();
+
+
+        page.getRoutes =
+          jest.fn()
+            .mockResolvedValue(
+              createSuccessfulRouteLoadResult({
+                routePlanningSession:
+                  newSession,
+                waypointCandidateCache:
+                  newCandidateCache
+              })
+            );
+
+        await page.loadRoutes();
+
+        deferred.resolve({
+          success: true
+        });
+
+
+        await showOtherRoutesPromise;
+
+
+        expect(
+          oldCandidateCache
+            .markSuccess
+        ).not.toHaveBeenCalled();
+
+        expect(
+          oldCandidateCache
+            .markFailed
+        ).not.toHaveBeenCalled();
+
+        expect(
+          routeGenerationServiceMock
+            .buildGeneratedRouteFromAiCandidate
+        ).not.toHaveBeenCalled();
+
+        expect(
+          page._routePlanningSession
+        ).toBe(
+          newSession
+        );
+
+        expect(
+          page._waypointCandidateCache
+        ).toBe(
+          newCandidateCache
+        );
+      }
+    );
+
+
+    test(
       "onUnload clears runtime planning state",
       () => {
         page._routePlanningSession =
