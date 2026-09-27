@@ -45,6 +45,14 @@ const VALID_EVENT = {
 }
 
 describe("AI waypoint planner integration", () => {
+  test('returns an explicit empty plan as a successful no-result response', async () => {
+    const client = { request: jest.fn().mockResolvedValue({
+      success: true, data: { text: '{"candidates":[]}' }
+    }) }
+    expect(await generateWaypointPlan(VALID_EVENT, client)).toEqual({
+      success: true, plan: { candidates: [] }
+    })
+  })
   test("returns a validated waypoint plan from a mocked AI response", async () => {
     const client = {
       request: jest.fn().mockResolvedValue({

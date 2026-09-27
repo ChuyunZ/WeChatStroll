@@ -1,7 +1,7 @@
 const MIN_WAYPOINTS = 1
-const MAX_WAYPOINTS = 3
+const MAX_WAYPOINTS = 8
 
-const MIN_ROUTE_CANDIDATES = 1
+const MIN_ROUTE_CANDIDATES = 0
 const MAX_ROUTE_CANDIDATES = 5
 
 function parseRoutePlan(rawText) {
@@ -290,6 +290,10 @@ function validateRoutePlan(
 
   if (!allowedPoiIds) {
     return invalidRoutePlan()
+  }
+
+  if (plan.candidates.length === 0) {
+    return { success: true, data: { candidates: [] } }
   }
 
   const validCandidates = []

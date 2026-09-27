@@ -51,7 +51,7 @@ function createWaypointCandidateCache(
     const entry =
       findEntry(candidateId)
 
-    if (!entry) {
+    if (!entry || entry.status !== 'unused') {
       return false
     }
 

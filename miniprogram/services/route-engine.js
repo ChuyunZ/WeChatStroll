@@ -273,7 +273,8 @@ function createRoutePlanningSession({
     }
   }
 
-  async function buildRouteForOrder({
+  // Both evaluation and rendering resolve the same validated traversal.
+  async function resolveRouteOrder({
     orderedWaypointIds = [],
     allowedWaypointIds,
     source = 'unknown'
@@ -369,17 +370,55 @@ function createRoutePlanningSession({
       }
     }
 
-    return buildSuccessfulRouteResult({
+    return {
+      success: true,
       waypointNodes: validation.waypointNodes,
       resolvedEdges,
       routeType,
       source
-    })
+    }
+  }
+
+  async function evaluateRouteOrder(options) {
+    const result = await resolveRouteOrder(options)
+    if (!result.success) return result
+
+    return {
+      success: true,
+      durationSeconds: result.resolvedEdges.reduce(
+        (total, edge) => total + edge.segment.durationSeconds, 0
+      ),
+      distanceMeters: result.resolvedEdges.reduce(
+        (total, edge) => total + edge.segment.distanceMeters, 0
+      )
+    }
+  }
+
+  async function buildRouteForOrder(options) {
+    const result = await resolveRouteOrder(options)
+    return result.success ? buildSuccessfulRouteResult(result) : result
+  }
+
+  // Copies expose only the trusted coordinates needed to seed the search.
+  function getWaypointSearchData(allowedWaypointIds) {
+    const validation = validateAllowedWaypointIds(allowedWaypointIds)
+    if (!validation.valid) return validation
+    return {
+      valid: true,
+      start: { latitude: startNode.latitude, longitude: startNode.longitude },
+      waypoints: validation.waypointNodes.map(node => ({
+        poiId: node.poiId,
+        latitude: node.latitude,
+        longitude: node.longitude
+      }))
+    }
   }
 
   return {
     registerVerifiedWaypoints,
     prefetchSegments,
+    evaluateRouteOrder,
+    getWaypointSearchData,
     buildRouteForOrder
   }
 }

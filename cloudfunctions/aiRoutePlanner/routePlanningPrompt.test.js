@@ -116,6 +116,9 @@ describe("route planning prompt", () => {
         buildRoutePlanningPrompt(validInput)
   
       const prompt = result.data.prompt
+      expect(prompt).toContain(`between 1 and ${require('./routePlanContract').MAX_WAYPOINTS} waypoint POIs`)
+      expect(prompt).toContain('route engine determines the final visit order')
+      expect(prompt).toContain('Return an empty candidates array')
   
       expect(prompt).toContain(
         "Return JSON only."
@@ -273,7 +276,7 @@ describe("route planning prompt", () => {
       const prompt = result.data.prompt
   
       expect(prompt).toContain(
-        "Generate between 1 and 5 distinct route candidates."
+        "Generate between 0 and 5 distinct route candidates."
       )
   
       expect(prompt).toContain(

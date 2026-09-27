@@ -215,11 +215,12 @@ function buildRoutePlanningPrompt(input) {
   
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
   
-    "Use the supplied START POINT as the user's actual starting location when ordering waypoint candidates.",
+    "Use the supplied START POINT as the user's actual starting location when selecting waypoint candidates.",
   
     "Prefer candidate POIs that reasonably match the user's normalized preferences.",
   
-    "Within each route candidate, return waypoint IDs in the order they should be visited.",
+    "Select waypoint sets only. The route engine determines the final visit order using real directed walking segments.",
+    "Do not fill the waypoint limit unnecessarily. Return an empty candidates array when no suitable set is available.",
   
     "",
     "START POINT",
