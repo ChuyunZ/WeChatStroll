@@ -6,6 +6,18 @@ const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
 
+const DEV_DEFAULT_PREFERENCES = {
+  durationMinutes: 30,
+  routeType: ROUTE_TYPES.LOOP,
+  crowdPreference: "medium",
+  environmentPreferences: [
+    "公园",
+    "水边",
+    "街道",
+    "商街"
+  ]
+};
+
 function isValidRoutePlanningSession(session) {
   return (
     session &&
@@ -13,6 +25,18 @@ function isValidRoutePlanningSession(session) {
     typeof session.registerVerifiedWaypoints === "function" &&
     typeof session.prefetchSegments === "function" &&
     typeof session.buildRouteForOrder === "function"
+  );
+}
+
+function isValidWaypointCandidateCache(cache) {
+  return (
+    cache &&
+    typeof cache === "object" &&
+    typeof cache.getUnusedCandidates === "function" &&
+    typeof cache.markBuilding === "function" &&
+    typeof cache.markSuccess === "function" &&
+    typeof cache.markFailed === "function" &&
+    typeof cache.getSuccessfulRoutes === "function"
   );
 }
 
@@ -26,6 +50,8 @@ Page({
     this._routePreferences = {};
     this._rawRoutes = [];
     this._routePlanningSession = null;
+    this._waypointCandidateCache = null;
+    this._routeLocation = null;
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -59,7 +85,15 @@ Page({
     }
 
     // 开发阶段直接打开 Routes 时，
-    // 允许使用默认空 preferences。
+    // 使用一组完整的默认 preferences。
+    this._routePreferences = {
+      ...DEV_DEFAULT_PREFERENCES,
+      environmentPreferences: [
+        ...DEV_DEFAULT_PREFERENCES
+          .environmentPreferences
+      ]
+    };
+
     this.loadRoutes();
   },
 
@@ -71,6 +105,9 @@ Page({
     // Planning Session 只属于当前这一次规划流程。
     // 页面真正销毁后，不再保留其中的 Map / Promise / closure 状态。
     this._routePlanningSession = null;
+
+    this._waypointCandidateCache = null;
+    this._routeLocation = null;
   },
 
   async loadRoutes() {
@@ -82,6 +119,8 @@ Page({
     // 新的 first-route 请求代表新的 Planning Session。
     // 旧 session 不能跨新规划请求继续复用。
     this._routePlanningSession = null;
+    this._waypointCandidateCache = null;
+    this._routeLocation = null;
 
     // 新请求开始后，
     // 清除上一批原始 Route。
@@ -121,6 +160,8 @@ Page({
       if (routes.length === 0) {
         this._rawRoutes = [];
         this._routePlanningSession = null;
+        this._waypointCandidateCache = null;
+        this._routeLocation = null;
 
         this.setData({
           routes: [],
@@ -140,6 +181,16 @@ Page({
         );
       }
 
+      if (
+        !isValidWaypointCandidateCache(
+          routeLoadResult.waypointCandidateCache
+        )
+      ) {
+        throw new Error(
+          "Invalid waypoint candidate cache"
+        );
+      }
+
       // 保存业务层的原始 Route。
       // Route Detail 会拿这个对象。
       this._rawRoutes = routes;
@@ -148,6 +199,11 @@ Page({
       // 因此只保存在 Page 实例的私有字段里，不放进 data。
       this._routePlanningSession =
         routeLoadResult.routePlanningSession;
+      
+      this._waypointCandidateCache =
+        routeLoadResult.waypointCandidateCache;
+
+      this._routeLocation = routeLoadResult.location;
 
       const preparedRoutes =
         this.prepareRoutes(routes);
@@ -166,6 +222,8 @@ Page({
 
       this._rawRoutes = [];
       this._routePlanningSession = null;
+      this._waypointCandidateCache = null;
+      this._routeLocation = null;
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -182,7 +240,7 @@ Page({
   async getRoutes() {
     const result =
       await routeGenerationService
-        .generateFirstRoute(
+        .generateRoutes(
           this._routePreferences || {}
         );
 
@@ -198,15 +256,19 @@ Page({
     if (result.status === "empty") {
       return {
         routes: [],
-        routePlanningSession: null
+        routePlanningSession: null,
+        waypointCandidateCache: null
       };
     }
 
     if (
       result.status !== "success" ||
-      !result.route ||
+      !Array.isArray(result.routes) ||
       !isValidRoutePlanningSession(
         result.routePlanningSession
+      ) ||
+      !isValidWaypointCandidateCache(
+        result.waypointCandidateCache
       )
     ) {
       throw new Error(
@@ -214,16 +276,14 @@ Page({
       );
     }
 
-    // 当前 ticket 只生成第一条真实路线，
-    // 但同时把同一个 Planning Session 交给页面持有。
-    // 后续 Route 2 / Route 3 / Route N 应继续复用它。
     return {
-      routes: [
-        result.route
-      ],
+      routes: result.routes,
       routePlanningSession:
-        result.routePlanningSession
-    };
+        result.routePlanningSession,
+      waypointCandidateCache:
+        result.waypointCandidateCache,
+      location: result.location
+    }
   },
 
   prepareRoutes(routes) {
@@ -367,28 +427,80 @@ Page({
     });
   },
 
-  showOtherRoutes() {
-    const newRoutes = [
-      ...this.data.routes
-    ];
+  async showOtherRoutes() {
+    const requestId =
+      this._routeRequestId;
 
-    if (newRoutes.length <= 1) {
+    const routePlanningSession =
+      this._routePlanningSession;
+
+    const waypointCandidateCache =
+      this._waypointCandidateCache;
+
+    const unusedCandidates = this._waypointCandidateCache.getUnusedCandidates();
+
+    if (unusedCandidates.length === 0) {
       wx.showToast({
-        title: "暂无其他路线",
+        title: "暂无更多路线",
         icon: "none"
       });
-
+    
       return;
     }
 
-    const firstRoute =
-      newRoutes.shift();
+    let routeReplaced = false;
+    for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
+      this._waypointCandidateCache.markBuilding(candidate.candidateId);
+    
+      const walkingRoute = await this._routePlanningSession.buildRouteForOrder({
+            allowedWaypointIds: candidate.waypointIds,
+            orderedWaypointIds: candidate.waypointIds,
+            source: "ai"});
+    
+      if (
+        requestId !== this._routeRequestId ||
+        routePlanningSession !== this._routePlanningSession ||
+        waypointCandidateCache !== this._waypointCandidateCache
+      ) {
+        return;
+      }
 
-    newRoutes.push(firstRoute);
+      if (!walkingRoute || walkingRoute.success !== true) {
+        this._waypointCandidateCache.markFailed(candidate.candidateId);
+        continue;
+      }
 
-    this.setData({
-      routes: newRoutes
-    });
+      const route = routeGenerationService.buildGeneratedRouteFromAiCandidate(
+        {location: this._routeLocation,
+          walkingRoute,
+          candidateIndex
+        })
+
+      this._waypointCandidateCache.markSuccess(candidate.candidateId, route)
+
+      const newRawRoutes = [...this._rawRoutes]
+      
+      // 删掉第一条
+      newRawRoutes.shift()
+      newRawRoutes.push(route)
+      this._rawRoutes = newRawRoutes
+
+      routeReplaced = true;
+      break;
+    }
+
+    if (!routeReplaced) {
+      wx.showToast({
+        title: "暂无更多路线",
+        icon: "none"
+      });
+    
+      return;
+    }
+
+    const preparedRoutes = this.prepareRoutes(this._rawRoutes);
+
+    this.setData({routes: preparedRoutes});
 
     wx.showToast({
       title: "已更换路线",

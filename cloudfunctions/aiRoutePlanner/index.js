@@ -1,5 +1,7 @@
 const cloud = require("wx-server-sdk")
 const { createAiClient } = require("./aiClient")
+const { buildRoutePlanningPrompt } = require("./routePlanningPrompt")
+const { parseAndValidateRoutePlan } = require("./routePlanContract")
 
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV,
@@ -8,7 +10,7 @@ cloud.init({
 
 let aiClient
 
-exports.main = async () => {
+exports.main = async (event) => {
   try {
     if (!aiClient) {
       const ai = cloud.ai()
@@ -20,11 +22,107 @@ exports.main = async () => {
     console.error("[AI Client] Configuration unavailable:", error.message)
     return {
       success: false,
-      error: "AI_CONFIG_UNAVAILABLE"
+      error: {
+        code: "AI_CONFIG_UNAVAILABLE",
+        message:
+          "AI service configuration is unavailable."
+      }
     }
   }
 
-  const prompt = 'Return exactly: {"success":true}'
+  const result =
+    await generateWaypointPlan(
+      event,
+      aiClient
+    )
 
-  return aiClient.request(prompt)
+  return normalizeErrorResponse(result)
 }
+
+async function generateWaypointPlan(
+  event,
+  client
+) {
+  const normalizedEvent =
+    event &&
+    typeof event === "object" &&
+    !Array.isArray(event)
+      ? event
+      : {}
+
+  const promptResult =
+    buildRoutePlanningPrompt({
+      startPoint: normalizedEvent.startPoint,
+      preferences: normalizedEvent.preferences,
+      nearbyPois: normalizedEvent.nearbyPois
+    })
+
+  if (!promptResult.success) {
+    return promptResult
+  }
+
+  const aiResult =
+    await client.request(
+      promptResult.data.prompt
+    )
+
+  if (!aiResult.success) {
+    return aiResult
+  }
+
+  const planResult =
+    parseAndValidateRoutePlan(
+      aiResult.data.text,
+      normalizedEvent.nearbyPois
+    )
+
+  if (!planResult.success) {
+    return planResult
+  }
+
+  return {
+    success: true,
+    plan: planResult.data
+  }
+}
+
+
+function normalizeErrorResponse(result) {
+  if (
+    !result ||
+    result.success === true ||
+    typeof result.error !== "string"
+  ) {
+    return result
+  }
+
+  const errorMessages = {
+    INVALID_AI_ROUTE_INPUT:
+      "Route planning input is invalid.",
+
+    INVALID_AI_REQUEST:
+      "AI request is invalid.",
+
+    EMPTY_AI_RESPONSE:
+      "AI returned an empty response.",
+
+    AI_REQUEST_FAILED:
+      "Unable to request an AI route plan.",
+
+    INVALID_AI_ROUTE_PLAN:
+      "AI returned an invalid route plan."
+  }
+
+  return {
+    success: false,
+    error: {
+      code: result.error,
+      message:
+        errorMessages[result.error] ||
+        "Unable to generate waypoint plan."
+    }
+  }
+}
+
+exports.generateWaypointPlan =
+  generateWaypointPlan

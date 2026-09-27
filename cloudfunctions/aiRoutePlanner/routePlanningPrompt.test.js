@@ -13,10 +13,10 @@ const validInput = {
     routeType: "loop",
     crowdPreference: "low",
     environmentPreferences: [
-      "park",
-      "water",
-      "street",
-      "shopping_mall"
+      "公园",
+      "水边",
+      "街道",
+      "商街"
     ]
   },
 
@@ -27,7 +27,7 @@ const validInput = {
       category: "park",
       latitude: 45.501,
       longitude: -73.57,
-      distanceMeters: 350
+      distanceInMeters: 350
     },
     {
       poiId: "poi-2",
@@ -35,7 +35,7 @@ const validInput = {
       category: "water",
       latitude: 45.503,
       longitude: -73.572,
-      distanceMeters: 600
+      distanceInMeters: 600
     }
   ]
 }
@@ -109,20 +109,23 @@ describe("route planning prompt", () => {
     )
   })
 
-  test("requires JSON-only waypoint output", () => {
-    const result =
-      buildRoutePlanningPrompt(validInput)
-
-    const prompt = result.data.prompt
-
-    expect(prompt).toContain(
-      "Return JSON only."
-    )
-
-    expect(prompt).toContain(
-      '{"waypoints":[{"poiId":"verified-poi-id"}]}'
-    )
-  })
+  test(
+    "requires JSON-only multi-candidate waypoint output",
+    () => {
+      const result =
+        buildRoutePlanningPrompt(validInput)
+  
+      const prompt = result.data.prompt
+  
+      expect(prompt).toContain(
+        "Return JSON only."
+      )
+  
+      expect(prompt).toContain(
+        '{"candidates":[{"waypoints":[{"poiId":"verified-poi-id-1"}]},{"waypoints":[{"poiId":"verified-poi-id-2"}]}]}'
+      )
+    }
+  )
 
   test("rejects missing start point", () => {
     const input = {
@@ -170,6 +173,54 @@ describe("route planning prompt", () => {
     })
   })
 
+  test(
+    "rejects duplicate environment preferences",
+    () => {
+      const result =
+        buildRoutePlanningPrompt({
+          ...validInput,
+          preferences: {
+            ...validInput.preferences,
+            environmentPreferences: [
+              "公园",
+              "水边",
+              "街道",
+              "街道"
+            ]
+          }
+        })
+
+      expect(result).toEqual({
+        success: false,
+        error: "INVALID_AI_ROUTE_INPUT"
+      })
+    }
+  )
+
+  test(
+    "rejects unsupported environment preferences",
+    () => {
+      const result =
+        buildRoutePlanningPrompt({
+          ...validInput,
+          preferences: {
+            ...validInput.preferences,
+            environmentPreferences: [
+              "公园",
+              "水边",
+              "街道",
+              "海滩"
+            ]
+          }
+        })
+
+      expect(result).toEqual({
+        success: false,
+        error: "INVALID_AI_ROUTE_INPUT"
+      })
+    }
+  )
+
   test("rejects missing nearby POIs", () => {
     const result = buildRoutePlanningPrompt({
       ...validInput,
@@ -209,7 +260,33 @@ describe("route planning prompt", () => {
 
     const prompt = result.data.prompt
     expect(prompt).toContain(
-      "Do not select the same POI more than once."
+      "Within a route candidate, do not select the same POI more than once."
     )
   })
+
+  test(
+    "requires diverse route candidates without subset relationships",
+    () => {
+      const result =
+        buildRoutePlanningPrompt(validInput)
+  
+      const prompt = result.data.prompt
+  
+      expect(prompt).toContain(
+        "Generate between 1 and 5 distinct route candidates."
+      )
+  
+      expect(prompt).toContain(
+        "Aim to generate 5 route candidates"
+      )
+  
+      expect(prompt).toContain(
+        "neither candidate's POI set may be a subset of or equal to the other candidate's POI set."
+      )
+  
+      expect(prompt).toContain(
+        "same POI set are invalid even if their waypoint visit order is different."
+      )
+    }
+  )
 })
