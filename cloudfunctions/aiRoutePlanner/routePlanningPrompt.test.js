@@ -293,3 +293,23 @@ describe("route planning prompt", () => {
     }
   )
 })
+
+
+test('replanning prompt uses bounded allowlisted observations and preserves the first prompt', () => {
+  const first = buildRoutePlanningPrompt(validInput).data.prompt
+  expect(first).not.toContain('PREVIOUS FAILED ATTEMPTS')
+  const observation = { attempt: 1, waypointIds: ['poi-1'],
+    failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 2700,
+      rawPayload: 'secret-payload', latitude: 12, polyline: [1, 2] }, stack: 'private-stack' }
+  const prompt = buildRoutePlanningPrompt({ ...validInput,
+    replanningContext: { attempt: 2, previousFailures: Array(30).fill(observation) }
+  }).data.prompt
+  const section = prompt.split('PREVIOUS FAILED ATTEMPTS\n')[1].split('\nREPLANNING RULES')[0]
+  const context = JSON.parse(section)
+  expect(context.previousFailures).toHaveLength(10)
+  expect(context.previousFailures[0]).toEqual({ attempt: 1, waypointIds: ['poi-1'],
+    failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 2700 } })
+  for (const forbidden of ['latitude', 'polyline', 'secret-payload', 'private-stack']) expect(section).not.toContain(forbidden)
+  expect(prompt).toContain('Do not repeat previously failed sets')
+  expect(buildRoutePlanningPrompt({ ...validInput, replanningContext: { attempt: 999 } }).data.prompt).toBe(first)
+})

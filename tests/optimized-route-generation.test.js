@@ -148,6 +148,7 @@ test('initial generation skips a failed candidate and returns the next success b
   expect(result.routes[0].candidateWaypointIds).toEqual(['C', 'A'])
   expect(result.waypointCandidateCache.getAllCandidates().map(entry => entry.status))
     .toEqual(['failed', 'success', 'unused', 'unused'])
+  expect(aiCalls()).toHaveLength(1)
 })
 
 test('rejects a candidate outside the requested duration range and tries the next candidate', async () => {
@@ -293,4 +294,104 @@ test('unexpected evaluation exceptions settle the candidate instead of leaving i
   await expect(buildOptimizedCandidateRoute({ session, candidateCache: cache,
     candidate: cache.getUnusedCandidates()[0], location, candidateIndex: 0 })).rejects.toThrow('unexpected')
   expect(cache.getAllCandidates()[0].status).toBe('failed')
+})
+function sequencePlans(plans) {
+  let index = 0
+  callCloudFunction.mockImplementation(async name => name === 'getNearbyPois'
+    ? { poisByCategory: { park: pois } }
+    : { plan: plans[Math.min(index++, plans.length - 1)] })
+}
+const planSets = (...sets) => ({ candidates: sets.map(ids => ({ waypoints: ids.map(poiId => ({ poiId })) })) })
+const aiCalls = () => callCloudFunction.mock.calls.filter(([name]) => name === 'aiRoutePlanner')
+
+test('first attempt succeeds with metadata and no retry context', async () => {
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai')
+  expect(result.planningMetadata).toEqual({ attemptCount: 1, replanned: false })
+  expect(aiCalls()).toHaveLength(1)
+  expect(aiCalls()[0][1]).not.toHaveProperty('replanningContext')
+})
+
+test('all candidates are used before replanning, with shared directed cache and current alternatives', async () => {
+  sequencePlans([planSets(['A', 'B'], ['A', 'D']), planSets(['B', 'A'], ['A', 'C'], ['A', 'E'])])
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true,
+    durationSeconds: ['B', 'D'].includes(from.nodeId) || ['B', 'D'].includes(to.nodeId) ? 100 : 1350,
+    distanceMeters: 200, polyline: [from, to]
+  }))
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai-replanned')
+  expect(result.planningMetadata).toEqual({ attemptCount: 2, replanned: true })
+  expect(aiCalls()).toHaveLength(2)
+  expect(aiCalls()[1][1].replanningContext).toEqual({ attempt: 2, previousFailures: [
+    { attempt: 1, waypointIds: ['A', 'B'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 1450, targetDurationSeconds: 2700 } },
+    { attempt: 1, waypointIds: ['A', 'D'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 1450, targetDurationSeconds: 2700 } }
+  ] })
+  expect(result.waypointCandidateCache.getAllCandidates().map(c => c.status)).toEqual(['failed', 'success', 'unused'])
+  expect(result.waypointCandidateCache.getUnusedCandidates()[0].waypointIds).toEqual(['A', 'E'])
+  expect(getWalkingSegment.mock.calls.filter(([from, to]) => from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
+  expect(getWalkingSegment).toHaveBeenCalledTimes(10)
+  expect(getCurrentLocation).toHaveBeenCalledTimes(1)
+})
+
+test('repeated sets in another order stop at attempt two and fallback reuses resolved edges', async () => {
+  sequencePlans([planSets(['A', 'B']), planSets(['B', 'A'])])
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 100, distanceMeters: 200, polyline: [from, to]
+  }))
+  const result = await generateRoutes(preferences)
+  expect(aiCalls()).toHaveLength(2)
+  expect(result).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(getWalkingSegment.mock.calls.filter(([from, to]) => from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
+})
+
+test('three distinct failed attempts exhaust the budget before deterministic fallback', async () => {
+  sequencePlans([planSets(['A', 'B']), planSets(['A', 'C']), planSets(['A', 'D'])])
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 200, polyline: [from, to]
+  }))
+  const result = await generateRoutes(preferences)
+  expect(aiCalls()).toHaveLength(3)
+  expect(result.source).toBe('fallback')
+  expect(result.planningMetadata).toEqual({ attemptCount: 3, replanned: true })
+  expect(aiCalls()[2][1].replanningContext.previousFailures.map(o => o.failure.type))
+    .toEqual(['DURATION_TOO_LONG', 'DURATION_TOO_LONG'])
+})
+
+test('invalid model output can recover on the next planning call', async () => {
+  sequencePlans([{ candidates: null }, planSets(['A', 'B'])])
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai-replanned')
+  expect(aiCalls()[1][1].replanningContext.previousFailures).toEqual([
+    { attempt: 1, waypointIds: [], failure: { type: 'INVALID_AI_PLAN' } }
+  ])
+})
+
+test('directed unwalkable observations omit provider data and precise location', async () => {
+  const log = jest.spyOn(console, 'log').mockImplementation(() => {})
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    sequencePlans([planSets(['A', 'B']), planSets(['A', 'C'])])
+    getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
+      ? { success: false, error: 'ROUTE_NOT_FOUND', rawPayload: 'private-provider-data', latitude: 30 }
+      : { success: true, durationSeconds: 1350, distanceMeters: 200, polyline: [from, to] })
+    expect((await generateRoutes(preferences)).source).toBe('ai-replanned')
+    const observations = aiCalls()[1][1].replanningContext.previousFailures
+    expect(observations[0].failure).toMatchObject({ type: 'UNWALKABLE_SEGMENT' })
+    const safe = JSON.stringify([observations, log.mock.calls, warn.mock.calls])
+    for (const forbidden of ['latitude', 'longitude', 'polyline', 'private-provider-data']) expect(safe).not.toContain(forbidden)
+  } finally { log.mockRestore(); warn.mockRestore() }
+})
+
+test('rate limiting stops before another candidate, another AI call, or fallback', async () => {
+  jest.useFakeTimers()
+  try {
+    getWalkingSegment.mockResolvedValue({ success: false, error: 'AMAP_RATE_LIMITED' })
+    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+    await jest.runAllTimersAsync()
+    await assertion
+    expect(aiCalls()).toHaveLength(1)
+    expect(getWalkingSegment.mock.calls.every(([from, to]) =>
+      ['START', 'A', 'B'].includes(from.nodeId) && ['START', 'A', 'B'].includes(to.nodeId))).toBe(true)
+  } finally { jest.useRealTimers() }
 })

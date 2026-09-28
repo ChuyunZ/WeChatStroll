@@ -133,6 +133,38 @@ function isValidNearbyPois(nearbyPois) {
   return true
 }
 
+function buildReplanningSection(context, nearbyPois) {
+  if (!context || !Number.isInteger(context.attempt) || context.attempt < 2 ||
+      context.attempt > 3 || !Array.isArray(context.previousFailures)) return []
+  const allowedIds = new Set(nearbyPois.map(poi => poi.poiId))
+  const types = new Set(['INVALID_AI_PLAN', 'UNWALKABLE_SEGMENT', 'NO_COMPLETE_ROUTE',
+    'DURATION_TOO_SHORT', 'DURATION_TOO_LONG', 'ROUTE_BUILD_FAILED'])
+  const previousFailures = []
+  for (const observation of context.previousFailures.slice(0, 2 * MAX_ROUTE_CANDIDATES)) {
+    if (!observation || !Number.isInteger(observation.attempt) || observation.attempt < 1 ||
+        observation.attempt >= context.attempt || !Array.isArray(observation.waypointIds) ||
+        observation.waypointIds.length > MAX_WAYPOINTS ||
+        !observation.waypointIds.every(id => allowedIds.has(id)) ||
+        !observation.failure || !types.has(observation.failure.type)) continue
+    const failure = { type: observation.failure.type }
+    for (const key of ['fromPoiId', 'toPoiId']) {
+      if (observation.waypointIds.includes(observation.failure[key])) failure[key] = observation.failure[key]
+    }
+    for (const key of ['actualDurationSeconds', 'targetDurationSeconds']) {
+      const value = observation.failure[key]
+      if (Number.isFinite(value) && value >= 0) failure[key] = value
+    }
+    previousFailures.push({ attempt: observation.attempt, waypointIds: [...observation.waypointIds], failure })
+  }
+  return [
+    '', 'PREVIOUS FAILED ATTEMPTS',
+    JSON.stringify({ attempt: context.attempt, previousFailures }),
+    'REPLANNING RULES',
+    'Choose different useful waypoint sets. Do not repeat previously failed sets, even in a different order.',
+    'Use only VERIFIED POI CANDIDATES. Do not invent route facts. The optimizer determines visit order.'
+  ]
+}
+
 function buildRoutePlanningPrompt(input) {
   if (
     !input ||
@@ -233,6 +265,7 @@ function buildRoutePlanningPrompt(input) {
     "",
     "VERIFIED POI CANDIDATES",
     JSON.stringify(nearbyPois, null, 2),
+    ...buildReplanningSection(input.replanningContext, nearbyPois),
   
     "",
     "EXPECTED OUTPUT FORMAT",

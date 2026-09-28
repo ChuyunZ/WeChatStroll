@@ -147,6 +147,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   const evaluated = new Map()
   let best = null
   let temporaryFailure = null
+  let failedSegment = null
   let rounds = 0
   const roundEvaluationCounts = []
 
@@ -162,6 +163,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   }
 
   async function evaluate(order) {
+    if (temporaryFailure) return null
     const key = JSON.stringify(order)
     if (evaluated.has(key)) return evaluated.get(key)
     if (!exact && evaluated.size >= ORDERING_MAX_EVALUATIONS) return null
@@ -170,6 +172,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       orderedWaypointIds: order
     })
     if (cost.error === 'AMAP_RATE_LIMITED') temporaryFailure = cost
+    if (!cost.success && cost.failedSegment) failedSegment = cost.failedSegment
     const result = cost.success ? { ...cost, order: [...order] } : null
     // Failed orders also consume the budget; never compare partial routes.
     evaluated.set(key, result)
@@ -179,7 +182,9 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
 
   let seedCount = 0
   if (exact) {
-    await session.prefetchSegments(ids)
+    const prefetch = await session.prefetchSegments(ids)
+    const throttled = prefetch && prefetch.failedEdges && prefetch.failedEdges.find(edge => edge.error === 'AMAP_RATE_LIMITED')
+    if (throttled) temporaryFailure = { failedSegment: throttled }
     for (const order of permutations(ids)) await evaluate(order)
   } else {
     const seeds = createSeeds(searchData)
@@ -189,13 +194,13 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       frontiers.push({ order, result: await evaluate(order) })
     }
     for (let round = 0; round < ORDERING_MAX_ROUNDS; round++) {
-      if (evaluated.size >= ORDERING_MAX_EVALUATIONS) break
+      if (temporaryFailure || evaluated.size >= ORDERING_MAX_EVALUATIONS) break
       rounds++
       const roundStartEvaluationCount = evaluated.size
       const roundBudget = Math.ceil(
         (ORDERING_MAX_EVALUATIONS - evaluated.size) / (ORDERING_MAX_ROUNDS - round)
       )
-      const hasRoundCapacity = () => evaluated.size < ORDERING_MAX_EVALUATIONS &&
+      const hasRoundCapacity = () => !temporaryFailure && evaluated.size < ORDERING_MAX_EVALUATIONS &&
         evaluated.size - roundStartEvaluationCount < roundBudget
       const next = frontiers.map(frontier => ({ ...frontier }))
       // Snapshot after seed evaluation / the previous round. Do not resort
@@ -242,10 +247,11 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
     distanceMeters: best ? best.distanceMeters : null,
     targetErrorSeconds: best && hasTarget ? Math.abs(best.durationSeconds - targetSeconds) : null
   }
-  if (!best) {
+  if (!best || temporaryFailure) {
     return { success: false,
       error: temporaryFailure ? 'AMAP_RATE_LIMITED' : 'WAYPOINT_ORDER_NOT_FOUND',
-      ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment } : {}), optimization }
+      ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment }
+        : failedSegment ? { failedSegment } : {}), optimization }
   }
   return { success: true, recommendedWaypointIds: [...best.order], optimization }
 }

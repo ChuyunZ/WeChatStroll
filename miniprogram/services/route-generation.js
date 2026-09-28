@@ -1,4 +1,5 @@
 const locationService = require('./location')
+const { waypointSetKey, normalizePlanningFailure, isReplannableFailure } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
@@ -26,7 +27,8 @@ const {
 } = require('./poi-search-radius')
 
 const {
-  MAX_FALLBACK_CANDIDATES
+  MAX_FALLBACK_CANDIDATES,
+  MAX_AI_PLANNING_ATTEMPTS
 } = require('../config/route-planning')
 
 const {
@@ -360,7 +362,8 @@ async function searchNearbyPois(
 async function requestWaypointPlan(
   location,
   preferences,
-  nearbyPois
+  nearbyPois,
+  replanningContext
 ) {
   const result =
     await callCloudFunction(
@@ -371,7 +374,8 @@ async function requestWaypointPlan(
           longitude: location.longitude
         },
         preferences,
-        nearbyPois
+        nearbyPois,
+        ...(replanningContext ? { replanningContext } : {})
       },
       {
         fallbackCode:
@@ -1159,128 +1163,106 @@ async function generateRoutes(
     }
   }
 
-  let plan
-
-  try {
-    plan = await requestWaypointPlan(
-      location,
-      preferences,
-      nearbyPois
-    )
-  } catch (error) {
-    return buildFallbackGenerationResult({
-      location,
-      poisByCategory,
-      preferences,
-      trigger: error && error.code
-        ? error.code
-        : 'AI_ROUTE_PLANNING_FAILED'
-    })
-  }
-
-  if (!hasValidWaypointPlanShape(plan)) {
-    return buildFallbackGenerationResult({
-      location,
-      poisByCategory,
-      preferences,
-      trigger: 'INVALID_AI_ROUTE_PLAN'
-    })
-  }
-
-  if (plan.candidates.length === 0) {
-    return buildFallbackGenerationResult({
-      location,
-      poisByCategory,
-      preferences,
-      trigger: 'NO_WAYPOINT_CANDIDATES'
-    })
-  }
-
-  const routeType = getRequestedRouteType(preferences)
-  console.log(
-    '[Route Generation] Plan received:',
-    {
-      candidateCount: plan.candidates.length,
-      routeType,
-      requestedDurationMinutes: preferences.durationMinutes,
-      candidates:
-        plan.candidates.map(
-          (candidate, candidateIndex) => ({
-            candidateIndex,
-            waypointIds:
-              candidate.waypoints.map(
-                waypoint => waypoint.poiId
-              )
-          })
-        )
-    }
-  )
-
-  // Create a session using start point, all nearbyPois and route type
-  const candidatePoiIds = new Set(
-      plan.candidates.flatMap(
-        candidate =>
-          candidate.waypoints.map(
-            waypoint => waypoint.poiId
-          )
-      )
-    )
-
-  const verifiedWaypointPool = nearbyPois.filter(
-      poi =>
-        candidatePoiIds.has(poi.poiId)
-    )
-
   const session = createRoutePlanningSession({
-      start: location,
-      verifiedWaypointPool,
-      routeType
+    start: location,
+    verifiedWaypointPool: nearbyPois,
+    routeType: getRequestedRouteType(preferences)
+  })
+  const attemptedWaypointSets = new Set()
+  const observations = []
+  let attemptCount = 0
+  let trigger = 'NO_VALID_AI_ROUTE'
+
+  for (let attempt = 1; attempt <= MAX_AI_PLANNING_ATTEMPTS; attempt++) {
+    attemptCount = attempt
+    console.log('[Agent Planning] Attempt start:', { attempt, observationCount: observations.length })
+    let plan
+    let planFailure
+    try {
+      plan = await requestWaypointPlan(location, preferences, nearbyPois,
+        attempt === 1 ? undefined : { attempt, previousFailures: [...observations] })
+      if (!hasValidWaypointPlanShape(plan)) planFailure = { error: 'INVALID_AI_ROUTE_PLAN' }
+    } catch (error) {
+      if (error && error.code === 'AMAP_RATE_LIMITED') throw error
+      trigger = error && error.code || 'AI_ROUTE_PLANNING_FAILED'
+      planFailure = { error: trigger }
+    }
+
+    const attemptObservations = []
+    let attemptedCandidates = 0
+    let canReplan = true
+    if (planFailure) {
+      trigger = planFailure.error
+      const failure = normalizePlanningFailure(planFailure)
+      attemptObservations.push({ attempt, waypointIds: [], failure })
+      canReplan = isReplannableFailure(failure)
+    } else {
+      console.log('[Agent Planning] Plan received:', { attempt, candidateCount: plan.candidates.length })
+      const candidateCache = createWaypointCandidateCache(plan.candidates)
+      // Settle repeated entries before execution, including alternatives after a success.
+      const unseen = []
+      const responseSets = new Set()
+      for (const [candidateIndex, candidate] of candidateCache.getUnusedCandidates().entries()) {
+        const key = waypointSetKey(candidate.waypointIds)
+        if (attemptedWaypointSets.has(key) || responseSets.has(key)) {
+          candidateCache.markFailed(candidate.candidateId)
+          console.log('[Agent Planning] Candidate skipped:', {
+            attempt, reason: 'REPEATED_WAYPOINT_SET', waypointIds: candidate.waypointIds
+          })
+        } else {
+          responseSets.add(key)
+          unseen.push({ candidateIndex, candidate, key })
+        }
+      }
+      for (const { candidateIndex, candidate, key } of unseen) {
+        attemptedWaypointSets.add(key)
+        attemptedCandidates++
+        const result = await buildOptimizedCandidateRoute({
+          session, candidateCache, candidate, location, candidateIndex,
+          requestedDurationMinutes: preferences.durationMinutes
+        })
+        if (result.error === 'AMAP_RATE_LIMITED') {
+          throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
+        }
+        if (result.success) {
+          const source = attempt === 1 ? 'ai' : 'ai-replanned'
+          logCandidateSummary(candidateCache)
+          console.log('[Agent Planning] Success:', { attempt, source })
+          return {
+            status: 'success', source, location, routes: [result.route],
+            routePlanningSession: session, waypointCandidateCache: candidateCache,
+            planningMetadata: { attemptCount, replanned: attemptCount > 1 }
+          }
+        }
+        const failure = normalizePlanningFailure(result, candidate.waypointIds)
+        attemptObservations.push({ attempt, waypointIds: [...candidate.waypointIds], failure })
+        if (!isReplannableFailure(failure)) canReplan = false
+      }
+      logCandidateSummary(candidateCache)
+      if (attemptedCandidates === 0) {
+        trigger = plan.candidates.length ? 'REPEATED_WAYPOINT_SET' : 'NO_WAYPOINT_CANDIDATES'
+        canReplan = false
+      }
+    }
+    observations.push(...attemptObservations)
+    console.warn('[Agent Planning] Attempt failed:', {
+      attempt, attemptedCandidates,
+      failureTypes: [...new Set(attemptObservations.map(observation => observation.failure.type))]
     })
-
-  const candidateCache = createWaypointCandidateCache(plan.candidates)
-
-  const routes = []
-  let temporaryFailure = false
-
-  const unusedCandidates = candidateCache.getUnusedCandidates()
-
-  for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
-    if (routes.length >= 1) {
+    if (!canReplan) break
+    if (attempt === MAX_AI_PLANNING_ATTEMPTS) {
+      console.warn('[Agent Planning] Attempts exhausted:', { attemptCount })
       break
     }
-
-    const result = await buildOptimizedCandidateRoute({
-      session, candidateCache, candidate, location, candidateIndex,
-      requestedDurationMinutes: preferences.durationMinutes
-    })
-    if (result.success) routes.push(result.route)
-    if (result.error === 'AMAP_RATE_LIMITED') temporaryFailure = true
+    console.log('[Agent Planning] Replanning:', { nextAttempt: attempt + 1, observationCount: observations.length })
   }
-  logCandidateSummary(candidateCache)
 
-  if (routes.length === 0) {
-    if (temporaryFailure) throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
-    return buildFallbackGenerationResult({
-      location,
-      poisByCategory,
-      preferences,
-      trigger: 'NO_VALID_AI_ROUTE',
-      routePlanningSession: session
-    })
-  }
-  
-  return {
-    status: 'success',
-    source: 'ai',
-    location,
-    routes,
-
-    // 以后如果还要生成新 route 继续用同一个 start / waypoint pool / segment cache
-    routePlanningSession: session, 
-
-    // 记住哪些 AI candidate 已经用过 哪些 success / failed / unused
-    waypointCandidateCache: candidateCache
-  }
+  const result = await buildFallbackGenerationResult({
+    location, poisByCategory, preferences, trigger, routePlanningSession: session
+  })
+  return result.status === 'success'
+    ? { ...result, planningMetadata: { attemptCount, replanned: attemptCount > 1 } }
+    : result
 }
 
 async function generateFirstRoute(
