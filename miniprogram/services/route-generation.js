@@ -1197,6 +1197,7 @@ async function generateRoutes(
       attemptObservations.push({ attempt, waypointIds: [], failure })
       canReplan = isReplannableFailure(failure)
     } else {
+      trigger = 'NO_VALID_AI_ROUTE'
       console.log('[Agent Planning] Plan received:', { attempt, candidateCount: plan.candidates.length })
       const candidateCache = createWaypointCandidateCache(plan.candidates)
       // Settle repeated entries before execution, including alternatives after a success.

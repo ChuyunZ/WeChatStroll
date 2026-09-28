@@ -367,6 +367,23 @@ test('invalid model output can recover on the next planning call', async () => {
   ])
 })
 
+test('fallback logs the final route failure after an earlier invalid AI plan', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    sequencePlans([{ candidates: null }, planSets(['A', 'B']), planSets(['A', 'C'])])
+    getWalkingSegment.mockImplementation(async (from, to) => ({
+      success: true, durationSeconds: 2700, distanceMeters: 200, polyline: [from, to]
+    }))
+    const result = await generateRoutes(preferences)
+    expect(result.source).toBe('fallback')
+    expect(aiCalls()).toHaveLength(3)
+    expect(warn).toHaveBeenCalledWith('[Route Generation] Falling back:',
+      expect.objectContaining({ trigger: 'NO_VALID_AI_ROUTE' }))
+    expect(warn).not.toHaveBeenCalledWith('[Route Generation] Falling back:',
+      expect.objectContaining({ trigger: 'INVALID_AI_ROUTE_PLAN' }))
+  } finally { warn.mockRestore() }
+})
+
 test('directed unwalkable observations omit provider data and precise location', async () => {
   const log = jest.spyOn(console, 'log').mockImplementation(() => {})
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})

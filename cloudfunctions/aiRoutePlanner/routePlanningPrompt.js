@@ -1,3 +1,4 @@
+const { MAX_AI_PLANNING_ATTEMPTS } = require("./config")
 const {
   MIN_WAYPOINTS,
   MAX_WAYPOINTS,
@@ -135,12 +136,13 @@ function isValidNearbyPois(nearbyPois) {
 
 function buildReplanningSection(context, nearbyPois) {
   if (!context || !Number.isInteger(context.attempt) || context.attempt < 2 ||
-      context.attempt > 3 || !Array.isArray(context.previousFailures)) return []
+      context.attempt > MAX_AI_PLANNING_ATTEMPTS || !Array.isArray(context.previousFailures)) return []
   const allowedIds = new Set(nearbyPois.map(poi => poi.poiId))
   const types = new Set(['INVALID_AI_PLAN', 'UNWALKABLE_SEGMENT', 'NO_COMPLETE_ROUTE',
     'DURATION_TOO_SHORT', 'DURATION_TOO_LONG', 'ROUTE_BUILD_FAILED'])
   const previousFailures = []
-  for (const observation of context.previousFailures.slice(0, 2 * MAX_ROUTE_CANDIDATES)) {
+  const maxPreviousFailures = (MAX_AI_PLANNING_ATTEMPTS - 1) * MAX_ROUTE_CANDIDATES
+  for (const observation of context.previousFailures.slice(0, maxPreviousFailures)) {
     if (!observation || !Number.isInteger(observation.attempt) || observation.attempt < 1 ||
         observation.attempt >= context.attempt || !Array.isArray(observation.waypointIds) ||
         observation.waypointIds.length > MAX_WAYPOINTS ||

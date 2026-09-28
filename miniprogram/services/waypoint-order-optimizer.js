@@ -163,7 +163,6 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   }
 
   async function evaluate(order) {
-    if (temporaryFailure) return null
     const key = JSON.stringify(order)
     if (evaluated.has(key)) return evaluated.get(key)
     if (!exact && evaluated.size >= ORDERING_MAX_EVALUATIONS) return null
@@ -182,9 +181,8 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
 
   let seedCount = 0
   if (exact) {
-    const prefetch = await session.prefetchSegments(ids)
-    const throttled = prefetch && prefetch.failedEdges && prefetch.failedEdges.find(edge => edge.error === 'AMAP_RATE_LIMITED')
-    if (throttled) temporaryFailure = { failedSegment: throttled }
+    // Speculative edges may fail without preventing a complete order.
+    await session.prefetchSegments(ids)
     for (const order of permutations(ids)) await evaluate(order)
   } else {
     const seeds = createSeeds(searchData)
@@ -194,13 +192,13 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       frontiers.push({ order, result: await evaluate(order) })
     }
     for (let round = 0; round < ORDERING_MAX_ROUNDS; round++) {
-      if (temporaryFailure || evaluated.size >= ORDERING_MAX_EVALUATIONS) break
+      if (evaluated.size >= ORDERING_MAX_EVALUATIONS) break
       rounds++
       const roundStartEvaluationCount = evaluated.size
       const roundBudget = Math.ceil(
         (ORDERING_MAX_EVALUATIONS - evaluated.size) / (ORDERING_MAX_ROUNDS - round)
       )
-      const hasRoundCapacity = () => !temporaryFailure && evaluated.size < ORDERING_MAX_EVALUATIONS &&
+      const hasRoundCapacity = () => evaluated.size < ORDERING_MAX_EVALUATIONS &&
         evaluated.size - roundStartEvaluationCount < roundBudget
       const next = frontiers.map(frontier => ({ ...frontier }))
       // Snapshot after seed evaluation / the previous round. Do not resort
@@ -247,7 +245,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
     distanceMeters: best ? best.distanceMeters : null,
     targetErrorSeconds: best && hasTarget ? Math.abs(best.durationSeconds - targetSeconds) : null
   }
-  if (!best || temporaryFailure) {
+  if (!best) {
     return { success: false,
       error: temporaryFailure ? 'AMAP_RATE_LIMITED' : 'WAYPOINT_ORDER_NOT_FOUND',
       ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment }

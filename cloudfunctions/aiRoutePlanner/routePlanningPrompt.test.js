@@ -1,6 +1,14 @@
 const {
   buildRoutePlanningPrompt
 } = require("./routePlanningPrompt")
+const { MAX_AI_PLANNING_ATTEMPTS } = require('./config')
+const { MAX_ROUTE_CANDIDATES } = require('./routePlanContract')
+
+test('AI planning attempt limits stay synchronized across deployments', () => {
+  expect(MAX_AI_PLANNING_ATTEMPTS).toBe(
+    require('../../miniprogram/config/route-planning').MAX_AI_PLANNING_ATTEMPTS
+  )
+})
 
 const validInput = {
   startPoint: {
@@ -306,7 +314,7 @@ test('replanning prompt uses bounded allowlisted observations and preserves the 
   }).data.prompt
   const section = prompt.split('PREVIOUS FAILED ATTEMPTS\n')[1].split('\nREPLANNING RULES')[0]
   const context = JSON.parse(section)
-  expect(context.previousFailures).toHaveLength(10)
+  expect(context.previousFailures).toHaveLength((MAX_AI_PLANNING_ATTEMPTS - 1) * MAX_ROUTE_CANDIDATES)
   expect(context.previousFailures[0]).toEqual({ attempt: 1, waypointIds: ['poi-1'],
     failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 2700 } })
   for (const forbidden of ['latitude', 'polyline', 'secret-payload', 'private-stack']) expect(section).not.toContain(forbidden)
