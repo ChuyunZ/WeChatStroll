@@ -883,6 +883,22 @@ describe(
     );
 
 
+    test('route previews retain every POI, numbered markers and fitting coordinates', () => {
+      const pointsOfInterest = Array.from({ length: 8 }, (_, index) => ({
+        poiId: `poi-${index}`, name: `Place ${index}`,
+        latitude: 23.13 + index / 100, longitude: 113.27
+      }));
+      const route = { ...GENERATED_ROUTE, pointsOfInterest, endPoint: pointsOfInterest[7] };
+      const [prepared] = page.prepareRoutes([route]);
+      expect(prepared.previewMarkers).toHaveLength(9);
+      expect(prepared.displayPois.map(poi => poi.poiId)).toEqual(pointsOfInterest.map(poi => poi.poiId));
+      pointsOfInterest.forEach((poi, index) => {
+        expect(prepared.previewMarkers[index + 1].title).toContain(`${index + 1}. ${poi.name}`);
+        expect(prepared.previewPoints).toContainEqual({ latitude: poi.latitude, longitude: poi.longitude });
+      });
+      expect(route.displayPois).toBeUndefined();
+    });
+
     test(
       "prepareRoutes formats a generated real route correctly",
       () => {

@@ -2,6 +2,21 @@ page {
   background: #f7f8f5;
 }
 
+.poi-list {
+  margin-top: 22rpx;
+  padding: 20rpx;
+  background: #f8faf7;
+  border-radius: 16rpx;
+}
+
+.poi-row {
+  margin-top: 10rpx;
+  color: #555555;
+  font-size: 24rpx;
+  line-height: 36rpx;
+  word-break: break-all;
+}
+
 .page {
   min-height: 100vh;
   padding: 36rpx 30rpx 60rpx;

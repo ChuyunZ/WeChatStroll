@@ -266,11 +266,16 @@ page {
 .legend-item {
   display: flex;
   align-items: center;
+  margin: 0 8rpx;
 }
 
 .legend-middle {
-  margin-left: 30rpx;
-  margin-right: 30rpx;
+  margin-left: 8rpx;
+  margin-right: 8rpx;
+}
+
+.poi-dot {
+  background: #208ca8;
 }
 
 .legend-dot {
@@ -451,4 +456,12 @@ page {
 
 .back-button::after {
   border: none;
+}
+
+.poi-row {
+  margin-top: 14rpx;
+  color: #555555;
+  font-size: 25rpx;
+  line-height: 40rpx;
+  word-break: break-all;
 }

@@ -78,6 +78,8 @@
           longitude="{{item.previewLongitude}}"
           scale="16"
           polyline="{{item.previewPolyline}}"
+          markers="{{item.previewMarkers}}"
+          include-points="{{item.previewPoints}}"
           enable-scroll="{{false}}"
           enable-zoom="{{false}}"
           enable-rotate="{{false}}"
@@ -134,6 +136,13 @@
 
 
       <!-- Recommendation -->
+      <view class="poi-list" wx:if="{{item.displayPois.length}}">
+        <text class="reason-label">途经地点（按访问顺序）</text>
+        <view class="poi-row" wx:for="{{item.displayPois}}" wx:for-item="poi" wx:key="visitNumber">
+          <text>{{poi.visitNumber}}. {{poi.displayName}}</text>
+        </view>
+      </view>
+
       <view class="reason">
         <text class="reason-label">推荐理由</text>
         <text class="reason-text">

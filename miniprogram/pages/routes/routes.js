@@ -1,6 +1,7 @@
 const routeGenerationService = require(
   "../../services/route-generation"
 );
+const { buildRouteMap } = require("../../utils/route-map");
 
 const {
   ROUTE_TYPES
@@ -292,6 +293,7 @@ Page({
 
   prepareRoutes(routes) {
     return routes.map((route) => {
+      const routeMap = buildRouteMap(route);
       const middleIndex =
         Math.floor(
           route.polyline.length / 2
@@ -327,6 +329,9 @@ Page({
 
       return {
         ...route,
+        displayPois: routeMap.displayPois,
+        previewMarkers: routeMap.markers,
+        previewPoints: routeMap.mapPoints,
 
         distanceKm:
           (
