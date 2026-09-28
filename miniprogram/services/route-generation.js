@@ -919,7 +919,13 @@ async function buildFallbackGenerationResult({
 }) {
   console.warn(
     '[Route Generation] Falling back:',
-    { trigger }
+    {
+      trigger,
+      reusedPlanningSession:
+        Boolean(routePlanningSession),
+      requestedDurationMinutes:
+        preferences.durationMinutes
+    }
   )
 
   const fallbackPois =
@@ -928,15 +934,46 @@ async function buildFallbackGenerationResult({
       preferences
     )
 
+  const routeType =
+    getRequestedRouteType(preferences)
+
+  console.log(
+    '[Route Generation] Fallback candidates:',
+    {
+      routeType,
+      targetDistanceMeters:
+        getFallbackTargetPoiDistance(
+          preferences
+        ),
+      candidateCount: fallbackPois.length,
+      candidates:
+        fallbackPois.map(
+          (poi, candidateIndex) => ({
+            candidateIndex,
+            poiId: poi.poiId,
+            name: poi.name,
+            category: poi.category,
+            distanceInMeters:
+              poi.distanceInMeters
+          })
+        )
+    }
+  )
+
   if (fallbackPois.length === 0) {
+    console.warn(
+      '[Route Generation] Fallback exhausted:',
+      {
+        attemptedCandidates: 0,
+        result: 'NO_VALID_ROUTE'
+      }
+    )
+
     return {
       status: 'empty',
       reason: 'NO_VALID_ROUTE'
     }
   }
-
-  const routeType =
-    getRequestedRouteType(preferences)
 
   const fallbackSession =
     routePlanningSession ||
@@ -952,7 +989,24 @@ async function buildFallbackGenerationResult({
     )
   }
 
-  for (const selectedPoi of fallbackPois) {
+  for (
+    const [
+      candidateIndex,
+      selectedPoi
+    ] of fallbackPois.entries()
+  ) {
+    console.log(
+      '[Route Generation] Trying fallback candidate:',
+      {
+        candidateIndex,
+        poiId: selectedPoi.poiId,
+        name: selectedPoi.name,
+        category: selectedPoi.category,
+        distanceInMeters:
+          selectedPoi.distanceInMeters
+      }
+    )
+
     const walkingRoute =
       await fallbackSession.buildRouteForOrder({
         allowedWaypointIds: [selectedPoi.poiId],
@@ -961,6 +1015,24 @@ async function buildFallbackGenerationResult({
       })
 
     if (!walkingRoute || walkingRoute.success !== true) {
+      console.warn(
+        '[Route Generation] Fallback candidate failed:',
+        {
+          stage: 'route_build',
+          candidateIndex,
+          poiId: selectedPoi.poiId,
+          error:
+            walkingRoute &&
+            walkingRoute.error,
+          reason:
+            walkingRoute &&
+            walkingRoute.reason,
+          failedSegment:
+            walkingRoute &&
+            walkingRoute.failedSegment
+        }
+      )
+
       if (
         walkingRoute &&
         walkingRoute.error === 'AMAP_RATE_LIMITED'
@@ -985,6 +1057,25 @@ async function buildFallbackGenerationResult({
       )
 
     if (!validation.valid) {
+      console.warn(
+        '[Route Generation] Fallback candidate failed:',
+        {
+          stage: 'route_validation',
+          candidateIndex,
+          poiId: selectedPoi.poiId,
+          error: validation.error,
+          reason: validation.reason,
+          actualDurationSeconds:
+            validation.actualDurationSeconds,
+          targetDurationSeconds:
+            validation.targetDurationSeconds,
+          minDurationSeconds:
+            validation.minDurationSeconds,
+          maxDurationSeconds:
+            validation.maxDurationSeconds
+        }
+      )
+
       continue
     }
 
@@ -995,6 +1086,19 @@ async function buildFallbackGenerationResult({
         walkingRoute,
         preferences
       })
+
+    console.log(
+      '[Route Generation] Fallback succeeded:',
+      {
+        candidateIndex,
+        poiId: selectedPoi.poiId,
+        name: selectedPoi.name,
+        durationSeconds:
+          walkingRoute.durationSeconds,
+        distanceMeters:
+          walkingRoute.distanceMeters
+      }
+    )
 
     return {
       status: 'success',
@@ -1007,6 +1111,15 @@ async function buildFallbackGenerationResult({
         createWaypointCandidateCache([])
     }
   }
+
+  console.warn(
+    '[Route Generation] Fallback exhausted:',
+    {
+      attemptedCandidates:
+        fallbackPois.length,
+      result: 'NO_VALID_ROUTE'
+    }
+  )
 
   return {
     status: 'empty',
