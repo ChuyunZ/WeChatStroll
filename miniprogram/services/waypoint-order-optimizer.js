@@ -146,6 +146,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   const strategy = exact ? 'exact' : 'heuristic'
   const evaluated = new Map()
   let best = null
+  let temporaryFailure = null
   let rounds = 0
   const roundEvaluationCounts = []
 
@@ -168,6 +169,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       allowedWaypointIds: ids,
       orderedWaypointIds: order
     })
+    if (cost.error === 'AMAP_RATE_LIMITED') temporaryFailure = cost
     const result = cost.success ? { ...cost, order: [...order] } : null
     // Failed orders also consume the budget; never compare partial routes.
     evaluated.set(key, result)
@@ -242,7 +244,8 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   }
   if (!best) {
     return { success: false,
-      error: 'WAYPOINT_ORDER_NOT_FOUND', optimization }
+      error: temporaryFailure ? 'AMAP_RATE_LIMITED' : 'WAYPOINT_ORDER_NOT_FOUND',
+      ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment } : {}), optimization }
   }
   return { success: true, recommendedWaypointIds: [...best.order], optimization }
 }

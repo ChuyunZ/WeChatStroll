@@ -178,6 +178,7 @@ function loadRoutesPage({
   pageDefinition = null;
 
   routeGenerationServiceMock = {
+    logCandidateSummary: jest.fn(),
     generateRoutes:
       jest.fn(),
 
@@ -246,6 +247,90 @@ function loadRoutesPage({
   return pageInstance;
 }
 
+
+describe('progressive initial route loading', () => {
+  function setup() {
+    const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
+    const cache = createWaypointCandidateCache(['A', 'B', 'C', 'D', 'E'].map(poiId => ({ waypoints: [{ poiId }] })));
+    cache.markBuilding('candidate-1');
+    cache.markSuccess('candidate-1', GENERATED_ROUTE);
+    const pending = [];
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(options => {
+      expect(cache.markBuilding(options.candidate.candidateId)).toBe(true);
+      const deferred = createDeferred();
+      pending.push({ options, ...deferred });
+      return deferred.promise.then(result => {
+        if (result.success) cache.markSuccess(options.candidate.candidateId, result.route);
+        else cache.markFailed(options.candidate.candidateId);
+        return result;
+      });
+    });
+    page.getRoutes = jest.fn().mockResolvedValue(createSuccessfulRouteLoadResult({ waypointCandidateCache: cache }));
+    return { cache, pending };
+  }
+
+  async function settle(entry, result) {
+    entry.resolve(result);
+    await entry.promise;
+    // Drain the service settlement and page continuation.
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  test('first route stays usable while later routes append, failed candidates are skipped, and display stops at three', async () => {
+    const { cache, pending } = setup();
+    await page.loadRoutes();
+    expect(page.data.routeState).toBe('success');
+    expect(page.data.routes).toHaveLength(1);
+    expect(page.data.isLoadingMoreRoutes).toBe(true);
+    page.viewRoute({ currentTarget: { dataset: { id: GENERATED_ROUTE.routeId } } });
+    expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+    await page.showOtherRoutes();
+    await page.showOtherRoutes();
+    expect(pending).toHaveLength(1);
+    await settle(pending[0], { success: false, error: 'AMAP_RATE_LIMITED' });
+    expect(page.data.routes).toHaveLength(1);
+    await settle(pending[1], { success: true, route: { ...GENERATED_ROUTE, routeId: 'second' } });
+    expect(page.data.routes).toHaveLength(2);
+    await settle(pending[2], { success: true, route: { ...GENERATED_ROUTE, routeId: 'third' } });
+    await page._initialFillPromise;
+    expect(page.data.routes.map(route => route.routeId)).toEqual([GENERATED_ROUTE.routeId, 'second', 'third']);
+    expect(page.data.isLoadingMoreRoutes).toBe(false);
+    expect(cache.getUnusedCandidates()).toHaveLength(1);
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).toHaveBeenCalledTimes(3);
+  });
+
+  test.each(['reload', 'unload', 'preferences'])('stale fill after %s cannot change page data or claim another candidate', async action => {
+    const { pending } = setup();
+    await page.loadRoutes();
+    const oldFill = page._initialFillPromise;
+    if (action === 'reload') {
+      page.getRoutes.mockResolvedValue(createSuccessfulRouteLoadResult());
+      await page.loadRoutes();
+    } else if (action === 'unload') page.onUnload();
+    else page.changePreferences();
+    const calls = page.setData.mock.calls.length;
+    await settle(pending[0], { success: true, route: { ...GENERATED_ROUTE, routeId: 'stale' } });
+    await oldFill;
+    expect(page.setData).toHaveBeenCalledTimes(calls);
+    expect(page.data.routes.some(route => route.routeId === 'stale')).toBe(false);
+    expect(pending).toHaveLength(1);
+  });
+
+  test('background exceptions preserve the first route and clear the loading-more state', async () => {
+    const { pending } = setup();
+    await page.loadRoutes();
+    pending[0].reject(new Error('test failure'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    for (let i = 1; i < 4; i++) {
+      await settle(pending[i], { success: false });
+    }
+    await page._initialFillPromise;
+    expect(page.data.routeState).toBe('success');
+    expect(page.data.routes).toHaveLength(1);
+    expect(page.data.isLoadingMoreRoutes).toBe(false);
+  });
+});
 
 beforeEach(() => {
   page =

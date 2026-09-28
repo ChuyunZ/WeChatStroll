@@ -46,6 +46,7 @@ function isValidWaypointCandidateCache(cache) {
 
 Page({
   data: {
+    isLoadingMoreRoutes: false,
     routes: [],
     routeState: "loading"
   },
@@ -134,6 +135,7 @@ Page({
 
     this.setData({
       routes: [],
+      isLoadingMoreRoutes: false,
       routeState: "loading"
     });
 
@@ -218,6 +220,8 @@ Page({
         routes: preparedRoutes,
         routeState: "success"
       });
+      // Do not await the remainder before making the first route usable.
+      this._initialFillPromise = this.fillInitialRoutes(requestId);
     } catch (error) {
       if (
         requestId !==
@@ -233,7 +237,7 @@ Page({
 
       console.error(
         "[Routes] Failed to load routes:",
-        error
+        { code: error && error.code || "ROUTE_LOAD_FAILED" }
       );
 
       this.setData({
@@ -289,6 +293,40 @@ Page({
       waypointCandidateCache:
         result.waypointCandidateCache,
       location: result.location
+    }
+  },
+
+  async fillInitialRoutes(requestId) {
+    const session = this._routePlanningSession;
+    const candidateCache = this._waypointCandidateCache;
+    const location = this._routeLocation;
+    const requestedDurationMinutes = (this._routePreferences || {}).durationMinutes;
+    const isCurrent = () => requestId === this._routeRequestId &&
+      session === this._routePlanningSession && candidateCache === this._waypointCandidateCache;
+    const candidates = candidateCache.getUnusedCandidates();
+    if (this._rawRoutes.length >= 3 || !candidates.length) return;
+    this.setData({ isLoadingMoreRoutes: true });
+    try {
+      for (const candidate of candidates) {
+        if (!isCurrent() || this._rawRoutes.length >= 3) break;
+        try {
+          const result = await routeGenerationService.buildOptimizedCandidateRoute({
+            session, candidateCache, candidate, location,
+            candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
+            requestedDurationMinutes
+          });
+          if (!isCurrent()) return;
+          if (!result.success) continue;
+          this._rawRoutes = [...this._rawRoutes, result.route];
+          this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+        } catch (error) {
+          if (!isCurrent()) return;
+          console.warn("[Routes] Background candidate failed:", { candidateId: candidate.candidateId, code: error && error.code || "UNEXPECTED_CANDIDATE_ERROR" });
+        }
+      }
+    } finally {
+      routeGenerationService.logCandidateSummary(candidateCache);
+      if (isCurrent()) this.setData({ isLoadingMoreRoutes: false });
     }
   },
 
@@ -379,6 +417,7 @@ Page({
   },
 
   changePreferences() {
+    this.onUnload();
     wx.redirectTo({
       url:
         "/pages/preferences/preferences"
@@ -438,6 +477,7 @@ Page({
   },
 
   async showOtherRoutes() {
+    if (this.data.isLoadingMoreRoutes) return;
     const requestId = this._routeRequestId;
     const session = this._routePlanningSession;
     const candidateCache = this._waypointCandidateCache;
@@ -477,6 +517,7 @@ Page({
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
     } finally {
       if (this._replacementSession === session) this._replacementSession = null;
+      routeGenerationService.logCandidateSummary(candidateCache);
     }
   }
 });

@@ -1,3 +1,8 @@
+// Synthetic tests skip real-time pacing; fake-timer tests cover production intervals.
+jest.mock('../miniprogram/config/route-planning', () => ({
+  ...jest.requireActual('../miniprogram/config/route-planning'), WALKING_PROVIDER_MIN_INTERVAL_MS: 0
+}))
+
 jest.mock('../miniprogram/services/location', () => ({ getCurrentLocation: jest.fn() }))
 jest.mock('../miniprogram/services/cloud-function-client', () => ({ callCloudFunction: jest.fn() }))
 jest.mock('../miniprogram/services/walking-segment', () => ({ getWalkingSegment: jest.fn() }))
@@ -35,6 +40,16 @@ beforeEach(() => {
 test('initial routes and replacements optimize sets and share all cached segments', async () => {
   const result = await generateRoutes(preferences)
   expect(result.status).toBe('success')
+  expect(result.routes).toHaveLength(1)
+  expect(getWalkingSegment).toHaveBeenCalledTimes(4)
+  for (const candidate of result.waypointCandidateCache.getUnusedCandidates().slice(0, 2)) {
+    const next = await buildOptimizedCandidateRoute({
+      session: result.routePlanningSession, candidateCache: result.waypointCandidateCache,
+      candidate, location, candidateIndex: Number(candidate.candidateId.split('-').pop()) - 1,
+      requestedDurationMinutes: 45
+    })
+    result.routes.push(next.route)
+  }
   expect(result.routes).toHaveLength(3)
   const first = result.routes[0]
   expect(first.candidateWaypointIds).toEqual(['B', 'A'])
@@ -69,6 +84,44 @@ test('explicit empty plan returns empty without walking requests', async () => {
   cloudPlan({ candidates: [] })
   expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_WAYPOINT_CANDIDATES' })
   expect(getWalkingSegment).not.toHaveBeenCalled()
+})
+
+test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {
+  getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
+    ? { success: false, error: 'ROUTE_NOT_FOUND' }
+    : { success: true, durationSeconds: 100, distanceMeters: 200, polyline: [from, to] })
+  const result = await generateRoutes(preferences)
+  expect(result.routes).toHaveLength(1)
+  expect(result.routes[0].candidateWaypointIds).toEqual(['C', 'A'])
+  expect(result.waypointCandidateCache.getAllCandidates().map(entry => entry.status))
+    .toEqual(['failed', 'success', 'unused', 'unused'])
+})
+
+test('route-build failures emit their stage and directed edge instead of bypassing the diagnostic log', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const session = createRoutePlanningSession({ start: location, verifiedWaypointPool: pois })
+    const failedSegment = { from: 'A', to: 'B', error: 'WALKING_SEGMENT_FAILED', causeCode: 'ROUTE_NOT_FOUND' }
+    jest.spyOn(session, 'buildRouteForOrder').mockResolvedValue({ success: false, error: 'MULTI_SEGMENT_ROUTE_FAILED', failedSegment })
+    const cache = createWaypointCandidateCache(candidates)
+    await buildOptimizedCandidateRoute({ session, candidateCache: cache, candidate: cache.getUnusedCandidates()[0], location, candidateIndex: 0 })
+    expect(warn).toHaveBeenCalledWith('[Route Generation] Candidate failed:', expect.objectContaining({
+      stage: 'route_build', failedSegment, optimization: expect.objectContaining({ strategy: 'exact' })
+    }))
+    const logged = JSON.stringify(warn.mock.calls)
+    expect(logged).not.toContain('latitude')
+    expect(logged).not.toContain('polyline')
+  } finally { warn.mockRestore() }
+})
+
+test('exhausted rate limiting produces a temporary generation error, not an empty geographic result', async () => {
+  jest.useFakeTimers()
+  try {
+    getWalkingSegment.mockResolvedValue({ success: false, error: 'AMAP_RATE_LIMITED' })
+    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+    await jest.runAllTimersAsync()
+    await assertion
+  } finally { jest.useRealTimers() }
 })
 
 test('defensive zero-point candidate never creates a successful route', async () => {

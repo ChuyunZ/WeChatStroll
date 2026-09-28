@@ -219,7 +219,7 @@ async function getWalkingSegment(
   } catch (error) {
     return {
       success: false,
-      error: 'WALKING_SEGMENT_FAILED',
+      error: error.code === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED' : 'WALKING_SEGMENT_FAILED',
 
       causeCode:
         typeof error.code === 'string'

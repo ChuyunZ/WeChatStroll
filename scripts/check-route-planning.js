@@ -22,6 +22,7 @@ function createSession(routeType, costs) {
   return {
     getCalls: () => calls,
     session: createRoutePlanningSession({
+      providerMinIntervalMs: 0, // Synthetic offline resolver; no provider traffic.
       start, verifiedWaypointPool: pois, routeType,
       segmentResolver: async (from, to) => {
         calls++

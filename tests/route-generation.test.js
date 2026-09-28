@@ -1,3 +1,8 @@
+// Synthetic tests skip real-time pacing; fake-timer tests cover production intervals.
+jest.mock('../miniprogram/config/route-planning', () => ({
+  ...jest.requireActual('../miniprogram/config/route-planning'), WALKING_PROVIDER_MIN_INTERVAL_MS: 0
+}))
+
 jest.mock(
   '../miniprogram/services/location',
   () => ({
@@ -844,7 +849,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateRoutes builds up to three real routes from AI candidates',
+    'generateRoutes returns the first real route and leaves candidates for background fill',
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {
@@ -912,7 +917,7 @@ describe('route-generation service', () => {
   
       expect(result.status).toBe('success')
   
-      expect(result.routes).toHaveLength(3)
+      expect(result.routes).toHaveLength(1)
   
       expect(
         result.routes.map(
@@ -920,9 +925,7 @@ describe('route-generation service', () => {
             route.pointsOfInterest[0].name
         )
       ).toEqual([
-        '人民公园',
-        '测试水边',
-        '测试商街'
+        '人民公园'
       ])
   
       expect(
@@ -934,7 +937,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateRoutes stops after three successful routes',
+    'generateRoutes stops after the first successful route',
     async () => {
       const extraPoi = {
         ...PARK_POI,
@@ -1001,7 +1004,8 @@ describe('route-generation service', () => {
           .generateRoutes()
   
       expect(result.status).toBe('success')
-      expect(result.routes).toHaveLength(3)
+      expect(result.routes).toHaveLength(1)
+      expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(3)
     }
   )
 })

@@ -53,11 +53,27 @@ Success includes `recommendedWaypointIds` and `optimization` with `strategy`, `w
 
 ## Generation and lifecycle
 
+`generateRoutes()` returns immediately after the first successful candidate (skipping failed candidates). It returns the same runtime planning session and candidate cache for continuation. The page enters `success` immediately and keeps the first route usable while appending further successes, up to three displayed routes. No second AI request is made. `isLoadingMoreRoutes` shows a lightweight progress message and disables replacement until initial fill settles; the handler also rejects programmatic/duplicate replacement clicks during fill.
+
+Continuation captures request ID, session, candidate cache, location and duration preference. It checks identities before claiming another candidate and after each await. Reload, unload or changing preferences invalidates ownership, so old work may finish its captured provider calls/cache updates but cannot append to or clear loading state on the current page. Exceptions during background fill leave existing routes visible and allow the next candidate to be tried.
+
 Both `generateRoutes` and the routes page call `buildOptimizedCandidateRoute` to claim an unused candidate, optimize, build once, and settle success/failure. Original IDs stay on the cache entry; the route also retains original IDs, recommended IDs, optimization metadata, `routeOrder`, and POI IDs. The old `generateFirstRoute` single-POI compatibility path remains supported; it has no ordering choice.
 
 The page ignores duplicate replacement clicks and results belonging to an unloaded or replaced session. Service exceptions mark the candidate failed, and page cleanup releases the click guard. A replacement reuses the existing session; a fresh planning request or unload ends its page ownership. In-flight work may finish against its captured old cache, but cannot update the new page or session. This change does not cancel outstanding provider requests.
 
-No POIs, a legal empty plan, or no successful route enters the existing empty UI with a neutral suggestion to adjust duration/preferences. Malformed AI responses and AI request errors retain the error path. Walking segment failures make affected orders unavailable.
+No POIs, a legal empty plan, or no successful route without temporary throttling enters the existing empty UI with a neutral suggestion to adjust duration/preferences. Malformed AI responses and AI request errors retain the error path. If no initial route succeeds and an exhausted throttle was encountered, generation throws `AMAP_RATE_LIMITED` and enters the error/retry UI, not the geographic empty-result UI.
+
+## Walking provider pacing and temporary failures
+
+Each planning session owns a FIFO request-start scheduler. `WALKING_PROVIDER_MIN_INTERVAL_MS = 400` spaces new resolver starts by at least 400 ms (approximately 2.5 starts/second). Responses can overlap; the existing concurrency limit remains separate from QPS. Exact prefetch, heuristic evaluations, final builds, background fill and replacement all share the scheduler and directed Promise cache. Cache hits bypass scheduling, and concurrent duplicate edges share the same pending Promise including its retry sequence. Synthetic offline fixtures explicitly set `providerMinIntervalMs: 0`; production sessions use the configured interval.
+
+AMap `10021` / `CUQPS_HAS_EXCEEDED_THE_LIMIT` becomes the application code `AMAP_RATE_LIMITED` in `getWalkingRoute`. `walking-segment`, engine, optimizer and generation preserve that classification. A genuine zero-route response stays `ROUTE_NOT_FOUND`; malformed responses become `INVALID_WALKING_ROUTE_RESPONSE`, while other provider/network failures remain `WALKING_ROUTE_FAILED`. Logs retain only safe codes and directed node IDs, not raw payloads, coordinates, URLs, keys or polylines.
+
+Only `AMAP_RATE_LIMITED` is retried: `WALKING_PROVIDER_RETRY_DELAYS_MS = [500, 1000]` permits at most three attempts per directed edge. Each retry waits its backoff and then passes through the same scheduler, so queued work can delay it further. Intermediate throttles are not settled edge facts. Eventual success is cached normally. Exhausted throttles are retained as explicitly temporary session results to prevent each permutation/candidate from starting another retry loop; they are omitted from unreachable-edge priority snapshots. A new planning session can retry them. If no feasible evaluated route is found and a temporary failure occurred, the optimizer reports `AMAP_RATE_LIMITED`, not `WAYPOINT_ORDER_NOT_FOUND`. Real-cost scoring and all search budgets remain unchanged.
+
+The reported 3-QPS quota belongs to the AMap key. A per-session limiter reduces single-session bursts but cannot guarantee aggregate quota compliance across users, overlapping sessions, or variable cloud dispatch latency. TODO for production scale: obtain a higher key quota or introduce centralized provider throttling/queueing. This PR does not introduce a distributed lock. First-route latency avoids waiting for later candidates, but the first candidate still pays its complete optimization cost and provider pacing.
+
+Diagnostics retain raw/validated AI candidate counts and IDs, candidate starts/results, failure stage (`optimization` or `route_build`), compact optimizer counts, failed directed edges and candidate-state summaries. `[Route Segment] Rate limited` records attempt and next backoff separately from permanent/provider failures. Deploy the updated `getWalkingRoute` cloud function with the client so the application rate-limit code is available; deploy `aiRoutePlanner` to pick up its diagnostic improvements.
 
 ## Map display
 

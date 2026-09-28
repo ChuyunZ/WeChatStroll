@@ -1,3 +1,8 @@
+// Synthetic tests skip real-time pacing; fake-timer tests cover production intervals.
+jest.mock('../miniprogram/config/route-planning', () => ({
+  ...jest.requireActual('../miniprogram/config/route-planning'), WALKING_PROVIDER_MIN_INTERVAL_MS: 0
+}))
+
 jest.mock(
   '../miniprogram/services/location',
   () => ({

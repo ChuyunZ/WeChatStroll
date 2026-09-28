@@ -163,8 +163,10 @@
     </view>
 
 
+    <view wx:if="{{isLoadingMoreRoutes}}" class="reason-text">正在继续寻找更多路线…</view>
     <button
       class="other-routes-button"
+      disabled="{{isLoadingMoreRoutes}}"
       bindtap="showOtherRoutes"
     >
       换一批路线

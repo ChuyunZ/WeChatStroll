@@ -338,6 +338,7 @@ exports.main = async (event, context) => {
   const destinationLocation =
     `${destination.longitude.toFixed(6)},${destination.latitude.toFixed(6)}`
 
+  let receivedResponse = false
   try {
     const response = await axios.get(AMAP_WALKING_URL, {
       params: {
@@ -349,6 +350,7 @@ exports.main = async (event, context) => {
       timeout: 60000
     })
 
+    receivedResponse = true
     const data = response.data
 
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -364,6 +366,8 @@ exports.main = async (event, context) => {
 
     if (data.status !== '1') {
       const error = new Error('AMap walking route request failed')
+      error.code = String(data.infocode) === '10021' || data.info === 'CUQPS_HAS_EXCEEDED_THE_LIMIT'
+        ? 'AMAP_RATE_LIMITED' : 'WALKING_ROUTE_FAILED'
 
       error.details = {
         status: data.status,
@@ -444,20 +448,20 @@ exports.main = async (event, context) => {
       }
     }
   } catch (error) {
-    console.error('AMap walking route request failed:', {
-      message: error.message,
-      details: error.details,
-      errorCode: error.code,
-      httpStatus: error.response?.status,
-      amapInfo: error.details?.info ?? error.response?.data?.info,
-      amapInfoCode:
-        error.details?.infocode ?? error.response?.data?.infocode
+    const providerCode = String(error.details?.infocode ?? error.response?.data?.infocode ?? '')
+    const rateLimited = error.code === 'AMAP_RATE_LIMITED' || providerCode === '10021'
+    const code = rateLimited ? 'AMAP_RATE_LIMITED'
+      : receivedResponse && !error.code ? 'INVALID_WALKING_ROUTE_RESPONSE' : 'WALKING_ROUTE_FAILED'
+    // Never log axios errors/details: they may contain URLs, keys or coordinates.
+    console.error(rateLimited ? '[Walking Provider] Rate limited:' : '[Walking Provider] Failed:', {
+      code, providerCode: /^\d{5}$/.test(providerCode) ? providerCode : undefined,
+      httpStatus: error.response?.status
     })
 
     return {
       success: false,
       error: {
-        code: 'WALKING_ROUTE_FAILED',
+        code,
         message: 'Unable to generate walking route'
       }
     }

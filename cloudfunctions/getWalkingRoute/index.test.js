@@ -63,17 +63,38 @@ function createValidEvent() {
   }
 }
 
-function expectWalkingRouteFailure(result) {
+function expectWalkingRouteFailure(result, code = 'INVALID_WALKING_ROUTE_RESPONSE') {
   expect(result).toEqual({
     success: false,
     error: {
-      code: 'WALKING_ROUTE_FAILED',
+      code,
       message: 'Unable to generate walking route'
     }
   })
 }
 
 describe('getWalkingRoute', () => {
+  test('provider diagnostics do not expose request URLs, keys, coordinates or raw payloads', async () => {
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {})
+    axios.get = async () => { throw Object.assign(new Error('secret URL and coordinates'), {
+      config: { url: 'secret-url', params: { key: 'secret-key', origin: '121.456,31.123' } },
+      response: { status: 429, data: { infocode: '10021', payload: 'secret-payload' } }
+    }) }
+    try {
+      expect(await main(createValidEvent())).toMatchObject({ error: { code: 'AMAP_RATE_LIMITED' } })
+      expect(log).toHaveBeenCalledWith('[Walking Provider] Rate limited:', {
+        code: 'AMAP_RATE_LIMITED', providerCode: '10021', httpStatus: 429
+      })
+      expect(JSON.stringify(log.mock.calls)).not.toContain('secret')
+      expect(JSON.stringify(log.mock.calls)).not.toContain('121.456')
+    } finally { log.mockRestore() }
+  })
+
+  test.each(['10021', 10021])('AMap %s is classified as temporary rate limiting', async infocode => {
+    axios.get = async () => ({ data: { status: '0', infocode, info: 'CUQPS_HAS_EXCEEDED_THE_LIMIT' } })
+    expect(await main(createValidEvent())).toMatchObject({ success: false, error: { code: 'AMAP_RATE_LIMITED' } })
+  })
+
   beforeEach(() => {
     // Expected failure tests intentionally trigger console.error.
     // Silence it so the Jest output stays readable.
@@ -245,7 +266,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expectWalkingRouteFailure(result)
+    expectWalkingRouteFailure(result, 'WALKING_ROUTE_FAILED')
   })
 
   test('Case 7: Network or Axios failure', async () => {
@@ -255,7 +276,7 @@ describe('getWalkingRoute', () => {
 
     const result = await main(createValidEvent())
 
-    expectWalkingRouteFailure(result)
+    expectWalkingRouteFailure(result, 'WALKING_ROUTE_FAILED')
   })
 
   test('Case 8: Invalid response data', async () => {
