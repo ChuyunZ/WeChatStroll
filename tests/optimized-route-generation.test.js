@@ -98,6 +98,47 @@ test('explicit empty AI plan uses a validated deterministic fallback without rep
   expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(0)
 })
 
+test('malformed nested AI candidates use the deterministic fallback', async () => {
+  cloudPlan({ candidates: [{ waypoints: null }] })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(result.routes).toHaveLength(1)
+})
+
+test('duration-aware fallback tries bounded POIs until one validates', async () => {
+  const fallbackPois = [
+    { ...pois[0], poiId: 'near', name: 'near', distanceInMeters: 100 },
+    { ...pois[1], poiId: 'middle', name: 'middle', distanceInMeters: 900 },
+    { ...pois[2], poiId: 'far', name: 'far', distanceInMeters: 1600 },
+    { ...pois[3], poiId: 'second-far', name: 'second-far', distanceInMeters: 1500 }
+  ]
+
+  callCloudFunction.mockImplementation(async name => name === 'getNearbyPois'
+    ? { poisByCategory: { park: fallbackPois } }
+    : { plan: { candidates: [] } })
+
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true,
+    durationSeconds: to.nodeId === 'second-far' ? 2700 : 100,
+    distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId))
+    .toEqual(['far', 'second-far'])
+})
+
 test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {
   getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
     ? { success: false, error: 'ROUTE_NOT_FOUND' }
@@ -179,7 +220,7 @@ test('exhausted rate limiting produces a temporary generation error, not an empt
 test('defensive zero-point candidate never creates a successful route', async () => {
   cloudPlan({ candidates: [{ waypoints: [] }] })
   expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
-  expect(getWalkingSegment).toHaveBeenCalledTimes(1)
+  expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
 test('malformed AI plan uses the deterministic fallback', async () => {
@@ -223,12 +264,13 @@ test('fallback also fails safely instead of exposing an invalid route', async ()
 
   expect(await generateRoutes(preferences))
     .toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
 test('failed walking segments produce empty and stay cached across candidates', async () => {
   getWalkingSegment.mockResolvedValue({ success: false, error: 'UNREACHABLE' })
   expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
-  expect(getWalkingSegment).toHaveBeenCalledTimes(14)
+  expect(getWalkingSegment).toHaveBeenCalledTimes(13)
 })
 
 test('a candidate is claimed once, including concurrent service calls', async () => {
