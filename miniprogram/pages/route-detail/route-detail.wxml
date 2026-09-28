@@ -177,7 +177,7 @@
       <view class="legend-item">
         <view class="legend-dot start-dot"></view>
         <text class="legend-text">
-          起点 / 返回点
+          {{route.returnsToStart ? '起点 / 返回点' : '起点'}}
         </text>
       </view>
 
@@ -193,7 +193,7 @@
         <text class="legend-text">编号地点</text>
       </view>
 
-      <view class="legend-item">
+      <view class="legend-item" wx:if="{{!route.returnsToStart}}">
         <view class="legend-dot end-dot"></view>
         <text class="legend-text">
           终点

@@ -18,6 +18,7 @@ The goal is to make sure every part of the application uses the same field names
 | `optimization` | object | For optimized routes | Search strategy, evaluated order count, cost, target error and budget metadata; see [waypoint ordering](waypoint-order-optimization.md) |
 | `distanceMeters` | number | Yes | Estimated walking distance in meters |
 | `routeType` | string | Yes | Shape/type of the route |
+| `returnsToStart` | boolean | For generated routes | Whether the route returns to its start; Route Detail derives this from `routeType` for legacy data when absent, and uses it for the start/return legend |
 | `crowdLevel` | string | Yes | Estimated crowd level |
 | `tags` | string[] | Yes | Environment/features associated with the route |
 | `description` | string | Yes | Longer description shown on the detail page |

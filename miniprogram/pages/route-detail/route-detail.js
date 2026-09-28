@@ -182,6 +182,12 @@ Page({
     return {
       ...route,
 
+      returnsToStart:
+        typeof route.returnsToStart === "boolean"
+          ? route.returnsToStart
+          : route.routeType === ROUTE_TYPES.LOOP ||
+            route.routeType === ROUTE_TYPES.OUT_AND_BACK,
+
       distanceKm:
         (
           route.distanceMeters /

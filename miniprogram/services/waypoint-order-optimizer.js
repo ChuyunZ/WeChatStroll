@@ -5,6 +5,15 @@ const {
   ORDERING_MAX_EVALUATIONS,
   ORDERING_MAX_ROUNDS
 } = require('../config/route-planning')
+const { createOrderPriorityEstimator } = require('./waypoint-order-priority')
+
+const MOVE_TYPE_PRIORITY = { relocation: 0, swap: 1, two_opt: 2 }
+
+function compareMoveMetadata(left, right) {
+  return MOVE_TYPE_PRIORITY[left.type] - MOVE_TYPE_PRIORITY[right.type] ||
+    left.fromIndex - right.fromIndex || left.toIndex - right.toIndex ||
+    compareIds(left.order, right.order)
+}
 
 function compareIds(left, right) {
   for (let index = 0; index < Math.min(left.length, right.length); index++) {
@@ -61,27 +70,60 @@ function createSeeds(searchData) {
   }).slice(0, ORDERING_MAX_SEEDS)
 }
 
-// Interleave relocation and swap moves so both get a chance within the budget.
-function* neighbors(order) {
+// Deduplicate all move types, retaining canonical metadata independently of
+// generation order. evaluate() still deduplicates across seed frontiers.
+function neighbors(order) {
+  const currentKey = JSON.stringify(order)
+  const candidates = new Map()
+  function add(type, candidateOrder, fromIndex, toIndex) {
+    const key = JSON.stringify(candidateOrder)
+    if (key === currentKey) return
+    const candidate = { type, order: candidateOrder, fromIndex, toIndex }
+    const existing = candidates.get(key)
+    if (!existing || compareMoveMetadata(candidate, existing) < 0) candidates.set(key, candidate)
+  }
   for (let from = 0; from < order.length; from++) {
     for (let to = 0; to < order.length; to++) {
       if (from === to) continue
       const moved = [...order]
       moved.splice(to, 0, moved.splice(from, 1)[0])
-      yield moved
+      add('relocation', moved, from, to)
       if (from < to) {
         const swapped = [...order]
         swapped[from] = order[to]
         swapped[to] = order[from]
-        yield swapped
+        add('swap', swapped, from, to)
+        // This is an order transformation only. Directed costs are evaluated
+        // in full by the engine, never by a symmetric 2-opt delta formula.
+        const reversed = [
+          ...order.slice(0, from),
+          ...order.slice(from, to + 1).reverse(),
+          ...order.slice(to + 1)
+        ]
+        add('two_opt', reversed, from, to)
       }
     }
   }
+  return Array.from(candidates.values())
+}
+
+function prioritizeNeighbors(order, estimate) {
+  return neighbors(order)
+    .map(candidate => ({ ...candidate, priority: estimate(candidate.order) }))
+    .sort((left, right) => {
+      const a = left.priority
+      const b = right.priority
+      return a.failedEdgeCount - b.failedEdgeCount ||
+        a.targetErrorSeconds - b.targetErrorSeconds ||
+        a.durationSeconds - b.durationSeconds ||
+        a.distanceMeters - b.distanceMeters || compareMoveMetadata(left, right)
+    })
 }
 
 async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMinutes } = {}) {
   if (!session || typeof session.getWaypointSearchData !== 'function' ||
       typeof session.evaluateRouteOrder !== 'function' ||
+      typeof session.getCachedSegmentCosts !== 'function' ||
       typeof session.prefetchSegments !== 'function') {
     return { success: false, error: 'INVALID_PLANNING_SESSION' }
   }
@@ -147,7 +189,12 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       if (evaluated.size >= ORDERING_MAX_EVALUATIONS) break
       rounds++
       const next = frontiers.map(frontier => ({ ...frontier }))
-      const iterators = frontiers.map(frontier => neighbors(frontier.order))
+      // Snapshot after seed evaluation / the previous round. Do not resort
+      // mid-round as new provider results arrive: all frontiers share facts.
+      const estimate = createOrderPriorityEstimator(searchData, session.getCachedSegmentCosts(), targetSeconds)
+      const iterators = frontiers.map(frontier =>
+        prioritizeNeighbors(frontier.order, estimate)[Symbol.iterator]()
+      )
       let active = true
       // Round-robin exploration includes variants of failed seeds.
       while (active && evaluated.size < ORDERING_MAX_EVALUATIONS) {
@@ -156,7 +203,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
           const step = iterators[index].next()
           if (step.done) continue
           active = true
-          const result = await evaluate(step.value)
+          const result = await evaluate(step.value.order)
           if (result && compare(result, next[index].result) < 0) {
             next[index] = { order: result.order, result }
           }
@@ -182,7 +229,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   }
   if (!best) {
     return { success: false,
-      error: exact ? 'NO_FEASIBLE_ORDER' : 'SEARCH_NO_FEASIBLE_ORDER_FOUND', optimization }
+      error: 'WAYPOINT_ORDER_NOT_FOUND', optimization }
   }
   return { success: true, recommendedWaypointIds: [...best.order], optimization }
 }

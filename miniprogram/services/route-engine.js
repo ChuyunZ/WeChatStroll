@@ -113,6 +113,8 @@ function createRoutePlanningSession({
    * requests for the same directed edge share the same provider call.
    */
   const segmentCache = new Map()
+  // Small settled-cost projection; Promise ownership and dedup stay above.
+  const resolvedSegmentCosts = new Map()
 
   function registerVerifiedWaypoints(verifiedWaypoints) {
     return registerWaypoints(
@@ -166,6 +168,12 @@ function createRoutePlanningSession({
             ? error.code.trim()
             : 'SEGMENT_RESOLVER_ERROR'
       }))
+      .then(segment => {
+        resolvedSegmentCosts.set(edgeKey, segment.success
+          ? { success: true, durationSeconds: segment.durationSeconds, distanceMeters: segment.distanceMeters }
+          : { success: false })
+        return segment
+      })
 
     /*
      * Cache before awaiting.
@@ -405,6 +413,7 @@ function createRoutePlanningSession({
     if (!validation.valid) return validation
     return {
       valid: true,
+      routeType,
       start: { latitude: startNode.latitude, longitude: startNode.longitude },
       waypoints: validation.waypointNodes.map(node => ({
         poiId: node.poiId,
@@ -414,11 +423,18 @@ function createRoutePlanningSession({
     }
   }
 
+  // Synchronous copies only: never fetch or await a pending segment. No
+  // Promise, polyline, provider payload or mutable internal object escapes.
+  function getCachedSegmentCosts() {
+    return Array.from(resolvedSegmentCosts, ([edgeKey, cost]) => ({ edgeKey, ...cost }))
+  }
+
   return {
     registerVerifiedWaypoints,
     prefetchSegments,
     evaluateRouteOrder,
     getWaypointSearchData,
+    getCachedSegmentCosts,
     buildRouteForOrder
   }
 }

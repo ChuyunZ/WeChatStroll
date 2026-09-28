@@ -1,7 +1,7 @@
 const { isValidGeoPoint, areGeoPointsEqual, copyGeoPoint } = require('./geo')
 
 function createMarker(id, point, title, kind, labelText = title) {
-  const colors = { start: '#58b978', poi: '#208ca8', end: '#e66a63' }
+  const colors = { start: '#2e7d32', poi: '#006d77', end: '#b3261e' }
   return {
     id,
     ...copyGeoPoint(point),
@@ -39,9 +39,9 @@ function buildRouteMap(route) {
   const markers = []
   if (start) markers.push(createMarker(1, start, sameEndpoints ? '起点 / 终点' : '起点', 'start'))
   let endMarked = sameEndpoints
-  displayPois.forEach(poi => {
+  displayPois.forEach((poi, index) => {
     if (!isValidGeoPoint(poi)) return
-    const isEnd = !sameEndpoints && areGeoPointsEqual(poi, end)
+    const isEnd = !sameEndpoints && index === displayPois.length - 1 && areGeoPointsEqual(poi, end)
     if (isEnd) endMarked = true
     const title = `${poi.visitNumber}. ${poi.displayName}${isEnd ? '（终点）' : ''}`
     // Keep permanent labels compact even when a POI name is very long.

@@ -41,6 +41,47 @@ test('coincident POIs keep distinct identities, numbering and readable text entr
     pointsOfInterest: [pois[0], { ...pois[0], poiId: 'other', name: 'Other place' }] })
   expect(result.displayPois.map(poi => poi.poiId)).toEqual(['poi-0', 'other'])
   expect(result.markers.map(marker => marker.id)).toEqual([1, 2, 3])
+  expect(result.markers[1]).toMatchObject({ title: '1. Place 1', iconPath: '/images/map-poi.png' })
+  expect(result.markers[2]).toMatchObject({ title: '2. Other place（终点）', iconPath: '/images/map-end.png' })
+  expect(result.markers.filter(marker => marker.iconPath === '/images/map-end.png')).toHaveLength(1)
+})
+
+test.each([
+  { ...pois[1] },
+  { ...pois[1], latitude: NaN }
+])('keeps a separate endpoint when only an earlier POI matches it (%j)', finalPoi => {
+  const result = buildRouteMap({ routeType: 'point_to_point', startPoint: start, endPoint: pois[0],
+    polyline: [start, pois[0]], pointsOfInterest: [pois[0], finalPoi] })
+  expect(result.markers[1]).toMatchObject({ title: '1. Place 1', iconPath: '/images/map-poi.png' })
+  const endpoints = result.markers.filter(marker => marker.iconPath === '/images/map-end.png')
+  expect(endpoints).toHaveLength(1)
+  expect(endpoints[0]).toMatchObject({ title: '终点', latitude: pois[0].latitude, longitude: pois[0].longitude })
+})
+
+test.each(['loop', 'out_and_back'])('%s does not mark colocated return POIs as separate endpoints', routeType => {
+  const result = buildRouteMap({ routeType, startPoint: start, endPoint: start,
+    polyline: [start, pois[0], start], pointsOfInterest: [{ ...start, name: 'First' }, { ...start, name: 'Last' }] })
+  expect(result.markers[0].title).toBe('起点 / 终点')
+  expect(result.markers.slice(1).map(marker => marker.iconPath)).toEqual(['/images/map-poi.png', '/images/map-poi.png'])
+})
+
+test('start, POI and endpoint labels have at least 4.5:1 text contrast', () => {
+  function luminance(hex) {
+    const channels = hex.slice(1).match(/.{2}/g).map(value => parseInt(value, 16) / 255)
+    const linear = channels.map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+  }
+  const { markers } = buildRouteMap({ startPoint: start, endPoint: pois[1],
+    polyline: [start, pois[1]], pointsOfInterest: pois.slice(0, 2) })
+  expect(markers.map(marker => marker.iconPath)).toEqual([
+    '/images/map-start.png', '/images/map-poi.png', '/images/map-end.png'
+  ])
+  for (const { label } of markers) {
+    const background = luminance(label.bgColor)
+    const foreground = luminance(label.color)
+    const ratio = (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05)
+    expect(ratio).toBeGreaterThanOrEqual(4.5)
+  }
 })
 
 test('long POI names stay in the list and title without expanding permanent map labels', () => {

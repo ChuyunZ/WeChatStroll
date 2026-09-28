@@ -1,4 +1,4 @@
-const EXACT_ORDERING_MAX_WAYPOINTS = 3
+const EXACT_ORDERING_MAX_WAYPOINTS = 4
 const SEGMENT_FETCH_CONCURRENCY = 4
 // Cloud functions deploy independently; keep MAX_WAYPOINTS in sync via tests.
 const MAX_WAYPOINTS = 8

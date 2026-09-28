@@ -201,6 +201,28 @@ describe(
   "Route Detail page",
   () => {
 
+    test.each([
+      ['point_to_point', false], ['loop', true], ['out_and_back', true]
+    ])('normalizes legacy %s return metadata for the legend', (routeType, returnsToStart) => {
+      const legacy = { ...GENERATED_ROUTE, routeType };
+      delete legacy.returnsToStart;
+      expect(page.prepareRoute(legacy).returnsToStart).toBe(returnsToStart);
+      expect(legacy.returnsToStart).toBeUndefined();
+    });
+
+    test.each([true, false])('preserves explicit returnsToStart=%s', returnsToStart => {
+      expect(page.prepareRoute({ ...GENERATED_ROUTE, returnsToStart }).returnsToStart).toBe(returnsToStart);
+    });
+
+    test('map legend uses normalized return metadata for its start label and separate endpoint', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const template = fs.readFileSync(path.join(__dirname,
+        '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8');
+      expect(template).toContain("{{route.returnsToStart ? '起点 / 返回点' : '起点'}}");
+      expect(template).toMatch(/<view class="legend-item" wx:if="{{!route.returnsToStart}}">\s*<view class="legend-dot end-dot">/);
+    });
+
     test(
       "onLoad waits for a real route from Routes through EventChannel",
       () => {
