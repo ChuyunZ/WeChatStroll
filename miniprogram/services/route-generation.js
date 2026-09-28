@@ -2,6 +2,10 @@ const locationService = require('./location')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
+  validateGeneratedWalkingRoute
+} = require('./route-validation')
+
+const {
   createCodedError: createRouteGenerationError
 } = require('../utils/errors')
 
@@ -590,6 +594,42 @@ async function buildOptimizedCandidateRoute({
 
       return walkingRoute || { success: false, error: 'NO_VALID_ROUTE' }
     }
+
+    stage = 'route_validation'
+    const validation = validateGeneratedWalkingRoute(
+      walkingRoute,
+      {
+        allowedWaypointIds: candidate.waypointIds,
+        requestedDurationMinutes
+      }
+    )
+
+    if (!validation.valid) {
+      candidateCache.markFailed(candidate.candidateId)
+
+      console.warn(
+        '[Route Generation] Candidate failed:',
+        {
+          stage: 'route_validation',
+          candidateId: candidate.candidateId,
+          candidateIndex,
+          waypointIds: candidate.waypointIds,
+          recommendedWaypointIds: recommendation.recommendedWaypointIds,
+          error: validation.error,
+          reason: validation.reason,
+          actualDurationSeconds: validation.actualDurationSeconds,
+          targetDurationSeconds: validation.targetDurationSeconds,
+          minDurationSeconds: validation.minDurationSeconds,
+          maxDurationSeconds: validation.maxDurationSeconds,
+          optimization: summarizeOptimization(recommendation.optimization)
+        }
+      )
+
+      const { valid, ...validationFailure } = validation
+      return { success: false, ...validationFailure }
+    }
+
+    stage = 'route_format'
     const route = {
       ...buildGeneratedRouteFromAiCandidate({ location, walkingRoute, candidateIndex }),
       candidateWaypointIds: [...candidate.waypointIds],
@@ -651,34 +691,158 @@ function logCandidateSummary(candidateCache) {
   })
 }
 
+async function buildFallbackGenerationResult({
+  location,
+  poisByCategory,
+  preferences,
+  trigger
+}) {
+  console.warn(
+    '[Route Generation] Falling back:',
+    { trigger }
+  )
+
+  const selectedPoi = selectCandidatePoi(
+    poisByCategory,
+    preferences
+  )
+
+  if (!selectedPoi) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_ROUTE'
+    }
+  }
+
+  const routeType = getRequestedRouteType(preferences)
+  const routePlanningSession = createRoutePlanningSession({
+    start: location,
+    verifiedWaypointPool: [selectedPoi],
+    routeType
+  })
+
+  const walkingRoute = await routePlanningSession.buildRouteForOrder({
+    allowedWaypointIds: [selectedPoi.poiId],
+    orderedWaypointIds: [selectedPoi.poiId],
+    source: 'fallback'
+  })
+
+  if (!walkingRoute || walkingRoute.success !== true) {
+    if (walkingRoute && walkingRoute.error === 'AMAP_RATE_LIMITED') {
+      throw createRouteGenerationError(
+        'AMAP_RATE_LIMITED',
+        'Walking provider is temporarily rate limited.'
+      )
+    }
+
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_ROUTE'
+    }
+  }
+
+  const validation = validateGeneratedWalkingRoute(
+    walkingRoute,
+    {
+      allowedWaypointIds: [selectedPoi.poiId],
+      requestedDurationMinutes: preferences.durationMinutes
+    }
+  )
+
+  if (!validation.valid) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_ROUTE'
+    }
+  }
+
+  const route = buildGeneratedRoute({
+    location,
+    selectedPoi,
+    walkingRoute,
+    preferences
+  })
+
+  return {
+    status: 'success',
+    source: 'fallback',
+    location,
+    routes: [route],
+    routePlanningSession,
+    waypointCandidateCache: createWaypointCandidateCache([])
+  }
+}
+
 // AI waypoint candidates -> walking routes
 async function generateRoutes(
   preferences = {}
 ) {
-  const waypointResult = await generateWaypointPlan(preferences)
+  const location =
+    await locationService.getCurrentLocation()
 
-  if (waypointResult.status === 'empty') {
-    return waypointResult
+  if (!isValidPoint(location)) {
+    throw createRouteGenerationError(
+      'INVALID_LOCATION',
+      'Current location has an invalid format.'
+    )
   }
 
-  const {
-    location,
-    nearbyPois,
-    plan
-  } = waypointResult
+  const radius =
+    getPoiSearchRadius(
+      preferences.durationMinutes
+    )
+
+  const poisByCategory =
+    await searchNearbyPois(location, radius)
+
+  const nearbyPois =
+    buildPoiCandidates(poisByCategory)
+
+  if (nearbyPois.length === 0) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_POI'
+    }
+  }
+
+  let plan
+
+  try {
+    plan = await requestWaypointPlan(
+      location,
+      preferences,
+      nearbyPois
+    )
+  } catch (error) {
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: error && error.code
+        ? error.code
+        : 'AI_ROUTE_PLANNING_FAILED'
+    })
+  }
 
   if (
     !plan ||
     !Array.isArray(plan.candidates)
   ) {
-    throw createRouteGenerationError(
-      'INVALID_AI_ROUTE_PLAN',
-      'AI route plan has no valid candidates.'
-    )
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'INVALID_AI_ROUTE_PLAN'
+    })
   }
 
   if (plan.candidates.length === 0) {
-    return { status: 'empty', reason: 'NO_WAYPOINT_CANDIDATES' }
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'NO_WAYPOINT_CANDIDATES'
+    })
   }
 
   const routeType = getRequestedRouteType(preferences)
@@ -745,14 +909,17 @@ async function generateRoutes(
 
   if (routes.length === 0) {
     if (temporaryFailure) throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
-    return {
-      status: 'empty',
-      reason: 'NO_VALID_ROUTE'
-    }
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'NO_VALID_AI_ROUTE'
+    })
   }
   
   return {
     status: 'success',
+    source: 'ai',
     location,
     routes,
 
