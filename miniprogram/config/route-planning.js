@@ -3,8 +3,8 @@ const SEGMENT_FETCH_CONCURRENCY = 4
 // Cloud functions deploy independently; keep MAX_WAYPOINTS in sync via tests.
 const MAX_WAYPOINTS = 8
 const ORDERING_MAX_SEEDS = 3
-const ORDERING_MAX_EVALUATIONS = 24
-const ORDERING_MAX_ROUNDS = 2
+const ORDERING_MAX_EVALUATIONS = 32
+const ORDERING_MAX_ROUNDS = 3
 
 module.exports = {
   EXACT_ORDERING_MAX_WAYPOINTS,

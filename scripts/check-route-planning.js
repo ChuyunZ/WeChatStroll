@@ -6,6 +6,7 @@ const { createRoutePlanningSession } = require('../miniprogram/services/route-en
 const { optimizeWaypointOrder } = require('../miniprogram/services/waypoint-order-optimizer')
 const { buildGeneratedRouteFromAiCandidate } = require('../miniprogram/services/route-generation')
 const { buildRouteMap } = require('../miniprogram/utils/route-map')
+const { ORDERING_MAX_EVALUATIONS, ORDERING_MAX_ROUNDS } = require('../miniprogram/config/route-planning')
 
 const start = { latitude: 31.2304, longitude: 121.4737 }
 const pois = Array.from({ length: 8 }, (_, index) => ({
@@ -68,7 +69,10 @@ async function main() {
     const recommendation = await optimizeWaypointOrder({ session: large.session, waypointIds: ids })
     assert.equal(recommendation.success, true)
     assert.equal(recommendation.optimization.strategy, 'heuristic')
-    assert.ok(recommendation.optimization.evaluatedOrderCount <= 24)
+    assert.ok(recommendation.optimization.evaluatedOrderCount <= ORDERING_MAX_EVALUATIONS)
+    assert.ok(recommendation.optimization.improvementRounds <= ORDERING_MAX_ROUNDS)
+    assert.equal(recommendation.optimization.roundEvaluationCounts.reduce((sum, n) => sum + n,
+      recommendation.optimization.seedCount), recommendation.optimization.evaluatedOrderCount)
     assert.deepEqual([...recommendation.recommendedWaypointIds].sort(), ids)
     const walkingRoute = await large.session.buildRouteForOrder({
       allowedWaypointIds: ids, orderedWaypointIds: recommendation.recommendedWaypointIds, source: 'optimized'

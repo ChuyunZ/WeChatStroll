@@ -37,7 +37,8 @@ test.each([0, 1, 2, 3, 4])('exact search handles %i waypoints', async count => {
   expect(result.recommendedWaypointIds).toEqual([...ids].sort())
   expect(result.optimization).toMatchObject({
     strategy: 'exact', evaluatedOrderCount: [0, 1, 2, 6, 24][count],
-    durationSeconds: count * 100, targetErrorSeconds: null
+    durationSeconds: count * 100, targetErrorSeconds: null,
+    evaluationBudget: null, roundEvaluationCounts: [], improvementRounds: 0
   })
 })
 
@@ -108,7 +109,7 @@ test.each([1, 3, 4, 5, 8])('all failures use the public error and retain search 
   expect(result.error).toBe('WAYPOINT_ORDER_NOT_FOUND')
   expect(result.optimization.strategy).toBe(count <= 4 ? 'exact' : 'heuristic')
   expect(result.optimization.budgetExhausted).toBe(count > 4)
-  expect(result.optimization.evaluatedOrderCount).toBe(count === 1 ? 1 : count === 3 ? 6 : 24)
+  expect(result.optimization.evaluatedOrderCount).toBe(count === 1 ? 1 : count === 3 ? 6 : count === 4 ? 24 : 32)
   const edges = resolver.mock.calls.map(([from, to]) => JSON.stringify([from.nodeId, to.nodeId]))
   expect(new Set(edges).size).toBe(edges.length)
 })
@@ -128,7 +129,15 @@ test.each([5, 6, 7, 8])('heuristic search is deterministic, bounded and preserve
   const visited = evaluate.mock.calls.map(([options]) => JSON.stringify(options.orderedWaypointIds))
   expect(new Set(visited).size).toBe(visited.length)
   expect(first.optimization.evaluatedOrderCount).toBe(visited.length)
-  expect(await optimizeWaypointOrder({ session, waypointIds: ids })).toEqual(first)
+  expect(first.optimization.evaluationBudget).toBe(32)
+  expect(first.optimization.roundEvaluationCounts.reduce((sum, n) => sum + n, first.optimization.seedCount))
+    .toBe(visited.length)
+  // Reproducibility requires identical initial cache facts, not the warmed
+  // cache left by the first run.
+  const repeated = fixture()
+  const repeatedEvaluate = jest.spyOn(repeated.session, 'evaluateRouteOrder')
+  expect(await optimizeWaypointOrder({ session: repeated.session, waypointIds: ids })).toEqual(first)
+  expect(repeatedEvaluate.mock.calls.map(([options]) => JSON.stringify(options.orderedWaypointIds))).toEqual(visited)
 })
 
 test('search explores variants even if every seed is unreachable', async () => {
@@ -202,9 +211,9 @@ test('heuristic explores a four-element reversal early and scores its directed c
   expect(visited).toContainEqual(reversal)
   expect(result.recommendedWaypointIds).toEqual(reversal)
   expect(result.optimization).toMatchObject({ strategy: 'heuristic', durationSeconds: 5 })
-  expect(visited.length).toBeLessThanOrEqual(24)
+  expect(visited.length).toBeLessThanOrEqual(config.ORDERING_MAX_EVALUATIONS)
   expect(new Set(visited.map(order => JSON.stringify(order))).size).toBe(visited.length)
-  expect(result.optimization.improvementRounds).toBeLessThanOrEqual(2)
+  expect(result.optimization.improvementRounds).toBeLessThanOrEqual(config.ORDERING_MAX_ROUNDS)
   const repeated = await makeFixture()
   const repeatedEvaluate = jest.spyOn(repeated.session, 'evaluateRouteOrder')
   expect(await optimizeWaypointOrder({ session: repeated.session, waypointIds: [...ids].reverse() })).toEqual(result)

@@ -27,6 +27,7 @@ function isValidRoutePlanningSession(session) {
     typeof session.prefetchSegments === "function" &&
     typeof session.evaluateRouteOrder === "function" &&
     typeof session.getWaypointSearchData === "function" &&
+    typeof session.getCachedSegmentCosts === "function" &&
     typeof session.buildRouteForOrder === "function"
   );
 }

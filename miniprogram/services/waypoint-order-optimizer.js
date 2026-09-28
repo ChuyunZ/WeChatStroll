@@ -147,6 +147,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   const evaluated = new Map()
   let best = null
   let rounds = 0
+  const roundEvaluationCounts = []
 
   function compare(left, right) {
     if (!right) return -1
@@ -188,6 +189,12 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
     for (let round = 0; round < ORDERING_MAX_ROUNDS; round++) {
       if (evaluated.size >= ORDERING_MAX_EVALUATIONS) break
       rounds++
+      const roundStartEvaluationCount = evaluated.size
+      const roundBudget = Math.ceil(
+        (ORDERING_MAX_EVALUATIONS - evaluated.size) / (ORDERING_MAX_ROUNDS - round)
+      )
+      const hasRoundCapacity = () => evaluated.size < ORDERING_MAX_EVALUATIONS &&
+        evaluated.size - roundStartEvaluationCount < roundBudget
       const next = frontiers.map(frontier => ({ ...frontier }))
       // Snapshot after seed evaluation / the previous round. Do not resort
       // mid-round as new provider results arrive: all frontiers share facts.
@@ -197,9 +204,10 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       )
       let active = true
       // Round-robin exploration includes variants of failed seeds.
-      while (active && evaluated.size < ORDERING_MAX_EVALUATIONS) {
+      while (active && hasRoundCapacity()) {
         active = false
         for (let index = 0; index < iterators.length; index++) {
+          if (!hasRoundCapacity()) break
           const step = iterators[index].next()
           if (step.done) continue
           active = true
@@ -209,9 +217,12 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
           }
         }
       }
-      const improved = next.some((frontier, index) => frontier.result !== frontiers[index].result)
+      const newEvaluationCount = evaluated.size - roundStartEvaluationCount
+      roundEvaluationCounts.push(newEvaluationCount)
       frontiers = next
-      if (!improved) break
+      // New settled edges can improve the next round's priorities even when
+      // no frontier improved. Stop only when no unseen orders were evaluated.
+      if (newEvaluationCount === 0) break
     }
   }
 
@@ -219,6 +230,8 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
     strategy,
     waypointCount: ids.length,
     evaluatedOrderCount: evaluated.size,
+    evaluationBudget: exact ? null : ORDERING_MAX_EVALUATIONS,
+    roundEvaluationCounts,
     seedCount,
     improvementRounds: rounds,
     budgetExhausted: !exact && evaluated.size >= ORDERING_MAX_EVALUATIONS,

@@ -116,6 +116,7 @@ function createRoutePlanningSessionMock() {
 
     evaluateRouteOrder: jest.fn(),
     getWaypointSearchData: jest.fn(),
+    getCachedSegmentCosts: jest.fn(),
 
     buildRouteForOrder:
       jest.fn()
@@ -513,6 +514,22 @@ describe(
         ).rejects.toThrow(
           "Invalid route generation result"
         );
+      }
+    );
+
+
+    test.each([undefined, null, {}])(
+      "getRoutes rejects a session with an invalid cache inspection method (%s)",
+      async getCachedSegmentCosts => {
+        const session = createRoutePlanningSessionMock();
+        session.getCachedSegmentCosts = getCachedSegmentCosts;
+        routeGenerationServiceMock.generateRoutes.mockResolvedValue({
+          status: "success",
+          routes: [GENERATED_ROUTE],
+          routePlanningSession: session,
+          waypointCandidateCache: createWaypointCandidateCacheMock()
+        });
+        await expect(page.getRoutes()).rejects.toThrow("Invalid route generation result");
       }
     );
 
