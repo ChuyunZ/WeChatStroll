@@ -32,7 +32,7 @@ beforeEach(() => {
   getCurrentLocation.mockResolvedValue(location)
   cloudPlan({ candidates })
   getWalkingSegment.mockImplementation(async (from, to) => ({
-    success: true, durationSeconds: 100, distanceMeters: 200,
+    success: true, durationSeconds: 1350, distanceMeters: 200,
     polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
   }))
 })
@@ -57,8 +57,8 @@ test('initial routes and replacements optimize sets and share all cached segment
   expect(first.routeOrder).toEqual({ orderedWaypointIds: ['A', 'B'], source: 'optimized' })
   expect(first.pointsOfInterest.map(p => p.poiId)).toEqual(['A', 'B'])
   expect(first.endPoint.name).toBe('B')
-  expect(first.durationSeconds).toBe(200)
-  expect(first.optimization).toMatchObject({ strategy: 'exact', evaluatedOrderCount: 2, targetErrorSeconds: 2500 })
+  expect(first.durationSeconds).toBe(2700)
+  expect(first.optimization).toMatchObject({ strategy: 'exact', evaluatedOrderCount: 2, targetErrorSeconds: 0 })
   expect(getWalkingSegment).toHaveBeenCalledTimes(10)
   const cache = result.waypointCandidateCache
   const candidate = cache.getUnusedCandidates()[0]
@@ -80,21 +80,114 @@ test('initial routes and replacements optimize sets and share all cached segment
   expect(getWalkingSegment).toHaveBeenCalledTimes(13)
 })
 
-test('explicit empty plan returns empty without walking requests', async () => {
+test('explicit empty AI plan uses a validated deterministic fallback without repeating location or POI search', async () => {
   cloudPlan({ candidates: [] })
-  expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_WAYPOINT_CANDIDATES' })
-  expect(getWalkingSegment).not.toHaveBeenCalled()
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(result.routes).toHaveLength(1)
+  expect(getCurrentLocation).toHaveBeenCalledTimes(1)
+  expect(callCloudFunction.mock.calls.map(([name]) => name))
+    .toEqual(['getNearbyPois', 'aiRoutePlanner'])
+  expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(0)
+})
+
+test('malformed nested AI candidates use the deterministic fallback', async () => {
+  cloudPlan({ candidates: [{ waypoints: null }] })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(result.routes).toHaveLength(1)
+})
+
+test('duration-aware fallback tries bounded POIs until one validates', async () => {
+  const fallbackPois = [
+    { ...pois[0], poiId: 'near', name: 'near', distanceInMeters: 100 },
+    { ...pois[1], poiId: 'middle', name: 'middle', distanceInMeters: 900 },
+    { ...pois[2], poiId: 'far', name: 'far', distanceInMeters: 1600 },
+    { ...pois[3], poiId: 'second-far', name: 'second-far', distanceInMeters: 1500 }
+  ]
+
+  callCloudFunction.mockImplementation(async name => name === 'getNearbyPois'
+    ? { poisByCategory: { park: fallbackPois } }
+    : { plan: { candidates: [] } })
+
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true,
+    durationSeconds: to.nodeId === 'second-far' ? 2700 : 100,
+    distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId))
+    .toEqual(['far', 'second-far'])
 })
 
 test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {
   getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
     ? { success: false, error: 'ROUTE_NOT_FOUND' }
-    : { success: true, durationSeconds: 100, distanceMeters: 200, polyline: [from, to] })
+    : { success: true, durationSeconds: 1350, distanceMeters: 200, polyline: [from, to] })
   const result = await generateRoutes(preferences)
   expect(result.routes).toHaveLength(1)
   expect(result.routes[0].candidateWaypointIds).toEqual(['C', 'A'])
   expect(result.waypointCandidateCache.getAllCandidates().map(entry => entry.status))
     .toEqual(['failed', 'success', 'unused', 'unused'])
+})
+
+test('rejects a candidate outside the requested duration range and tries the next candidate', async () => {
+  getWalkingSegment.mockImplementation(async (from, to) => {
+    const touchesB = from.nodeId === 'B' || to.nodeId === 'B'
+    return {
+      success: true, durationSeconds: touchesB ? 100 : 1350, distanceMeters: 200,
+      polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+    }
+  })
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('ai')
+  expect(result.routes).toHaveLength(1)
+  expect(result.routes[0].candidateWaypointIds).toEqual(['C', 'A'])
+  expect(result.routes[0].durationSeconds).toBe(2700)
+  expect(result.waypointCandidateCache.getAllCandidates().map(entry => entry.status))
+    .toEqual(['failed', 'success', 'unused', 'unused'])
+})
+
+test('falls back after every AI candidate fails and validates the fallback route', async () => {
+  getWalkingSegment.mockImplementation(async (from, to) => {
+    if (from.nodeId === 'START' && to.nodeId === 'A') {
+      return {
+        success: true, durationSeconds: 2700, distanceMeters: 1000,
+        polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+      }
+    }
+
+    return { success: false, error: 'ROUTE_NOT_FOUND' }
+  })
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(result.routes).toHaveLength(1)
+  expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(0)
 })
 
 test('route-build failures emit their stage and directed edge instead of bypassing the diagnostic log', async () => {
@@ -127,17 +220,51 @@ test('exhausted rate limiting produces a temporary generation error, not an empt
 test('defensive zero-point candidate never creates a successful route', async () => {
   cloudPlan({ candidates: [{ waypoints: [] }] })
   expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
-  expect(getWalkingSegment).not.toHaveBeenCalled()
+  expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
-test('malformed plans and AI provider failures remain errors', async () => {
+test('malformed AI plan uses the deterministic fallback', async () => {
   cloudPlan({ candidates: null })
-  await expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'INVALID_AI_ROUTE_PLAN' })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+})
+
+test('AI provider failure uses the deterministic fallback', async () => {
   callCloudFunction.mockImplementation(async name => {
     if (name === 'getNearbyPois') return { poisByCategory: { park: pois } }
     throw Object.assign(new Error('Unavailable'), { code: 'AI_REQUEST_FAILED' })
   })
-  await expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'AI_REQUEST_FAILED' })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  const result = await generateRoutes(preferences)
+
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('fallback')
+  expect(getCurrentLocation).toHaveBeenCalledTimes(1)
+  expect(callCloudFunction.mock.calls.map(([name]) => name))
+    .toEqual(['getNearbyPois', 'aiRoutePlanner'])
+})
+
+test('fallback also fails safely instead of exposing an invalid route', async () => {
+  cloudPlan({ candidates: [] })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 100, distanceMeters: 200,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }))
+
+  expect(await generateRoutes(preferences))
+    .toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
 test('failed walking segments produce empty and stay cached across candidates', async () => {

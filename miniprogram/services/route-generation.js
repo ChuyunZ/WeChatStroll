@@ -2,6 +2,10 @@ const locationService = require('./location')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
+  validateGeneratedWalkingRoute
+} = require('./route-validation')
+
+const {
   createCodedError: createRouteGenerationError
 } = require('../utils/errors')
 
@@ -20,6 +24,10 @@ const {
 const {
   getPoiSearchRadius
 } = require('./poi-search-radius')
+
+const {
+  MAX_FALLBACK_CANDIDATES
+} = require('../config/route-planning')
 
 const {
   ROUTE_TYPES
@@ -129,6 +137,193 @@ function selectCandidatePoi(
   return selectNearestPoi(allPois)
 }
 
+function getFallbackTargetPoiDistance(
+  preferences = {}
+) {
+  if (
+    typeof preferences.durationMinutes !== 'number' ||
+    !Number.isFinite(preferences.durationMinutes) ||
+    preferences.durationMinutes <= 0
+  ) {
+    return null
+  }
+
+  return getPoiSearchRadius(
+    preferences.durationMinutes
+  )
+}
+
+function compareFallbackPoiFit(
+  left,
+  right,
+  targetDistanceMeters
+) {
+  const leftDistance = getPoiDistance(left)
+  const rightDistance = getPoiDistance(right)
+
+  const leftScore =
+    targetDistanceMeters === null
+      ? leftDistance
+      : Math.abs(
+          leftDistance -
+          targetDistanceMeters
+        )
+
+  const rightScore =
+    targetDistanceMeters === null
+      ? rightDistance
+      : Math.abs(
+          rightDistance -
+          targetDistanceMeters
+        )
+
+  if (leftScore !== rightScore) {
+    return leftScore < rightScore ? -1 : 1
+  }
+
+  if (leftDistance !== rightDistance) {
+    return leftDistance < rightDistance ? -1 : 1
+  }
+
+  if (left.poiId < right.poiId) return -1
+  if (left.poiId > right.poiId) return 1
+  return 0
+}
+
+function buildFallbackPoiCandidates(
+  poisByCategory,
+  preferences = {}
+) {
+  if (
+    !poisByCategory ||
+    typeof poisByCategory !== 'object' ||
+    Array.isArray(poisByCategory)
+  ) {
+    return []
+  }
+
+  const targetDistanceMeters =
+    getFallbackTargetPoiDistance(
+      preferences
+    )
+
+  const environmentRanking =
+    Array.isArray(preferences.environmentPreferences)
+      ? preferences.environmentPreferences
+      : []
+
+  const preferredCategories = []
+  const seenCategories = new Set()
+
+  for (const environment of environmentRanking) {
+    const category =
+      POI_ENVIRONMENT_CATEGORY_MAP[environment]
+
+    if (
+      !category ||
+      seenCategories.has(category)
+    ) {
+      continue
+    }
+
+    seenCategories.add(category)
+    preferredCategories.push(category)
+  }
+
+  const candidates = []
+  const seenPoiIds = new Set()
+
+  function addCandidate(poi) {
+    if (
+      !poi ||
+      seenPoiIds.has(poi.poiId)
+    ) {
+      return
+    }
+
+    seenPoiIds.add(poi.poiId)
+    candidates.push(poi)
+  }
+
+  for (const category of preferredCategories) {
+    const categoryPois =
+      Array.isArray(poisByCategory[category])
+        ? poisByCategory[category]
+            .filter(isValidPoi)
+            .sort(
+              (left, right) =>
+                compareFallbackPoiFit(
+                  left,
+                  right,
+                  targetDistanceMeters
+                )
+            )
+        : []
+
+    addCandidate(categoryPois[0])
+
+    if (
+      candidates.length >=
+      MAX_FALLBACK_CANDIDATES
+    ) {
+      return candidates
+    }
+  }
+
+  const preferredCategoryRanks = new Map(
+    preferredCategories.map(
+      (category, index) => [
+        category,
+        index
+      ]
+    )
+  )
+
+  const allPois =
+    Object.values(poisByCategory)
+      .filter(Array.isArray)
+      .reduce(
+        (combined, pois) =>
+          combined.concat(pois),
+        []
+      )
+      .filter(isValidPoi)
+      .sort((left, right) => {
+        const leftRank =
+          preferredCategoryRanks.has(left.category)
+            ? preferredCategoryRanks.get(left.category)
+            : preferredCategories.length
+
+        const rightRank =
+          preferredCategoryRanks.has(right.category)
+            ? preferredCategoryRanks.get(right.category)
+            : preferredCategories.length
+
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank
+        }
+
+        return compareFallbackPoiFit(
+          left,
+          right,
+          targetDistanceMeters
+        )
+      })
+
+  for (const poi of allPois) {
+    addCandidate(poi)
+
+    if (
+      candidates.length >=
+      MAX_FALLBACK_CANDIDATES
+    ) {
+      break
+    }
+  }
+
+  return candidates
+}
+
 async function searchNearbyPois(
   location,
   radius
@@ -187,6 +382,34 @@ async function requestWaypointPlan(
     )
 
   return result.plan
+}
+
+function hasValidWaypointPlanShape(plan) {
+  if (
+    !plan ||
+    typeof plan !== 'object' ||
+    Array.isArray(plan) ||
+    !Array.isArray(plan.candidates)
+  ) {
+    return false
+  }
+
+  return plan.candidates.every(
+    candidate =>
+      candidate &&
+      typeof candidate === 'object' &&
+      !Array.isArray(candidate) &&
+      Array.isArray(candidate.waypoints) &&
+      candidate.waypoints.length > 0 &&
+      candidate.waypoints.every(
+        waypoint =>
+          waypoint &&
+          typeof waypoint === 'object' &&
+          !Array.isArray(waypoint) &&
+          typeof waypoint.poiId === 'string' &&
+          waypoint.poiId.trim() !== ''
+      )
+  )
 }
 
 function buildRecommendationReason(
@@ -590,6 +813,42 @@ async function buildOptimizedCandidateRoute({
 
       return walkingRoute || { success: false, error: 'NO_VALID_ROUTE' }
     }
+
+    stage = 'route_validation'
+    const validation = validateGeneratedWalkingRoute(
+      walkingRoute,
+      {
+        allowedWaypointIds: candidate.waypointIds,
+        requestedDurationMinutes
+      }
+    )
+
+    if (!validation.valid) {
+      candidateCache.markFailed(candidate.candidateId)
+
+      console.warn(
+        '[Route Generation] Candidate failed:',
+        {
+          stage: 'route_validation',
+          candidateId: candidate.candidateId,
+          candidateIndex,
+          waypointIds: candidate.waypointIds,
+          recommendedWaypointIds: recommendation.recommendedWaypointIds,
+          error: validation.error,
+          reason: validation.reason,
+          actualDurationSeconds: validation.actualDurationSeconds,
+          targetDurationSeconds: validation.targetDurationSeconds,
+          minDurationSeconds: validation.minDurationSeconds,
+          maxDurationSeconds: validation.maxDurationSeconds,
+          optimization: summarizeOptimization(recommendation.optimization)
+        }
+      )
+
+      const { valid, ...validationFailure } = validation
+      return { success: false, ...validationFailure }
+    }
+
+    stage = 'route_format'
     const route = {
       ...buildGeneratedRouteFromAiCandidate({ location, walkingRoute, candidateIndex }),
       candidateWaypointIds: [...candidate.waypointIds],
@@ -651,34 +910,290 @@ function logCandidateSummary(candidateCache) {
   })
 }
 
+async function buildFallbackGenerationResult({
+  location,
+  poisByCategory,
+  preferences,
+  trigger,
+  routePlanningSession = null
+}) {
+  console.warn(
+    '[Route Generation] Falling back:',
+    {
+      trigger,
+      reusedPlanningSession:
+        Boolean(routePlanningSession),
+      requestedDurationMinutes:
+        preferences.durationMinutes
+    }
+  )
+
+  const fallbackPois =
+    buildFallbackPoiCandidates(
+      poisByCategory,
+      preferences
+    )
+
+  const routeType =
+    getRequestedRouteType(preferences)
+
+  console.log(
+    '[Route Generation] Fallback candidates:',
+    {
+      routeType,
+      targetDistanceMeters:
+        getFallbackTargetPoiDistance(
+          preferences
+        ),
+      candidateCount: fallbackPois.length,
+      candidates:
+        fallbackPois.map(
+          (poi, candidateIndex) => ({
+            candidateIndex,
+            poiId: poi.poiId,
+            name: poi.name,
+            category: poi.category,
+            distanceInMeters:
+              poi.distanceInMeters
+          })
+        )
+    }
+  )
+
+  if (fallbackPois.length === 0) {
+    console.warn(
+      '[Route Generation] Fallback exhausted:',
+      {
+        attemptedCandidates: 0,
+        result: 'NO_VALID_ROUTE'
+      }
+    )
+
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_ROUTE'
+    }
+  }
+
+  const fallbackSession =
+    routePlanningSession ||
+    createRoutePlanningSession({
+      start: location,
+      verifiedWaypointPool: fallbackPois,
+      routeType
+    })
+
+  if (routePlanningSession) {
+    fallbackSession.registerVerifiedWaypoints(
+      fallbackPois
+    )
+  }
+
+  for (
+    const [
+      candidateIndex,
+      selectedPoi
+    ] of fallbackPois.entries()
+  ) {
+    console.log(
+      '[Route Generation] Trying fallback candidate:',
+      {
+        candidateIndex,
+        poiId: selectedPoi.poiId,
+        name: selectedPoi.name,
+        category: selectedPoi.category,
+        distanceInMeters:
+          selectedPoi.distanceInMeters
+      }
+    )
+
+    const walkingRoute =
+      await fallbackSession.buildRouteForOrder({
+        allowedWaypointIds: [selectedPoi.poiId],
+        orderedWaypointIds: [selectedPoi.poiId],
+        source: 'fallback'
+      })
+
+    if (!walkingRoute || walkingRoute.success !== true) {
+      console.warn(
+        '[Route Generation] Fallback candidate failed:',
+        {
+          stage: 'route_build',
+          candidateIndex,
+          poiId: selectedPoi.poiId,
+          error:
+            walkingRoute &&
+            walkingRoute.error,
+          reason:
+            walkingRoute &&
+            walkingRoute.reason,
+          failedSegment:
+            walkingRoute &&
+            walkingRoute.failedSegment
+        }
+      )
+
+      if (
+        walkingRoute &&
+        walkingRoute.error === 'AMAP_RATE_LIMITED'
+      ) {
+        throw createRouteGenerationError(
+          'AMAP_RATE_LIMITED',
+          'Walking provider is temporarily rate limited.'
+        )
+      }
+
+      continue
+    }
+
+    const validation =
+      validateGeneratedWalkingRoute(
+        walkingRoute,
+        {
+          allowedWaypointIds: [selectedPoi.poiId],
+          requestedDurationMinutes:
+            preferences.durationMinutes
+        }
+      )
+
+    if (!validation.valid) {
+      console.warn(
+        '[Route Generation] Fallback candidate failed:',
+        {
+          stage: 'route_validation',
+          candidateIndex,
+          poiId: selectedPoi.poiId,
+          error: validation.error,
+          reason: validation.reason,
+          actualDurationSeconds:
+            validation.actualDurationSeconds,
+          targetDurationSeconds:
+            validation.targetDurationSeconds,
+          minDurationSeconds:
+            validation.minDurationSeconds,
+          maxDurationSeconds:
+            validation.maxDurationSeconds
+        }
+      )
+
+      continue
+    }
+
+    const route =
+      buildGeneratedRoute({
+        location,
+        selectedPoi,
+        walkingRoute,
+        preferences
+      })
+
+    console.log(
+      '[Route Generation] Fallback succeeded:',
+      {
+        candidateIndex,
+        poiId: selectedPoi.poiId,
+        name: selectedPoi.name,
+        durationSeconds:
+          walkingRoute.durationSeconds,
+        distanceMeters:
+          walkingRoute.distanceMeters
+      }
+    )
+
+    return {
+      status: 'success',
+      source: 'fallback',
+      location,
+      routes: [route],
+      routePlanningSession:
+        fallbackSession,
+      waypointCandidateCache:
+        createWaypointCandidateCache([])
+    }
+  }
+
+  console.warn(
+    '[Route Generation] Fallback exhausted:',
+    {
+      attemptedCandidates:
+        fallbackPois.length,
+      result: 'NO_VALID_ROUTE'
+    }
+  )
+
+  return {
+    status: 'empty',
+    reason: 'NO_VALID_ROUTE'
+  }
+}
+
 // AI waypoint candidates -> walking routes
 async function generateRoutes(
   preferences = {}
 ) {
-  const waypointResult = await generateWaypointPlan(preferences)
+  const location =
+    await locationService.getCurrentLocation()
 
-  if (waypointResult.status === 'empty') {
-    return waypointResult
-  }
-
-  const {
-    location,
-    nearbyPois,
-    plan
-  } = waypointResult
-
-  if (
-    !plan ||
-    !Array.isArray(plan.candidates)
-  ) {
+  if (!isValidPoint(location)) {
     throw createRouteGenerationError(
-      'INVALID_AI_ROUTE_PLAN',
-      'AI route plan has no valid candidates.'
+      'INVALID_LOCATION',
+      'Current location has an invalid format.'
     )
   }
 
+  const radius =
+    getPoiSearchRadius(
+      preferences.durationMinutes
+    )
+
+  const poisByCategory =
+    await searchNearbyPois(location, radius)
+
+  const nearbyPois =
+    buildPoiCandidates(poisByCategory)
+
+  if (nearbyPois.length === 0) {
+    return {
+      status: 'empty',
+      reason: 'NO_VALID_POI'
+    }
+  }
+
+  let plan
+
+  try {
+    plan = await requestWaypointPlan(
+      location,
+      preferences,
+      nearbyPois
+    )
+  } catch (error) {
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: error && error.code
+        ? error.code
+        : 'AI_ROUTE_PLANNING_FAILED'
+    })
+  }
+
+  if (!hasValidWaypointPlanShape(plan)) {
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'INVALID_AI_ROUTE_PLAN'
+    })
+  }
+
   if (plan.candidates.length === 0) {
-    return { status: 'empty', reason: 'NO_WAYPOINT_CANDIDATES' }
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'NO_WAYPOINT_CANDIDATES'
+    })
   }
 
   const routeType = getRequestedRouteType(preferences)
@@ -745,14 +1260,18 @@ async function generateRoutes(
 
   if (routes.length === 0) {
     if (temporaryFailure) throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
-    return {
-      status: 'empty',
-      reason: 'NO_VALID_ROUTE'
-    }
+    return buildFallbackGenerationResult({
+      location,
+      poisByCategory,
+      preferences,
+      trigger: 'NO_VALID_AI_ROUTE',
+      routePlanningSession: session
+    })
   }
   
   return {
     status: 'success',
+    source: 'ai',
     location,
     routes,
 
