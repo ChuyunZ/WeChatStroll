@@ -1,6 +1,7 @@
 const routeGenerationService = require(
   "../../services/route-generation"
 );
+const { buildRouteMap } = require("../../utils/route-map");
 
 const {
   ROUTE_TYPES
@@ -24,6 +25,9 @@ function isValidRoutePlanningSession(session) {
     typeof session === "object" &&
     typeof session.registerVerifiedWaypoints === "function" &&
     typeof session.prefetchSegments === "function" &&
+    typeof session.evaluateRouteOrder === "function" &&
+    typeof session.getWaypointSearchData === "function" &&
+    typeof session.getCachedSegmentCosts === "function" &&
     typeof session.buildRouteForOrder === "function"
   );
 }
@@ -42,6 +46,7 @@ function isValidWaypointCandidateCache(cache) {
 
 Page({
   data: {
+    isLoadingMoreRoutes: false,
     routes: [],
     routeState: "loading"
   },
@@ -98,6 +103,7 @@ Page({
   },
 
   onUnload() {
+    this._replacementSession = null;
     // 页面关闭后，让仍在运行的旧请求失效。
     this._routeRequestId =
       (this._routeRequestId || 0) + 1;
@@ -111,6 +117,7 @@ Page({
   },
 
   async loadRoutes() {
+    this._replacementSession = null;
     const requestId =
       (this._routeRequestId || 0) + 1;
 
@@ -128,6 +135,7 @@ Page({
 
     this.setData({
       routes: [],
+      isLoadingMoreRoutes: false,
       routeState: "loading"
     });
 
@@ -212,6 +220,8 @@ Page({
         routes: preparedRoutes,
         routeState: "success"
       });
+      // Do not await the remainder before making the first route usable.
+      this._initialFillPromise = this.fillInitialRoutes(requestId);
     } catch (error) {
       if (
         requestId !==
@@ -227,7 +237,7 @@ Page({
 
       console.error(
         "[Routes] Failed to load routes:",
-        error
+        { code: error && error.code || "ROUTE_LOAD_FAILED" }
       );
 
       this.setData({
@@ -286,8 +296,43 @@ Page({
     }
   },
 
+  async fillInitialRoutes(requestId) {
+    const session = this._routePlanningSession;
+    const candidateCache = this._waypointCandidateCache;
+    const location = this._routeLocation;
+    const requestedDurationMinutes = (this._routePreferences || {}).durationMinutes;
+    const isCurrent = () => requestId === this._routeRequestId &&
+      session === this._routePlanningSession && candidateCache === this._waypointCandidateCache;
+    const candidates = candidateCache.getUnusedCandidates();
+    if (this._rawRoutes.length >= 3 || !candidates.length) return;
+    this.setData({ isLoadingMoreRoutes: true });
+    try {
+      for (const candidate of candidates) {
+        if (!isCurrent() || this._rawRoutes.length >= 3) break;
+        try {
+          const result = await routeGenerationService.buildOptimizedCandidateRoute({
+            session, candidateCache, candidate, location,
+            candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
+            requestedDurationMinutes
+          });
+          if (!isCurrent()) return;
+          if (!result.success) continue;
+          this._rawRoutes = [...this._rawRoutes, result.route];
+          this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+        } catch (error) {
+          if (!isCurrent()) return;
+          console.warn("[Routes] Background candidate failed:", { candidateId: candidate.candidateId, code: error && error.code || "UNEXPECTED_CANDIDATE_ERROR" });
+        }
+      }
+    } finally {
+      routeGenerationService.logCandidateSummary(candidateCache);
+      if (isCurrent()) this.setData({ isLoadingMoreRoutes: false });
+    }
+  },
+
   prepareRoutes(routes) {
     return routes.map((route) => {
+      const routeMap = buildRouteMap(route);
       const middleIndex =
         Math.floor(
           route.polyline.length / 2
@@ -323,6 +368,9 @@ Page({
 
       return {
         ...route,
+        displayPois: routeMap.displayPois,
+        previewMarkers: routeMap.markers,
+        previewPoints: routeMap.mapPoints,
 
         distanceKm:
           (
@@ -369,6 +417,7 @@ Page({
   },
 
   changePreferences() {
+    this.onUnload();
     wx.redirectTo({
       url:
         "/pages/preferences/preferences"
@@ -428,83 +477,47 @@ Page({
   },
 
   async showOtherRoutes() {
-    const requestId =
-      this._routeRequestId;
+    if (this.data.isLoadingMoreRoutes) return;
+    const requestId = this._routeRequestId;
+    const session = this._routePlanningSession;
+    const candidateCache = this._waypointCandidateCache;
+    const location = this._routeLocation;
+    if (this._replacementSession === session && session) return;
 
-    const routePlanningSession =
-      this._routePlanningSession;
-
-    const waypointCandidateCache =
-      this._waypointCandidateCache;
-
-    const unusedCandidates = this._waypointCandidateCache.getUnusedCandidates();
-
-    if (unusedCandidates.length === 0) {
-      wx.showToast({
-        title: "暂无更多路线",
-        icon: "none"
-      });
-    
+    const unusedCandidates = candidateCache ? candidateCache.getUnusedCandidates() : [];
+    if (!session || unusedCandidates.length === 0) {
+      wx.showToast({ title: "暂无更多路线", icon: "none" });
       return;
     }
 
-    let routeReplaced = false;
-    for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
-      this._waypointCandidateCache.markBuilding(candidate.candidateId);
-    
-      const walkingRoute = await this._routePlanningSession.buildRouteForOrder({
-            allowedWaypointIds: candidate.waypointIds,
-            orderedWaypointIds: candidate.waypointIds,
-            source: "ai"});
-    
-      if (
-        requestId !== this._routeRequestId ||
-        routePlanningSession !== this._routePlanningSession ||
-        waypointCandidateCache !== this._waypointCandidateCache
-      ) {
+    const isCurrent = () => requestId === this._routeRequestId &&
+      session === this._routePlanningSession &&
+      candidateCache === this._waypointCandidateCache;
+    this._replacementSession = session;
+    try {
+      for (const candidate of unusedCandidates) {
+        const result = await routeGenerationService.buildOptimizedCandidateRoute({
+          session, candidateCache, candidate, location,
+          candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
+          requestedDurationMinutes: (this._routePreferences || {}).durationMinutes
+        });
+        if (!isCurrent()) return;
+        if (!result.success) continue;
+
+        const newRawRoutes = [...this._rawRoutes];
+        newRawRoutes.shift();
+        newRawRoutes.push(result.route);
+        this._rawRoutes = newRawRoutes;
+        this.setData({ routes: this.prepareRoutes(newRawRoutes) });
+        wx.showToast({ title: "已更换路线", icon: "none" });
         return;
       }
-
-      if (!walkingRoute || walkingRoute.success !== true) {
-        this._waypointCandidateCache.markFailed(candidate.candidateId);
-        continue;
-      }
-
-      const route = routeGenerationService.buildGeneratedRouteFromAiCandidate(
-        {location: this._routeLocation,
-          walkingRoute,
-          candidateIndex
-        })
-
-      this._waypointCandidateCache.markSuccess(candidate.candidateId, route)
-
-      const newRawRoutes = [...this._rawRoutes]
-      
-      // 删掉第一条
-      newRawRoutes.shift()
-      newRawRoutes.push(route)
-      this._rawRoutes = newRawRoutes
-
-      routeReplaced = true;
-      break;
+      if (isCurrent()) wx.showToast({ title: "暂无更多路线", icon: "none" });
+    } catch (error) {
+      if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
+    } finally {
+      if (this._replacementSession === session) this._replacementSession = null;
+      routeGenerationService.logCandidateSummary(candidateCache);
     }
-
-    if (!routeReplaced) {
-      wx.showToast({
-        title: "暂无更多路线",
-        icon: "none"
-      });
-    
-      return;
-    }
-
-    const preparedRoutes = this.prepareRoutes(this._rawRoutes);
-
-    this.setData({routes: preparedRoutes});
-
-    wx.showToast({
-      title: "已更换路线",
-      icon: "none"
-    });
   }
 });

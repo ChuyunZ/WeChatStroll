@@ -201,6 +201,28 @@ describe(
   "Route Detail page",
   () => {
 
+    test.each([
+      ['point_to_point', false], ['loop', true], ['out_and_back', true]
+    ])('normalizes legacy %s return metadata for the legend', (routeType, returnsToStart) => {
+      const legacy = { ...GENERATED_ROUTE, routeType };
+      delete legacy.returnsToStart;
+      expect(page.prepareRoute(legacy).returnsToStart).toBe(returnsToStart);
+      expect(legacy.returnsToStart).toBeUndefined();
+    });
+
+    test.each([true, false])('preserves explicit returnsToStart=%s', returnsToStart => {
+      expect(page.prepareRoute({ ...GENERATED_ROUTE, returnsToStart }).returnsToStart).toBe(returnsToStart);
+    });
+
+    test('map legend uses normalized return metadata for its start label and separate endpoint', () => {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const template = fs.readFileSync(path.join(__dirname,
+        '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8');
+      expect(template).toContain("{{route.returnsToStart ? '起点 / 返回点' : '起点'}}");
+      expect(template).toMatch(/<view class="legend-item" wx:if="{{!route.returnsToStart}}">\s*<view class="legend-dot end-dot">/);
+    });
+
     test(
       "onLoad waits for a real route from Routes through EventChannel",
       () => {
@@ -374,7 +396,7 @@ describe(
                 .longitude,
 
             title:
-              "终点"
+              "1. 人民公园（终点）"
           })
         );
       }
@@ -416,60 +438,27 @@ describe(
     );
 
 
-    test(
-      "loop mock routes keep start and end markers visible",
-      () => {
-        page.loadRoute(
-          mockRoutes[0]
-        );
+    test("loop mock routes use the real shared start/end instead of a fake endpoint", () => {
+      page.loadRoute(mockRoutes[0]);
+      expect(page.data.markers).toHaveLength(1);
+      expect(page.data.markers[0]).toMatchObject({
+        latitude: mockRoutes[0].startPoint.latitude,
+        longitude: mockRoutes[0].startPoint.longitude
+      });
+    });
 
-
-        expect(
-          page.data.markers[0].latitude
-        ).toBe(
-          mockRoutes[0]
-            .polyline[0]
-            .latitude
-        );
-
-
-        expect(
-          page.data.markers[0].longitude
-        ).toBe(
-          mockRoutes[0]
-            .polyline[0]
-            .longitude
-        );
-
-
-        expect(
-          page.data.markers[1].latitude
-        ).toBe(
-          mockRoutes[0]
-            .polyline[
-              mockRoutes[0]
-                .polyline
-                .length - 2
-            ]
-            .latitude
-        );
-
-
-        expect(
-          page.data.markers[1].longitude
-        ).toBe(
-          mockRoutes[0]
-            .polyline[
-              mockRoutes[0]
-                .polyline
-                .length - 2
-            ]
-            .longitude
-        );
-      }
-    );
-
-
+    test("detail displays all POIs in route order, including points off the walking polyline", () => {
+      const pointsOfInterest = Array.from({ length: 8 }, (_, index) => ({
+        poiId: `poi-${index}`, name: `Place ${index}`,
+        latitude: 23.13 + index / 100, longitude: 113.27
+      }));
+      page.loadRoute({ ...GENERATED_ROUTE, pointsOfInterest, endPoint: pointsOfInterest[7] });
+      expect(page.data.markers).toHaveLength(9);
+      expect(page.data.route.displayPois.map(poi => poi.poiId)).toEqual(pointsOfInterest.map(poi => poi.poiId));
+      pointsOfInterest.forEach(poi => {
+        expect(page.data.mapPoints).toContainEqual({ latitude: poi.latitude, longitude: poi.longitude });
+      });
+    });
     test(
       "Route Detail shows error when EventChannel route ID does not match the URL route ID",
       () => {

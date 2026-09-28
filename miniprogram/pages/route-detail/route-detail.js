@@ -1,5 +1,6 @@
 const { mockRoutes } = require("../../data/mock-routes");
 const { isValidGeoPoint } = require("../../utils/geo");
+const { buildRouteMap } = require("../../utils/route-map");
 const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
@@ -82,25 +83,7 @@ Page({
     const polyline =
       route.polyline;
 
-    const startPoint =
-      this.getRouteStartPoint(route);
-
-    let endPoint =
-      this.getRouteEndPoint(route);
-
-    /*
-     * 旧 mock loop route 的终点与起点完全重合时，
-     * 使用倒数第二个 polyline point 作为终点 marker，
-     * 避免两个 marker 完全叠在一起。
-     */
-    if (
-      startPoint.latitude === endPoint.latitude &&
-      startPoint.longitude === endPoint.longitude &&
-      polyline.length >= 3
-    ) {
-      endPoint =
-        polyline[polyline.length - 2];
-    }
+    const routeMap = buildRouteMap(route);
 
     const middleIndex =
       Math.floor(
@@ -111,7 +94,7 @@ Page({
       polyline[middleIndex];
 
     this.setData({
-      route: preparedRoute,
+      route: { ...preparedRoute, displayPois: routeMap.displayPois },
 
       loading: false,
       error: false,
@@ -122,9 +105,8 @@ Page({
       mapLongitude:
         middlePoint.longitude,
 
-      // include-points 使用整条真实 polyline，
-      // 让地图自动覆盖完整路线。
-      mapPoints: polyline,
+      // 覆盖真实折线和所有地点，包括未落在道路折线上的 POI。
+      mapPoints: routeMap.mapPoints,
 
       mapPolyline: [
         {
@@ -134,57 +116,7 @@ Page({
         }
       ],
 
-      markers: [
-        {
-          id: 1,
-
-          latitude:
-            startPoint.latitude,
-
-          longitude:
-            startPoint.longitude,
-
-          width: 28,
-          height: 36,
-
-          title: "起点",
-
-          label: {
-            content: "起点",
-            color: "#ffffff",
-            fontSize: 12,
-            borderRadius: 12,
-            bgColor: "#58b978",
-            padding: 5,
-            textAlign: "center"
-          }
-        },
-
-        {
-          id: 2,
-
-          latitude:
-            endPoint.latitude,
-
-          longitude:
-            endPoint.longitude,
-
-          width: 28,
-          height: 36,
-
-          title: "终点",
-
-          label: {
-            content: "终点",
-            color: "#ffffff",
-            fontSize: 12,
-            borderRadius: 12,
-            bgColor: "#e66a63",
-            padding: 5,
-            textAlign: "center"
-          }
-        }
-      ]
+      markers: routeMap.markers
     });
   },
 
@@ -204,32 +136,6 @@ Page({
           this.isValidPoint(point)
       )
     );
-  },
-
-  getRouteStartPoint(route) {
-    if (
-      this.isValidPoint(
-        route.startPoint
-      )
-    ) {
-      return route.startPoint;
-    }
-
-    return route.polyline[0];
-  },
-
-  getRouteEndPoint(route) {
-    if (
-      this.isValidPoint(
-        route.endPoint
-      )
-    ) {
-      return route.endPoint;
-    }
-
-    return route.polyline[
-      route.polyline.length - 1
-    ];
   },
 
   showRouteError() {
@@ -275,6 +181,12 @@ Page({
 
     return {
       ...route,
+
+      returnsToStart:
+        typeof route.returnsToStart === "boolean"
+          ? route.returnsToStart
+          : route.routeType === ROUTE_TYPES.LOOP ||
+            route.routeType === ROUTE_TYPES.OUT_AND_BACK,
 
       distanceKm:
         (

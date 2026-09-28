@@ -45,8 +45,7 @@
   >
     <text class="state-title">暂时没有找到合适的路线</text>
     <text class="state-description">
-      当前时长内没有合适的路线
-        附近符合你偏好的路线需要更长时间。
+      可以尝试增加散步时长或调整偏好。
     </text>
 
     <button
@@ -79,6 +78,8 @@
           longitude="{{item.previewLongitude}}"
           scale="16"
           polyline="{{item.previewPolyline}}"
+          markers="{{item.previewMarkers}}"
+          include-points="{{item.previewPoints}}"
           enable-scroll="{{false}}"
           enable-zoom="{{false}}"
           enable-rotate="{{false}}"
@@ -135,6 +136,13 @@
 
 
       <!-- Recommendation -->
+      <view class="poi-list" wx:if="{{item.displayPois.length}}">
+        <text class="reason-label">途经地点（按访问顺序）</text>
+        <view class="poi-row" wx:for="{{item.displayPois}}" wx:for-item="poi" wx:key="visitNumber">
+          <text>{{poi.visitNumber}}. {{poi.displayName}}</text>
+        </view>
+      </view>
+
       <view class="reason">
         <text class="reason-label">推荐理由</text>
         <text class="reason-text">
@@ -155,8 +163,10 @@
     </view>
 
 
+    <view wx:if="{{isLoadingMoreRoutes}}" class="reason-text">正在继续寻找更多路线…</view>
     <button
       class="other-routes-button"
+      disabled="{{isLoadingMoreRoutes}}"
       bindtap="showOtherRoutes"
     >
       换一批路线

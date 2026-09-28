@@ -1,8 +1,7 @@
 const cloud = require("wx-server-sdk")
 const { createAiClient } = require("./aiClient")
 const { buildRoutePlanningPrompt } = require("./routePlanningPrompt")
-const { parseAndValidateRoutePlan } = require("./routePlanContract")
-
+const { parseRoutePlan, parseAndValidateRoutePlan } = require("./routePlanContract")
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV,
   timeout: 60000
@@ -69,6 +68,48 @@ async function generateWaypointPlan(
   if (!aiResult.success) {
     return aiResult
   }
+  const rawPlanResult =
+    parseRoutePlan(
+      aiResult.data.text
+    )
+
+  if (rawPlanResult.success) {
+    const rawCandidates =
+      rawPlanResult.data &&
+      Array.isArray(
+        rawPlanResult.data.candidates
+      )
+        ? rawPlanResult.data.candidates
+        : []
+
+    console.log(
+      "[AI Route Planner] Raw candidates:",
+      {
+        count:
+          rawCandidates.length,
+
+        waypointIds:
+          rawCandidates.map(
+            candidate =>
+              candidate &&
+              Array.isArray(candidate.waypoints)
+                ? candidate.waypoints.map(
+                    waypoint =>
+                      waypoint &&
+                      typeof waypoint.poiId === "string"
+                        ? waypoint.poiId
+                        : null
+                  )
+                : null
+          )
+      }
+    )
+  }
+  else {
+    console.warn(
+      "[AI Route Planner] Raw response is not valid JSON."
+    )
+  }
 
   const planResult =
     parseAndValidateRoutePlan(
@@ -77,8 +118,25 @@ async function generateWaypointPlan(
     )
 
   if (!planResult.success) {
+    console.warn('[AI Route Planner] Validation failed:', { code: planResult.error })
     return planResult
   }
+  console.log(
+    "[AI Route Planner] Validated candidates:",
+    {
+      count:
+        planResult.data.candidates.length,
+
+      waypointIds:
+        planResult.data.candidates.map(
+          candidate =>
+            candidate.waypoints.map(
+              waypoint =>
+                waypoint.poiId
+            )
+        )
+    }
+  )
 
   return {
     success: true,

@@ -11,8 +11,14 @@ The goal is to make sure every part of the application uses the same field names
 | `routeId` | string | Yes | Unique identifier for the route |
 | `title` | string | Yes | User-facing route title |
 | `durationMinutes` | number | Yes | Estimated walking duration in minutes |
+| `durationSeconds` | number | For optimized routes | Complete walking duration used for ordering; minutes are rounded up for display |
+| `routeOrder` | object | For optimized routes | `orderedWaypointIds` and `source: "optimized"` |
+| `candidateWaypointIds` | string[] | For optimized routes | Original AI-selected IDs, before reordering |
+| `recommendedWaypointIds` | string[] | For optimized routes | Recommended permutation of the complete candidate set |
+| `optimization` | object | For optimized routes | Search strategy, evaluated order count, cost, target error and budget metadata; see [waypoint ordering](waypoint-order-optimization.md) |
 | `distanceMeters` | number | Yes | Estimated walking distance in meters |
 | `routeType` | string | Yes | Shape/type of the route |
+| `returnsToStart` | boolean | For generated routes | Whether the route returns to its start; Route Detail derives this from `routeType` for legacy data when absent, and uses it for the start/return legend |
 | `crowdLevel` | string | Yes | Estimated crowd level |
 | `tags` | string[] | Yes | Environment/features associated with the route |
 | `description` | string | Yes | Longer description shown on the detail page |
@@ -91,6 +97,7 @@ Fields:
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `name` | string | Yes | Point-of-interest name |
+| `poiId` | string | For optimized routes | Verified POI ID, preserved through route detail navigation |
 | `type` | string | Yes | Category such as `scenic`, `park`, `cafe`, or `rest_area` |
 | `latitude` | number | Yes | Latitude |
 | `longitude` | number | Yes | Longitude |

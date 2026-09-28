@@ -32,6 +32,25 @@ const nearbyPois = [
 ]
 
 describe("route plan contract", () => {
+  test('cloud and miniprogram deployment boundaries agree on waypoint limit', () => {
+    expect(require('./routePlanContract').MAX_WAYPOINTS)
+      .toBe(require('../../miniprogram/config/route-planning').MAX_WAYPOINTS)
+  })
+
+  test.each([1, 3, 4, 8, 9])('validates the %i-waypoint boundary', count => {
+    const pool = Array.from({ length: count }, (_, index) => ({ poiId: `point-${index}` }))
+    const result = validateRoutePlan({ candidates: [{ waypoints: pool }] }, pool)
+    expect(result.success).toBe(count <= 8)
+  })
+
+  test.each([
+    { candidates: [{ waypoints: [] }] },
+    { candidates: [{ waypoints: [{ poiId: 'poi-1' }, { poiId: 'poi-1' }] }] },
+    { candidates: [{ waypoints: [{ poiId: 'unknown' }] }] },
+    { candidates: [], unexpected: true }
+  ])('does not disguise invalid plans as a normal empty result: %j', plan => {
+    expect(validateRoutePlan(plan, nearbyPois)).toEqual({ success: false, error: 'INVALID_AI_ROUTE_PLAN' })
+  })
   test(
     "parses valid JSON multi-candidate route plan",
     () => {
@@ -190,7 +209,7 @@ describe("route plan contract", () => {
   )
 
   test(
-    "rejects empty candidate list",
+    "accepts an explicit empty candidate list",
     () => {
       const result =
         validateRoutePlan(
@@ -201,9 +220,8 @@ describe("route plan contract", () => {
         )
 
       expect(result).toEqual({
-        success: false,
-        error:
-          "INVALID_AI_ROUTE_PLAN"
+        success: true,
+        data: { candidates: [] }
       })
     }
   )

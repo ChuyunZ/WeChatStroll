@@ -1,4 +1,5 @@
 const locationService = require('./location')
+const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
   createCodedError: createRouteGenerationError
@@ -459,6 +460,9 @@ function buildGeneratedRouteFromAiCandidate({
     routeId:
       `generated_ai_${candidateIndex + 1}_${Date.now()}`,
 
+    routeOrder: walkingRoute.routeOrder,
+    durationSeconds: walkingRoute.durationSeconds,
+
     title:
       `途经${waypointText}的散步路线`,
 
@@ -500,6 +504,7 @@ function buildGeneratedRouteFromAiCandidate({
     pointsOfInterest:
       waypoints.map(
         waypoint => ({
+          poiId: waypoint.poiId,
           name: waypoint.name,
           type:
             waypoint.category ||
@@ -517,6 +522,133 @@ function buildGeneratedRouteFromAiCandidate({
     environmentStats:
       walkingRoute.environmentStats
   }
+}
+
+// Both initial generation and replacement claim and settle candidates here.
+async function buildOptimizedCandidateRoute({
+  session, candidateCache, candidate, location, candidateIndex,
+  requestedDurationMinutes
+}) {
+  if (!candidateCache.markBuilding(candidate.candidateId)) {
+    return { success: false, error: 'CANDIDATE_NOT_UNUSED' }
+  }
+  console.log(
+    '[Route Generation] Candidate start:',
+    {
+      candidateId: candidate.candidateId,
+      candidateIndex,
+      waypointIds: candidate.waypointIds
+    }
+  )
+  let stage = 'optimization'
+  try {
+    const recommendation = await optimizeWaypointOrder({
+      session, waypointIds: candidate.waypointIds, requestedDurationMinutes
+    })
+    if (!recommendation.success) {
+      candidateCache.markFailed(candidate.candidateId)
+
+      console.warn(
+        '[Route Generation] Candidate failed:',
+        {
+          stage: 'optimization',
+          candidateId: candidate.candidateId,
+          candidateIndex,
+          waypointIds: candidate.waypointIds,
+          error: recommendation.error,
+          reason: recommendation.reason,
+          validationReason: recommendation.validationReason,
+          failedSegment: recommendation.failedSegment,
+          optimization: summarizeOptimization(recommendation.optimization)
+        }
+      )
+
+      return recommendation
+    }
+    stage = 'route_build'
+    const walkingRoute = await session.buildRouteForOrder({
+      allowedWaypointIds: candidate.waypointIds,
+      orderedWaypointIds: recommendation.recommendedWaypointIds,
+      source: 'optimized'
+    })
+    if (!walkingRoute || walkingRoute.success !== true) {
+      candidateCache.markFailed(candidate.candidateId)
+      console.warn(
+        '[Route Generation] Candidate failed:',
+        {
+          stage: 'route_build',
+          candidateId: candidate.candidateId,
+          candidateIndex,
+          waypointIds: candidate.waypointIds,
+          recommendedWaypointIds: recommendation.recommendedWaypointIds,
+          error: walkingRoute && walkingRoute.error,
+          reason: walkingRoute && walkingRoute.reason,
+          failedSegment: walkingRoute && walkingRoute.failedSegment,
+          optimization: summarizeOptimization(recommendation.optimization)
+        }
+      )
+
+      return walkingRoute || { success: false, error: 'NO_VALID_ROUTE' }
+    }
+    const route = {
+      ...buildGeneratedRouteFromAiCandidate({ location, walkingRoute, candidateIndex }),
+      candidateWaypointIds: [...candidate.waypointIds],
+      recommendedWaypointIds: [...recommendation.recommendedWaypointIds],
+      optimization: recommendation.optimization
+    }
+    candidateCache.markSuccess(candidate.candidateId, route)
+
+    console.log(
+      '[Route Generation] Candidate success:',
+      {
+        candidateId: candidate.candidateId,
+        candidateIndex,
+        originalWaypointIds: candidate.waypointIds,
+        recommendedWaypointIds: recommendation.recommendedWaypointIds,
+        strategy: recommendation.optimization.strategy,
+        evaluatedOrderCount: recommendation.optimization.evaluatedOrderCount,
+        roundEvaluationCounts: recommendation.optimization.roundEvaluationCounts,
+        durationSeconds: walkingRoute.durationSeconds,
+        distanceMeters: walkingRoute.distanceMeters
+      }
+    )
+
+    return { success: true, route }
+  } catch (error) {
+    candidateCache.markFailed(candidate.candidateId)
+
+    console.error(
+      '[Route Generation] Candidate exception:',
+      {
+        stage,
+        candidateId: candidate.candidateId,
+        candidateIndex,
+        waypointIds: candidate.waypointIds,
+        code: error && error.code || 'UNEXPECTED_CANDIDATE_ERROR'
+      }
+    )
+
+    throw error
+  }
+}
+
+function summarizeOptimization(optimization = {}) {
+  return {
+    strategy: optimization.strategy,
+    evaluatedOrderCount: optimization.evaluatedOrderCount,
+    roundEvaluationCounts: optimization.roundEvaluationCounts,
+    budgetExhausted: optimization.budgetExhausted
+  }
+}
+
+function logCandidateSummary(candidateCache) {
+  console.log('[Route Generation] Summary:', {
+    candidateCount: candidateCache.getAllCandidates().length,
+    successfulRouteCount: candidateCache.getSuccessfulRoutes().length,
+    candidateStates: candidateCache.getAllCandidates().map(candidate => ({
+      candidateId: candidate.candidateId, waypointIds: candidate.waypointIds, status: candidate.status
+    }))
+  })
 }
 
 // AI waypoint candidates -> walking routes
@@ -537,8 +669,7 @@ async function generateRoutes(
 
   if (
     !plan ||
-    !Array.isArray(plan.candidates) ||
-    plan.candidates.length === 0
+    !Array.isArray(plan.candidates)
   ) {
     throw createRouteGenerationError(
       'INVALID_AI_ROUTE_PLAN',
@@ -546,7 +677,29 @@ async function generateRoutes(
     )
   }
 
+  if (plan.candidates.length === 0) {
+    return { status: 'empty', reason: 'NO_WAYPOINT_CANDIDATES' }
+  }
+
   const routeType = getRequestedRouteType(preferences)
+  console.log(
+    '[Route Generation] Plan received:',
+    {
+      candidateCount: plan.candidates.length,
+      routeType,
+      requestedDurationMinutes: preferences.durationMinutes,
+      candidates:
+        plan.candidates.map(
+          (candidate, candidateIndex) => ({
+            candidateIndex,
+            waypointIds:
+              candidate.waypoints.map(
+                waypoint => waypoint.poiId
+              )
+          })
+        )
+    }
+  )
 
   // Create a session using start point, all nearbyPois and route type
   const candidatePoiIds = new Set(
@@ -572,39 +725,26 @@ async function generateRoutes(
   const candidateCache = createWaypointCandidateCache(plan.candidates)
 
   const routes = []
+  let temporaryFailure = false
 
   const unusedCandidates = candidateCache.getUnusedCandidates()
 
   for (const [candidateIndex, candidate] of unusedCandidates.entries()) {
-    if (routes.length >= 3) {
+    if (routes.length >= 1) {
       break
     }
 
-    candidateCache.markBuilding(candidate.candidateId)
-
-    const walkingRoute = await session.buildRouteForOrder({
-        allowedWaypointIds: candidate.waypointIds,
-        orderedWaypointIds: candidate.waypointIds,
-        source: 'ai'
-      })
-
-    if (!walkingRoute || walkingRoute.success !== true) {
-      candidateCache.markFailed(candidate.candidateId)
-      continue
-    }
-
-    const route = buildGeneratedRouteFromAiCandidate(
-      {location,
-        walkingRoute,
-        candidateIndex
-      })
-
-    candidateCache.markSuccess(candidate.candidateId, route)
-
-    routes.push(route)
+    const result = await buildOptimizedCandidateRoute({
+      session, candidateCache, candidate, location, candidateIndex,
+      requestedDurationMinutes: preferences.durationMinutes
+    })
+    if (result.success) routes.push(result.route)
+    if (result.error === 'AMAP_RATE_LIMITED') temporaryFailure = true
   }
+  logCandidateSummary(candidateCache)
 
   if (routes.length === 0) {
+    if (temporaryFailure) throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
     return {
       status: 'empty',
       reason: 'NO_VALID_ROUTE'
@@ -725,6 +865,7 @@ async function generateFirstRoute(
 }
 
 module.exports = {
+  logCandidateSummary,
   generateFirstRoute,
   generateWaypointPlan,
   selectCandidatePoi,
@@ -732,5 +873,6 @@ module.exports = {
   buildGeneratedRoute,
   buildPoiCandidates,
   generateRoutes,
+  buildOptimizedCandidateRoute,
   buildGeneratedRouteFromAiCandidate
 }

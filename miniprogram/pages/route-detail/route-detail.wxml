@@ -177,7 +177,7 @@
       <view class="legend-item">
         <view class="legend-dot start-dot"></view>
         <text class="legend-text">
-          起点
+          {{route.returnsToStart ? '起点 / 返回点' : '起点'}}
         </text>
       </view>
 
@@ -189,6 +189,11 @@
       </view>
 
       <view class="legend-item">
+        <view class="legend-dot poi-dot"></view>
+        <text class="legend-text">编号地点</text>
+      </view>
+
+      <view class="legend-item" wx:if="{{!route.returnsToStart}}">
         <view class="legend-dot end-dot"></view>
         <text class="legend-text">
           终点
@@ -201,6 +206,13 @@
 
 
   <!-- Description -->
+  <view class="content-card" wx:if="{{route.displayPois.length}}">
+    <text class="card-title">途经地点（按访问顺序）</text>
+    <view class="poi-row" wx:for="{{route.displayPois}}" wx:for-item="poi" wx:key="visitNumber">
+      <text>{{poi.visitNumber}}. {{poi.displayName}}</text>
+    </view>
+  </view>
+
   <view class="content-card">
 
     <text class="card-title">
