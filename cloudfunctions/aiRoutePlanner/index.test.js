@@ -198,3 +198,15 @@ describe("AI waypoint planner integration", () => {
     expect(client.request).not.toHaveBeenCalled()
   })
 })
+
+
+test('later attempts keep the verified POI output contract', async () => {
+  const client = { request: jest.fn().mockResolvedValue({ success: true,
+    data: { text: JSON.stringify({ candidates: [{ waypoints: [{ poiId: 'unknown-poi' }] }] }) }
+  }) }
+  const result = await generateWaypointPlan({ ...VALID_EVENT, replanningContext: {
+    attempt: 2, previousFailures: [{ attempt: 1, waypointIds: ['park-1'], failure: { type: 'NO_COMPLETE_ROUTE' } }]
+  } }, client)
+  expect(client.request.mock.calls[0][0]).toContain('PREVIOUS FAILED ATTEMPTS')
+  expect(result).toEqual({ success: false, error: 'INVALID_AI_ROUTE_PLAN' })
+})

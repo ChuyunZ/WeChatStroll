@@ -147,6 +147,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   const evaluated = new Map()
   let best = null
   let temporaryFailure = null
+  let failedSegment = null
   let rounds = 0
   const roundEvaluationCounts = []
 
@@ -170,6 +171,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       orderedWaypointIds: order
     })
     if (cost.error === 'AMAP_RATE_LIMITED') temporaryFailure = cost
+    if (!cost.success && cost.failedSegment) failedSegment = cost.failedSegment
     const result = cost.success ? { ...cost, order: [...order] } : null
     // Failed orders also consume the budget; never compare partial routes.
     evaluated.set(key, result)
@@ -179,6 +181,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
 
   let seedCount = 0
   if (exact) {
+    // Speculative edges may fail without preventing a complete order.
     await session.prefetchSegments(ids)
     for (const order of permutations(ids)) await evaluate(order)
   } else {
@@ -245,7 +248,8 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   if (!best) {
     return { success: false,
       error: temporaryFailure ? 'AMAP_RATE_LIMITED' : 'WAYPOINT_ORDER_NOT_FOUND',
-      ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment } : {}), optimization }
+      ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment }
+        : failedSegment ? { failedSegment } : {}), optimization }
   }
   return { success: true, recommendedWaypointIds: [...best.order], optimization }
 }

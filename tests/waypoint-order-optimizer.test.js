@@ -107,6 +107,45 @@ test('a failed prefetched edge only invalidates orders that need it; final build
   expect(resolver).toHaveBeenCalledTimes(4)
 })
 
+test.each(['A->B', 'B->A', 'all'])('exact search tolerates unused throttled edges but reports required throttles (%s)', async throttled => {
+  jest.useFakeTimers()
+  try {
+    const { session, resolver } = fixture()
+    const resolve = resolver.getMockImplementation()
+    resolver.mockImplementation((from, to) => throttled === 'all' || `${from.nodeId}->${to.nodeId}` === throttled
+      ? { success: false, error: 'AMAP_RATE_LIMITED' }
+      : resolve(from, to))
+    const pending = optimizeWaypointOrder({ session, waypointIds: ['A', 'B'] })
+    await jest.runAllTimersAsync()
+    const result = await pending
+    if (throttled === 'all') {
+      expect(result).toMatchObject({ success: false, error: 'AMAP_RATE_LIMITED' })
+    } else {
+      const expected = throttled === 'A->B' ? ['B', 'A'] : ['A', 'B']
+      expect(result).toMatchObject({ success: true, recommendedWaypointIds: expected })
+      const calls = resolver.mock.calls.length
+      expect(await session.buildRouteForOrder({ allowedWaypointIds: ['A', 'B'], orderedWaypointIds: expected }))
+        .toMatchObject({ success: true })
+      expect(resolver).toHaveBeenCalledTimes(calls)
+    }
+  } finally { jest.useRealTimers() }
+})
+
+test.each([true, false])('heuristic search preserves complete orders before or after a throttle (%s)', async throttleFirst => {
+  const { session } = fixture()
+  const complete = { success: true, durationSeconds: 500, distanceMeters: 1000 }
+  const limited = { success: false, error: 'AMAP_RATE_LIMITED' }
+  jest.spyOn(session, 'evaluateRouteOrder')
+    .mockResolvedValue(limited)
+    .mockResolvedValueOnce(throttleFirst ? limited : complete)
+    .mockResolvedValueOnce(throttleFirst ? complete : limited)
+  const result = await optimizeWaypointOrder({ session, waypointIds: ['A', 'B', 'C', 'D', 'E'] })
+  expect(result.success).toBe(true)
+  const successfulCall = session.evaluateRouteOrder.mock.calls[throttleFirst ? 1 : 0][0]
+  expect(result.recommendedWaypointIds).toEqual(successfulCall.orderedWaypointIds)
+  expect(result.optimization.evaluatedOrderCount).toBeLessThanOrEqual(config.ORDERING_MAX_EVALUATIONS)
+})
+
 test.each([1, 3, 4, 5, 8])('all failures use the public error and retain search diagnostics (%i points)', async count => {
   const { session, resolver } = fixture({ fallback: null })
   const result = await optimizeWaypointOrder({ session, waypointIds: pool.slice(0, count).map(p => p.poiId) })

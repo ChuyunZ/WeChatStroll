@@ -53,7 +53,8 @@ async function generateWaypointPlan(
     buildRoutePlanningPrompt({
       startPoint: normalizedEvent.startPoint,
       preferences: normalizedEvent.preferences,
-      nearbyPois: normalizedEvent.nearbyPois
+      nearbyPois: normalizedEvent.nearbyPois,
+      replanningContext: normalizedEvent.replanningContext
     })
 
   if (!promptResult.success) {
