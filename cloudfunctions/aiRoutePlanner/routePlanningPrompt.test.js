@@ -321,3 +321,16 @@ test('replanning prompt uses bounded allowlisted observations and preserves the 
   expect(prompt).toContain('Do not repeat previously failed sets')
   expect(buildRoutePlanningPrompt({ ...validInput, replanningContext: { attempt: 999 } }).data.prompt).toBe(first)
 })
+
+test('non-replannable build failures are excluded from model context', () => {
+  const prompt = buildRoutePlanningPrompt({ ...validInput, replanningContext: {
+    attempt: 2, previousFailures: [
+      { attempt: 1, waypointIds: ['poi-1'], failure: { type: 'ROUTE_BUILD_FAILED' } },
+      { attempt: 1, waypointIds: ['poi-2'], failure: { type: 'NO_COMPLETE_ROUTE' } }
+    ]
+  } }).data.prompt
+  const context = JSON.parse(prompt.split('PREVIOUS FAILED ATTEMPTS\n')[1].split('\nREPLANNING RULES')[0])
+  expect(context.previousFailures).toEqual([
+    { attempt: 1, waypointIds: ['poi-2'], failure: { type: 'NO_COMPLETE_ROUTE' } }
+  ])
+})

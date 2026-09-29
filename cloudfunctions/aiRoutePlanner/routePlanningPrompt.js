@@ -139,7 +139,7 @@ function buildReplanningSection(context, nearbyPois) {
       context.attempt > MAX_AI_PLANNING_ATTEMPTS || !Array.isArray(context.previousFailures)) return []
   const allowedIds = new Set(nearbyPois.map(poi => poi.poiId))
   const types = new Set(['INVALID_AI_PLAN', 'UNWALKABLE_SEGMENT', 'NO_COMPLETE_ROUTE',
-    'DURATION_TOO_SHORT', 'DURATION_TOO_LONG', 'ROUTE_BUILD_FAILED'])
+    'DURATION_TOO_SHORT', 'DURATION_TOO_LONG'])
   const previousFailures = []
   const maxPreviousFailures = (MAX_AI_PLANNING_ATTEMPTS - 1) * MAX_ROUTE_CANDIDATES
   for (const observation of context.previousFailures.slice(0, maxPreviousFailures)) {

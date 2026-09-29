@@ -5,7 +5,8 @@ function waypointSetKey(ids) {
 
 function normalizePlanningFailure(result = {}, waypointIds = []) {
   const code = result.code || result.error
-  if (code === 'INVALID_AI_ROUTE_PLAN' || code === 'EMPTY_AI_RESPONSE') {
+  if (['INVALID_AI_ROUTE_PLAN', 'EMPTY_AI_RESPONSE', 'INVALID_WAYPOINT_SET',
+    'NO_WAYPOINTS', 'TOO_MANY_WAYPOINTS'].includes(code)) {
     return { type: 'INVALID_AI_PLAN' }
   }
   if (result.reason === 'ROUTE_DURATION_OUT_OF_RANGE') {
@@ -33,4 +34,14 @@ function isReplannableFailure(failure) {
     'DURATION_TOO_SHORT', 'DURATION_TOO_LONG'].includes(failure.type)
 }
 
-module.exports = { waypointSetKey, normalizePlanningFailure, isReplannableFailure }
+// Only normalized AI-loop categories, never observation details or fallback internals.
+function buildPlanningMetadata(attemptCount, fallbackUsed, observations) {
+  return {
+    attemptCount,
+    replanned: attemptCount > 1,
+    fallbackUsed,
+    failureTypes: [...new Set(observations.map(observation => observation.failure.type))]
+  }
+}
+
+module.exports = { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata }

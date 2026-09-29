@@ -1,5 +1,5 @@
 const locationService = require('./location')
-const { waypointSetKey, normalizePlanningFailure, isReplannableFailure } = require('./agentic-route-planning')
+const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
@@ -1232,12 +1232,15 @@ async function generateRoutes(
           return {
             status: 'success', source, location, routes: [result.route],
             routePlanningSession: session, waypointCandidateCache: candidateCache,
-            planningMetadata: { attemptCount, replanned: attemptCount > 1 }
+            planningMetadata: buildPlanningMetadata(attemptCount, false, [...observations, ...attemptObservations])
           }
         }
         const failure = normalizePlanningFailure(result, candidate.waypointIds)
         attemptObservations.push({ attempt, waypointIds: [...candidate.waypointIds], failure })
-        if (!isReplannableFailure(failure)) canReplan = false
+        if (!isReplannableFailure(failure)) {
+          canReplan = false
+          break
+        }
       }
       logCandidateSummary(candidateCache)
       if (attemptedCandidates === 0) {
@@ -1261,9 +1264,7 @@ async function generateRoutes(
   const result = await buildFallbackGenerationResult({
     location, poisByCategory, preferences, trigger, routePlanningSession: session
   })
-  return result.status === 'success'
-    ? { ...result, planningMetadata: { attemptCount, replanned: attemptCount > 1 } }
-    : result
+  return { ...result, planningMetadata: buildPlanningMetadata(attemptCount, true, observations) }
 }
 
 async function generateFirstRoute(

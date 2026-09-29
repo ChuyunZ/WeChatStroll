@@ -16,10 +16,11 @@ test('observations project only directed verified POI IDs and normalized failure
 })
 
 test.each(['AI_CONFIG_UNAVAILABLE', 'AI_REQUEST_FAILED', 'AI_ROUTE_PLANNING_FAILED',
-  'INVALID_LOCATION', 'AMAP_RATE_LIMITED', 'INVALID_WAYPOINT_SET'])('%s is not replannable', error => {
+  'INVALID_LOCATION', 'AMAP_RATE_LIMITED', 'INVALID_PLANNING_SESSION', 'INVALID_REQUESTED_DURATION'])('%s is not replannable', error => {
   expect(isReplannableFailure(normalizePlanningFailure({ error }))).toBe(false)
 })
 
-test.each(['INVALID_AI_ROUTE_PLAN', 'EMPTY_AI_RESPONSE'])('%s permits another generation', error => {
+test.each(['INVALID_AI_ROUTE_PLAN', 'EMPTY_AI_RESPONSE', 'INVALID_WAYPOINT_SET',
+  'NO_WAYPOINTS', 'TOO_MANY_WAYPOINTS'])('%s permits another generation', error => {
   expect(isReplannableFailure(normalizePlanningFailure({ error }))).toBe(true)
 })

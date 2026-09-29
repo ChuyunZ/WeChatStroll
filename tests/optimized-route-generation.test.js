@@ -220,7 +220,7 @@ test('exhausted rate limiting produces a temporary generation error, not an empt
 
 test('defensive zero-point candidate never creates a successful route', async () => {
   cloudPlan({ candidates: [{ waypoints: [] }] })
-  expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(await generateRoutes(preferences)).toMatchObject({ status: 'empty', reason: 'NO_VALID_ROUTE' })
   expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
@@ -264,13 +264,13 @@ test('fallback also fails safely instead of exposing an invalid route', async ()
   }))
 
   expect(await generateRoutes(preferences))
-    .toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+    .toMatchObject({ status: 'empty', reason: 'NO_VALID_ROUTE' })
   expect(getWalkingSegment).toHaveBeenCalledTimes(3)
 })
 
 test('failed walking segments produce empty and stay cached across candidates', async () => {
   getWalkingSegment.mockResolvedValue({ success: false, error: 'UNREACHABLE' })
-  expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(await generateRoutes(preferences)).toMatchObject({ status: 'empty', reason: 'NO_VALID_ROUTE' })
   expect(getWalkingSegment).toHaveBeenCalledTimes(13)
 })
 
@@ -304,10 +304,49 @@ function sequencePlans(plans) {
 const planSets = (...sets) => ({ candidates: sets.map(ids => ({ waypoints: ids.map(poiId => ({ poiId })) })) })
 const aiCalls = () => callCloudFunction.mock.calls.filter(([name]) => name === 'aiRoutePlanner')
 
+test('non-replannable provider failure stops remaining AI candidates and uses existing fallback', async () => {
+  const log = jest.spyOn(console, 'log').mockImplementation(() => {})
+  try {
+    getWalkingSegment.mockResolvedValue({ success: false, error: 'WALKING_SEGMENT_FAILED', causeCode: 'CONFIG_MISSING' })
+    const result = await generateRoutes(preferences)
+    expect(aiCalls()).toHaveLength(1)
+    const starts = log.mock.calls.filter(([message]) => message === '[Route Generation] Candidate start:')
+    expect(starts).toHaveLength(1)
+    expect(starts[0][1].waypointIds).toEqual(['B', 'A'])
+    expect(result).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE', planningMetadata: {
+      attemptCount: 1, replanned: false, fallbackUsed: true, failureTypes: ['ROUTE_BUILD_FAILED']
+    } })
+  } finally { log.mockRestore() }
+})
+
+test('invalid candidate scope is local and does not prevent another candidate from succeeding', async () => {
+  cloudPlan(planSets(['unknown'], ['A', 'B']))
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai')
+  expect(aiCalls()).toHaveLength(1)
+  expect(result.planningMetadata).toEqual({ attemptCount: 1, replanned: false,
+    fallbackUsed: false, failureTypes: ['INVALID_AI_PLAN'] })
+  expect(getWalkingSegment.mock.calls.some(([from, to]) => from.nodeId === 'unknown' || to.nodeId === 'unknown')).toBe(false)
+})
+
+test('total failure retains unique safe AI-loop categories in first-occurrence order', async () => {
+  sequencePlans([planSets(['A', 'B'], ['A', 'C']), planSets(['A', 'D']), planSets(['B', 'C'])])
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: from.nodeId === 'D' || to.nodeId === 'D' ? 4000 : 100,
+    distanceMeters: 200, polyline: [from, to], rawPayload: 'private-data'
+  }))
+  const result = await generateRoutes(preferences)
+  expect(result).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE', planningMetadata: {
+    attemptCount: 3, replanned: true, fallbackUsed: true,
+    failureTypes: ['DURATION_TOO_SHORT', 'DURATION_TOO_LONG']
+  } })
+  expect(aiCalls()).toHaveLength(3)
+})
+
 test('first attempt succeeds with metadata and no retry context', async () => {
   const result = await generateRoutes(preferences)
   expect(result.source).toBe('ai')
-  expect(result.planningMetadata).toEqual({ attemptCount: 1, replanned: false })
+  expect(result.planningMetadata).toEqual({ attemptCount: 1, replanned: false, fallbackUsed: false, failureTypes: [] })
   expect(aiCalls()).toHaveLength(1)
   expect(aiCalls()[0][1]).not.toHaveProperty('replanningContext')
 })
@@ -321,7 +360,7 @@ test('all candidates are used before replanning, with shared directed cache and 
   }))
   const result = await generateRoutes(preferences)
   expect(result.source).toBe('ai-replanned')
-  expect(result.planningMetadata).toEqual({ attemptCount: 2, replanned: true })
+  expect(result.planningMetadata).toEqual({ attemptCount: 2, replanned: true, fallbackUsed: false, failureTypes: ['DURATION_TOO_SHORT'] })
   expect(aiCalls()).toHaveLength(2)
   expect(aiCalls()[1][1].replanningContext).toEqual({ attempt: 2, previousFailures: [
     { attempt: 1, waypointIds: ['A', 'B'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 1450, targetDurationSeconds: 2700 } },
@@ -341,7 +380,7 @@ test('repeated sets in another order stop at attempt two and fallback reuses res
   }))
   const result = await generateRoutes(preferences)
   expect(aiCalls()).toHaveLength(2)
-  expect(result).toEqual({ status: 'empty', reason: 'NO_VALID_ROUTE' })
+  expect(result).toMatchObject({ status: 'empty', reason: 'NO_VALID_ROUTE' })
   expect(getWalkingSegment.mock.calls.filter(([from, to]) => from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
 })
 
@@ -353,7 +392,7 @@ test('three distinct failed attempts exhaust the budget before deterministic fal
   const result = await generateRoutes(preferences)
   expect(aiCalls()).toHaveLength(3)
   expect(result.source).toBe('fallback')
-  expect(result.planningMetadata).toEqual({ attemptCount: 3, replanned: true })
+  expect(result.planningMetadata).toEqual({ attemptCount: 3, replanned: true, fallbackUsed: true, failureTypes: ['DURATION_TOO_LONG'] })
   expect(aiCalls()[2][1].replanningContext.previousFailures.map(o => o.failure.type))
     .toEqual(['DURATION_TOO_LONG', 'DURATION_TOO_LONG'])
 })
