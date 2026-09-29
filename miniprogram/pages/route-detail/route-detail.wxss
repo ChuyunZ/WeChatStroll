@@ -465,3 +465,47 @@ page {
   line-height: 40rpx;
   word-break: break-all;
 }
+
+.edit-poi {
+  padding: 22rpx 0;
+  border-bottom: 1rpx solid #edf0ed;
+  margin-bottom: 18rpx;
+}
+
+.edit-poi-name,
+.poi-metadata {
+  display: block;
+  word-break: break-all;
+  font-size: 25rpx;
+  line-height: 38rpx;
+  color: #555555;
+}
+
+.poi-metadata {
+  font-size: 23rpx;
+  color: #777777;
+}
+
+.destination-label {
+  color: #b3261e;
+  font-size: 23rpx;
+}
+
+.edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.edit-button {
+  margin: 16rpx 0 0;
+  padding: 0 20rpx;
+  font-size: 25rpx;
+  line-height: 80rpx;
+  background: #eef7f1;
+  color: #356647;
+}
+
+.edit-controls .edit-button {
+  flex: 1;
+}

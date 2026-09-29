@@ -1,4 +1,5 @@
 const locationService = require('./location')
+const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
 const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
@@ -374,7 +375,12 @@ async function requestWaypointPlan(
           longitude: location.longitude
         },
         preferences,
-        nearbyPois,
+        // Keep the existing AI input contract; richer POI metadata stays local.
+        nearbyPois: nearbyPois.map(poi => ({
+          poiId: poi.poiId, name: poi.name, category: poi.category,
+          latitude: poi.latitude, longitude: poi.longitude,
+          distanceInMeters: poi.distanceInMeters
+        })),
         ...(replanningContext ? { replanningContext } : {})
       },
       {
@@ -497,6 +503,11 @@ function buildGeneratedRoute({
       `generated_` +
       `${selectedPoi.poiId || 'route'}_` +
       `${Date.now()}`,
+    editableWaypoints: [copyEditableWaypoint(selectedPoi)],
+    recommendedWaypointIds: [selectedPoi.poiId],
+    recommendedDurationMinutes: walkingRoute.durationMinutes,
+    durationSeconds: walkingRoute.durationSeconds,
+    routeOrder: { source: 'recommended', orderedWaypointIds: [selectedPoi.poiId] },
 
     title:
       `前往${selectedPoi.name}的散步路线`,
@@ -539,6 +550,7 @@ function buildGeneratedRoute({
 
     pointsOfInterest: [
       {
+        ...copyEditableWaypoint(selectedPoi),
         name: selectedPoi.name,
 
         type:
@@ -581,14 +593,7 @@ function buildPoiCandidates(poisByCategory) {
     }
 
     for (const element of poisByCategory[category]) {
-      flattenPois.push({
-        poiId: element.poiId,
-        name: element.name,
-        category: element.category,
-        latitude: element.latitude,
-        longitude: element.longitude,
-        distanceInMeters: element.distanceInMeters
-      })
+      flattenPois.push(copyEditableWaypoint(element))
     }
   }
 
@@ -689,6 +694,9 @@ function buildGeneratedRouteFromAiCandidate({
 
     routeOrder: walkingRoute.routeOrder,
     durationSeconds: walkingRoute.durationSeconds,
+    editableWaypoints: waypoints.map(copyEditableWaypoint),
+    recommendedWaypointIds: waypoints.map(waypoint => waypoint.poiId),
+    recommendedDurationMinutes: walkingRoute.durationMinutes,
 
     title:
       `途经${waypointText}的散步路线`,
@@ -731,6 +739,7 @@ function buildGeneratedRouteFromAiCandidate({
     pointsOfInterest:
       waypoints.map(
         waypoint => ({
+          ...copyEditableWaypoint(waypoint),
           poiId: waypoint.poiId,
           name: waypoint.name,
           type:
@@ -796,7 +805,7 @@ async function buildOptimizedCandidateRoute({
     const walkingRoute = await session.buildRouteForOrder({
       allowedWaypointIds: candidate.waypointIds,
       orderedWaypointIds: recommendation.recommendedWaypointIds,
-      source: 'optimized'
+      source: 'recommended'
     })
     if (!walkingRoute || walkingRoute.success !== true) {
       candidateCache.markFailed(candidate.candidateId)
@@ -1367,7 +1376,36 @@ async function generateFirstRoute(
   }
 }
 
+// Reuse the generation formatter for all engine-derived display facts.
+// Recommendation metadata and the original editable pool never shrink.
+function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
+  const ids = walkingRoute && walkingRoute.routeOrder && walkingRoute.routeOrder.orderedWaypointIds
+  if (!walkingRoute || walkingRoute.success !== true || !isValidEditableOrder(baseRoute, ids)) {
+    throw createRouteGenerationError('INVALID_ROUTE_ORDER', 'Invalid editable route order.')
+  }
+  const formatted = buildGeneratedRouteFromAiCandidate({
+    location: baseRoute.startPoint, walkingRoute, candidateIndex: 0
+  })
+  return {
+    ...baseRoute,
+    title: formatted.title,
+    description: formatted.description,
+    durationSeconds: formatted.durationSeconds,
+    durationMinutes: formatted.durationMinutes,
+    distanceMeters: formatted.distanceMeters,
+    polyline: formatted.polyline,
+    pointsOfInterest: formatted.pointsOfInterest,
+    endPoint: formatted.endPoint,
+    routeType: formatted.routeType,
+    returnsToStart: formatted.returnsToStart,
+    environmentStats: formatted.environmentStats,
+    routeOrder: { source: 'user', orderedWaypointIds: [...ids] },
+    updatedAt: formatted.updatedAt
+  }
+}
+
 module.exports = {
+  rebuildGeneratedRouteForOrder,
   logCandidateSummary,
   generateFirstRoute,
   generateWaypointPlan,

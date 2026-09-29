@@ -16,7 +16,9 @@ const { createWaypointCandidateCache } = require('../miniprogram/services/waypoi
 
 const location = { latitude: 30, longitude: 120 }
 const pois = ['A', 'B', 'C', 'D', 'E'].map((poiId, index) => ({
-  poiId, name: poiId, latitude: 30 + index / 100, longitude: 120, category: 'park'
+  poiId, name: poiId, latitude: 30 + index / 100, longitude: 120, category: 'park',
+  address: `${poiId} street`, distanceInMeters: 800,
+  providerMeta: { type: '公园', typecode: '110101' }
 }))
 const candidates = ['B', 'C', 'D', 'E'].map(id => ({ waypoints: [{ poiId: id }, { poiId: 'A' }] }))
 const preferences = { durationMinutes: 45, routeType: 'point_to_point' }
@@ -54,8 +56,10 @@ test('initial routes and replacements optimize sets and share all cached segment
   const first = result.routes[0]
   expect(first.candidateWaypointIds).toEqual(['B', 'A'])
   expect(first.recommendedWaypointIds).toEqual(['A', 'B'])
-  expect(first.routeOrder).toEqual({ orderedWaypointIds: ['A', 'B'], source: 'optimized' })
+  expect(first.routeOrder).toEqual({ orderedWaypointIds: ['A', 'B'], source: 'recommended' })
   expect(first.pointsOfInterest.map(p => p.poiId)).toEqual(['A', 'B'])
+  expect(first.editableWaypoints).toEqual(pois.slice(0, 2))
+  expect(first.pointsOfInterest[0]).toMatchObject(pois[0])
   expect(first.endPoint.name).toBe('B')
   expect(first.durationSeconds).toBe(2700)
   expect(first.optimization).toMatchObject({ strategy: 'exact', evaluatedOrderCount: 2, targetErrorSeconds: 0 })
@@ -93,6 +97,8 @@ test('explicit empty AI plan uses a validated deterministic fallback without rep
   expect(result.source).toBe('fallback')
   expect(result.routes).toHaveLength(1)
   expect(getCurrentLocation).toHaveBeenCalledTimes(1)
+  expect(result.routes[0].editableWaypoints).toEqual([pois[0]])
+  expect(result.routes[0].routeOrder).toEqual({ source: 'recommended', orderedWaypointIds: ['A'] })
   expect(callCloudFunction.mock.calls.map(([name]) => name))
     .toEqual(['getNearbyPois', 'aiRoutePlanner'])
   expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(0)

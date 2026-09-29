@@ -46,7 +46,7 @@
     <view class="header-content">
 
       <text class="header-small">
-        AI 为你推荐的路线
+        {{hasPreview ? '自定义路线预览（未确认）' : route.routeOrder.source === 'user' ? '你确认的路线' : '为你推荐的路线'}}
       </text>
 
       <text class="route-title">
@@ -206,6 +206,42 @@
 
 
   <!-- Description -->
+  <view class="content-card" wx:if="{{canEdit}}">
+    <text class="card-title">路线地点</text>
+    <button wx:if="{{!editing}}" class="edit-button" bindtap="enterRouteEdit">编辑路线地点</button>
+    <block wx:else>
+      <text class="content-text">调整访问顺序，也可移除地点后重新加入。地图在预览成功后更新。</text>
+      <view class="edit-poi" wx:for="{{activeWaypoints}}" wx:for-item="poi" wx:key="poiId">
+        <text class="edit-poi-name">{{poi.visitNumber}}. {{poi.name}}</text>
+        <text class="destination-label" wx:if="{{poi.isDestination}}">当前终点</text>
+        <text class="poi-metadata">{{poi.categoryLabel}}{{poi.providerMeta.type ? ' · ' + poi.providerMeta.type : ''}}</text>
+        <text class="poi-metadata" wx:if="{{poi.address}}">{{poi.address}}</text>
+        <text class="poi-metadata" wx:if="{{poi.hasDistance}}">距原始起点约 {{poi.distanceInMeters}} 米</text>
+        <view class="edit-controls">
+          <button class="edit-button" data-id="{{poi.poiId}}" data-direction="-1" disabled="{{index === 0 || confirming}}" bindtap="moveWaypoint">上移</button>
+          <button class="edit-button" data-id="{{poi.poiId}}" data-direction="1" disabled="{{index === activeWaypoints.length - 1 || confirming}}" bindtap="moveWaypoint">下移</button>
+          <button class="edit-button" data-id="{{poi.poiId}}" disabled="{{activeWaypoints.length === 1 || confirming}}" bindtap="removeWaypoint">移除</button>
+        </view>
+      </view>
+      <text class="card-title" wx:if="{{removedWaypoints.length}}">已移除地点</text>
+      <view class="edit-poi" wx:for="{{removedWaypoints}}" wx:for-item="poi" wx:key="poiId">
+        <text class="edit-poi-name">{{poi.name}}（已移除）</text>
+        <text class="poi-metadata">{{poi.categoryLabel}}{{poi.providerMeta.type ? ' · ' + poi.providerMeta.type : ''}}</text>
+        <text class="poi-metadata" wx:if="{{poi.address}}">{{poi.address}}</text>
+        <text class="poi-metadata" wx:if="{{poi.hasDistance}}">距原始起点约 {{poi.distanceInMeters}} 米</text>
+        <button class="edit-button" data-id="{{poi.poiId}}" disabled="{{confirming}}" bindtap="addWaypoint">重新加入</button>
+      </view>
+      <text class="content-text" wx:if="{{editMessage}}">{{editMessage}}</text>
+      <button class="edit-button" disabled="{{previewLoading || confirming}}" bindtap="restoreRecommendation">恢复推荐路线并预览</button>
+      <button class="edit-button" loading="{{previewLoading}}" disabled="{{previewLoading || confirming}}" bindtap="previewRoute">{{previewLoading ? '正在更新路线…' : '预览真实路线'}}</button>
+      <view class="edit-controls">
+        <button class="edit-button" disabled="{{confirming}}" bindtap="cancelRouteEdit">取消编辑</button>
+        <button class="edit-button" loading="{{confirming}}" disabled="{{!hasPreview || previewLoading || confirming}}" bindtap="confirmRouteEdit">确认路线</button>
+      </view>
+    </block>
+    <text class="content-text" wx:if="{{route.durationDifference !== null}}">推荐 {{route.recommendedDurationMinutes}} 分钟 · 当前 {{route.durationMinutes}} 分钟{{route.durationDifference > 0 ? ' · 多 ' + route.durationDifferenceAbs + ' 分钟' : route.durationDifference < 0 ? ' · 少 ' + route.durationDifferenceAbs + ' 分钟' : ''}}</text>
+  </view>
+
   <view class="content-card" wx:if="{{route.displayPois.length}}">
     <text class="card-title">途经地点（按访问顺序）</text>
     <view class="poi-row" wx:for="{{route.displayPois}}" wx:for-item="poi" wx:key="visitNumber">
@@ -252,6 +288,7 @@
 
     <button
       class="start-button"
+      disabled="{{editing}}"
       bindtap="startWalk"
     >
       开始散步

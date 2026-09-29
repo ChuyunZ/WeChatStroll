@@ -309,12 +309,12 @@ describe('route-generation service', () => {
       )
 
       expect(route.pointsOfInterest).toEqual([
-        {
+        expect.objectContaining({
           name: '人民公园',
           type: 'park',
           latitude: 23.127159,
           longitude: 113.264345
-        }
+        })
       ])
 
       expect(route.environmentStats).toEqual(

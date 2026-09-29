@@ -84,7 +84,7 @@ afterEach(() => {
 })
 
 describe('waypoint generation service', () => {
-  test('buildPoiCandidates flattens categories and keeps only planning fields', () => {
+  test('buildPoiCandidates preserves verified metadata for local route editing', () => {
     const candidates =
       routeGenerationService.buildPoiCandidates(
         createPoisByCategory()
@@ -97,7 +97,9 @@ describe('waypoint generation service', () => {
         category: 'park',
         latitude: 45.501,
         longitude: -73.571,
-        distanceInMeters: 350
+        distanceInMeters: 350,
+        address: PARK_POI.address,
+        providerMeta: PARK_POI.providerMeta
       },
       {
         poiId: 'water-1',
@@ -105,9 +107,11 @@ describe('waypoint generation service', () => {
         category: 'water',
         latitude: 45.503,
         longitude: -73.572,
-        distanceInMeters: null
+        distanceInMeters: null,
+        address: WATER_POI.address
       }
     ])
+    expect(candidates[0].providerMeta).not.toBe(PARK_POI.providerMeta)
   })
 
   test('generateWaypointPlan sends verified flattened POIs to aiRoutePlanner', async () => {
