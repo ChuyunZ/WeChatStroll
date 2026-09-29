@@ -2,6 +2,7 @@ const routeGenerationService = require(
   "../../services/route-generation"
 );
 const { buildRouteMap } = require("../../utils/route-map");
+const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 
 const {
   ROUTE_TYPES
@@ -458,11 +459,65 @@ Page({
       return;
     }
 
+    const session = this._routePlanningSession;
+    const generationId = this._routeRequestId;
+    let channel;
+    let latestRequestId;
+    let preview;
+    let closed = false;
+    const isCurrent = () => !closed && session && session === this._routePlanningSession &&
+      generationId === this._routeRequestId &&
+      this._rawRoutes.includes(selectedRoute);
+    const respond = (eventName, result) => {
+      if (!closed && channel) channel.emit(eventName, result);
+    };
+
     wx.navigateTo({
       url:
         `/pages/route-detail/route-detail?id=${routeId}&from=routes`,
-
-      success(res) {
+      events: {
+        previewRoute: async (request = {}) => {
+          latestRequestId = request.requestId;
+          preview = null;
+          const reply = { routeId, requestId: request.requestId };
+          try {
+            if (!isCurrent() || request.routeId !== routeId ||
+                !isValidEditableOrder(selectedRoute, request.orderedWaypointIds)) throw new Error('Invalid edit');
+            const walkingRoute = await session.buildRouteForOrder({
+              allowedWaypointIds: selectedRoute.editableWaypoints.map(poi => poi.poiId),
+              orderedWaypointIds: [...request.orderedWaypointIds],
+              source: 'user'
+            });
+            if (latestRequestId !== request.requestId || closed) return;
+            if (!isCurrent()) throw new Error('Expired session');
+            if (!walkingRoute || !walkingRoute.success) throw walkingRoute;
+            preview = routeGenerationService.rebuildGeneratedRouteForOrder({ baseRoute: selectedRoute, walkingRoute });
+            respond('routePreviewResult', { ...reply, route: preview });
+          } catch (error) {
+            if (latestRequestId === request.requestId) {
+              respond('routePreviewResult', { ...reply, message: routeEditErrorMessage(error) });
+            }
+          }
+        },
+        confirmRoute: (request = {}) => {
+          if (!isCurrent() || request.routeId !== routeId ||
+              request.requestId !== latestRequestId || !preview) {
+            respond('routeConfirmResult', { routeId, requestId: request.requestId,
+              message: '路线已过期，请返回路线列表重试' });
+            return;
+          }
+          // Only promote a route built here; never trust route facts from the UI.
+          this._rawRoutes = this._rawRoutes.map(route => route === selectedRoute ? preview : route);
+          selectedRoute = preview;
+          preview = null;
+          this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+          respond('routeConfirmResult', { routeId, requestId: request.requestId, route: selectedRoute });
+        },
+        invalidateRoutePreview: () => { latestRequestId = null; preview = null; },
+        closeRouteEditor: () => { closed = true; preview = null; channel = null; }
+      },
+      success: (res) => {
+        channel = res.eventChannel;
         if (
           res.eventChannel &&
           typeof res.eventChannel.emit === "function"
