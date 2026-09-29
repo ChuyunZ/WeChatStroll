@@ -85,7 +85,8 @@ Page({
     this._confirmedRoute = route;
     this.setData({ canEdit: Boolean(this._eventChannel &&
       typeof this._eventChannel.emit === "function" &&
-      isValidEditableOrder(route, route && route.recommendedWaypointIds)) });
+      isValidEditableOrder(route, route && route.recommendedWaypointIds) &&
+      route.editableWaypoints.length > 1) });
     this.displayRoute(route);
   },
 
@@ -343,6 +344,7 @@ Page({
         result.routeId !== this._confirmedRoute.routeId) return;
     this.setData({ confirming: false });
     if (!result.route) {
+      this.displayRoute(this._confirmedRoute);
       this.setData({ editMessage: result.message, hasPreview: false });
       this._previewRoute = null;
       return;

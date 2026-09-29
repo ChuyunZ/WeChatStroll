@@ -157,7 +157,7 @@ test.each(['point_to_point', 'loop', 'out_and_back'])('preview and confirm %s pr
 })
 
 test('cancel restores the confirmed map and one active waypoint remains editable after confirmation', async () => {
-  const { detail, route } = await setup()
+  const { detail, route, routes } = await setup()
   detail.enterRouteEdit()
   detail.updateDraft(['B'])
   detail.previewRoute()
@@ -170,6 +170,9 @@ test('cancel restores the confirmed map and one active waypoint remains editable
   detail.previewRoute()
   await flush()
   detail.confirmRouteEdit()
+  routes.viewRoute(tap(route.routeId))
+  expect(detail.data.route.editableWaypoints).toHaveLength(3)
+  expect(detail.data.route.routeOrder.orderedWaypointIds).toEqual(['B'])
   detail.enterRouteEdit()
   expect(detail.data.canEdit).toBe(true)
   expect(detail.data.draftWaypointIds).toEqual(['B'])
@@ -187,7 +190,15 @@ test.each([[], ['A', 'A'], ['A', 'X'], ['fake'], [1], null])('route boundary rej
   expect(channel.emit).toHaveBeenLastCalledWith('routePreviewResult', expect.objectContaining({ message: expect.any(String) }))
 })
 
-test.each([1, 2, 3])('supports a variable pool of %i waypoints', async count => {
+test('a single-waypoint editable pool does not offer or allow editing', async () => {
+  const { detail } = await setup('point_to_point', 1)
+  expect(detail.data.canEdit).toBe(false)
+  detail.enterRouteEdit()
+  expect(detail.data.editing).toBe(false)
+  expect(detail.data.draftWaypointIds).toEqual([])
+})
+
+test.each([2, 3])('supports a variable pool of %i waypoints', async count => {
   const { detail } = await setup('point_to_point', count)
   detail.enterRouteEdit()
   expect(detail.data.activeWaypoints).toHaveLength(count)
@@ -305,23 +316,41 @@ test('late response is ignored after a newer successful preview', async () => {
 
 test('confirmation accepts only the latest built preview, not supplied route facts', async () => {
   const { handlers, routes, route, detail } = await setup()
+  const confirmedDisplay = {
+    route: detail.data.route,
+    mapPolyline: detail.data.mapPolyline,
+    markers: detail.data.markers,
+    mapPoints: detail.data.mapPoints
+  }
   handlers.confirmRoute({ routeId: route.routeId, requestId: 100, route: { durationMinutes: 1 } })
   expect(routes._rawRoutes[0]).toBe(route)
   detail.enterRouteEdit()
+  detail.updateDraft(['B'])
   detail.previewRoute()
   await flush()
+  expect(detail.data.hasPreview).toBe(true)
+  expect(detail.data.route.routeOrder.orderedWaypointIds).toEqual(['B'])
+  expect(detail.data.mapPolyline).not.toEqual(confirmedDisplay.mapPolyline)
   routes.onUnload()
   detail.confirmRouteEdit()
   expect(detail.data.editing).toBe(true)
   expect(detail.data.confirming).toBe(false)
   expect(detail.data.editMessage).toContain('过期')
   expect(detail._confirmedRoute).toBe(route)
+  expect(routes._rawRoutes[0]).toBe(route)
+  expect(detail._previewRoute).toBeNull()
+  expect(detail.data.hasPreview).toBe(false)
+  expect(detail.data.draftWaypointIds).toEqual(['B'])
+  expect(detail.data).toMatchObject(confirmedDisplay)
+  detail.addWaypoint(tap('A'))
+  expect(detail.data.draftWaypointIds).toEqual(['B', 'A'])
 })
 
 test('editing template exposes trusted metadata, removed stops, destination and disabled actions', () => {
   const fs = require('fs')
   const template = fs.readFileSync(require('path').join(__dirname,
     '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8')
+  expect(template).toMatch(/<view class="content-card" wx:if="{{canEdit}}">\s*<text class="card-title">路线地点<\/text>\s*<button[^>]*bindtap="enterRouteEdit"/)
   for (const field of ['poi.address', 'poi.providerMeta.type', 'poi.distanceInMeters',
     'poi.isDestination', 'removedWaypoints', 'activeWaypoints.length === 1', 'route.durationDifference']) {
     expect(template).toContain(field)
