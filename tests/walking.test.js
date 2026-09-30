@@ -5,6 +5,7 @@ const TEST_ROUTE = mockRoutes[0];
 let pageDefinition;
 let page;
 let getCurrentLocation;
+let storage;
 
 function createEventChannel() {
   const handlers = {};
@@ -21,6 +22,7 @@ function loadWalkingPage({ eventChannel = null } = {}) {
   jest.resetModules();
 
   pageDefinition = null;
+  storage = {};
   getCurrentLocation = jest.fn().mockResolvedValue({
     latitude: 31.2304,
     longitude: 121.4737
@@ -40,7 +42,14 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     navigateBack: jest.fn(),
     navigateTo: jest.fn(),
     showModal: jest.fn(),
-    showToast: jest.fn()
+    showToast: jest.fn(),
+    getStorageSync: jest.fn(key => storage[key]),
+    setStorageSync: jest.fn((key, value) => {
+      storage[key] = value;
+    }),
+    removeStorageSync: jest.fn(key => {
+      delete storage[key];
+    })
   };
 
   require("../miniprogram/pages/walking/walking");
@@ -143,6 +152,26 @@ describe("Walking page", () => {
     expect(page.data.loading).toBe(false);
     expect(page.data.error).toBe(false);
     expect(page.data.route.routeId).toBe(TEST_ROUTE.routeId);
+  });
+
+  test("restores an existing active walk with its original start time", () => {
+    wx.setStorageSync("activeWalkSession", {
+      version: 1,
+      status: "active",
+      routeId: TEST_ROUTE.routeId,
+      route: TEST_ROUTE,
+      startTimeMs: new Date("2026-10-01T11:30:00.000Z").getTime()
+    });
+
+    page.onLoad({
+      routeId: "different-route"
+    });
+
+    page.updateElapsedTime();
+
+    expect(page.data.route.routeId).toBe(TEST_ROUTE.routeId);
+    expect(page.data.elapsedSeconds).toBe(1800);
+    expect(page.data.elapsedText).toBe("00:30:00");
   });
 
   test("shows an error for an invalid route", () => {
@@ -273,6 +302,28 @@ describe("Walking page", () => {
     expect(page._active).toBe(false);
   });
 
+  test("finishing clears the local active-walk lock", () => {
+    const feedbackEventChannel = {
+      emit: jest.fn()
+    };
+
+    wx.navigateTo.mockImplementation(options => {
+      options.success({
+        eventChannel: feedbackEventChannel
+      });
+    });
+
+    page.onLoad({
+      routeId: TEST_ROUTE.routeId
+    });
+
+    expect(wx.getStorageSync("activeWalkSession")).toBeTruthy();
+
+    page.finishWalk();
+
+    expect(wx.getStorageSync("activeWalkSession")).toBeUndefined();
+  });
+
   test("confirming early end records ended_early", () => {
     const feedbackEventChannel = {
       emit: jest.fn()
@@ -356,6 +407,12 @@ describe("Walking page", () => {
   });
 
   expect(wx.enableAlertBeforeUnload).toHaveBeenCalled();
+  expect(wx.getStorageSync("activeWalkSession")).toEqual(
+    expect.objectContaining({
+      routeId: TEST_ROUTE.routeId,
+      startTimeMs: new Date("2026-10-01T12:00:00.000Z").getTime()
+    })
+  );
   expect(jest.getTimerCount()).toBe(1);
 });
 
@@ -363,7 +420,7 @@ describe("Walking page", () => {
     page.loadWalkingRoute(TEST_ROUTE);
 
     expect(wx.enableAlertBeforeUnload).toHaveBeenCalledWith({
-      message: "散步正在进行，确定要离开吗？"
+      message: "散步路线已锁定。如需更换路线，请先点击“提前结束”。"
     });
 
     page.onUnload();

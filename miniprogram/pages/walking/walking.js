@@ -2,6 +2,7 @@ const { mockRoutes } = require("../../data/mock-routes");
 const { isValidGeoPoint } = require("../../utils/geo");
 const { buildRouteMap } = require("../../utils/route-map");
 const locationService = require("../../services/location");
+const activeWalkSessionService = require("../../services/active-walk-session");
 
 const TIMER_INTERVAL_MS = 1000;
 
@@ -69,6 +70,35 @@ Page({
 
     const routeId = options.routeId;
 
+    let activeSession;
+
+    try {
+      activeSession = activeWalkSessionService.getActiveWalkSession();
+    } catch (error) {
+      this.showRouteError();
+      wx.showToast({
+        title: "暂时无法恢复散步状态",
+        icon: "none"
+      });
+      return;
+    }
+
+    if (activeSession) {
+      if (!this.isValidRoute(activeSession.route)) {
+        try {
+          activeWalkSessionService.clearActiveWalkSession(activeSession.routeId);
+        } catch (error) {
+          console.warn("[Walking] Unable to clear invalid active session.");
+        }
+
+        this.showRouteError();
+        return;
+      }
+
+      this.loadWalkingRoute(activeSession.route, activeSession.startTimeMs);
+      return;
+    }
+
     if (typeof this.getOpenerEventChannel === "function") {
       const eventChannel = this.getOpenerEventChannel();
 
@@ -86,7 +116,7 @@ Page({
             return;
           }
 
-          this.loadWalkingRoute(route);
+          this.startWalkingRoute(route);
         });
 
         return;
@@ -95,23 +125,22 @@ Page({
 
     // 兼容开发阶段直接打开 Walking 页面。
     const mockRoute = mockRoutes.find(route => route.routeId === routeId);
-
-    this.loadWalkingRoute(mockRoute);
+    this.startWalkingRoute(mockRoute);
   },
 
-    onShow() {
+  onShow() {
     this._pageVisible = true;
 
     if (this.data.ended) {
-        wx.navigateBack();
-        return;
+      wx.navigateBack();
+      return;
     }
 
     if (this._active) {
-        this.updateElapsedTime();
-        this.startTimer();
+      this.updateElapsedTime();
+      this.startTimer();
     }
-    },
+  },
 
   onHide() {
     this._pageVisible = false;
@@ -145,14 +174,39 @@ Page({
     );
   },
 
-  loadWalkingRoute(route) {
+  startWalkingRoute(route) {
+    if (!this.isValidRoute(route)) {
+      this.showRouteError();
+      return;
+    }
+
+    let sessionResult;
+
+    try {
+      sessionResult = activeWalkSessionService.createActiveWalkSession(route);
+    } catch (error) {
+      this.showRouteError();
+      wx.showToast({
+        title: "暂时无法保存散步状态",
+        icon: "none"
+      });
+      return;
+    }
+
+    this.loadWalkingRoute(
+      sessionResult.session.route,
+      sessionResult.session.startTimeMs
+    );
+  },
+
+  loadWalkingRoute(route, startTimeMs = Date.now()) {
     if (!this.isValidRoute(route)) {
       this.showRouteError();
       return;
     }
 
     this._route = route;
-    this._startTimeMs = Date.now();
+    this._startTimeMs = startTimeMs;
     this._active = true;
     this._finishing = false;
 
@@ -311,7 +365,7 @@ Page({
     }
 
     wx.enableAlertBeforeUnload({
-      message: "散步正在进行，确定要离开吗？"
+      message: "散步路线已锁定。如需更换路线，请先点击“提前结束”。"
     });
   },
 
@@ -374,6 +428,23 @@ Page({
       completionStatus
     };
 
+    try {
+      const cleared = activeWalkSessionService.clearActiveWalkSession(
+        this._route.routeId
+      );
+
+      if (!cleared) {
+        throw new Error("Active walk session changed.");
+      }
+    } catch (error) {
+      this._finishing = false;
+      wx.showToast({
+        title: "暂时无法结束散步，请重试",
+        icon: "none"
+      });
+      return;
+    }
+
     this._active = false;
 
     this.stopTimer();
@@ -396,6 +467,15 @@ Page({
       },
 
       fail: () => {
+        try {
+          activeWalkSessionService.createActiveWalkSession(
+            this._route,
+            this._startTimeMs
+          );
+        } catch (error) {
+          console.warn("[Walking] Unable to restore active session after navigation failure.");
+        }
+
         this._active = true;
         this._finishing = false;
 
