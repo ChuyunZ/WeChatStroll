@@ -333,8 +333,9 @@ async function searchNearbyPois(
 ) {
   const result =
     await callCloudFunction(
-      'getNearbyPois',
+      'amapProvider',
       {
+        action: 'nearbyPois',
         longitude: location.longitude,
         latitude: location.latitude,
         radius

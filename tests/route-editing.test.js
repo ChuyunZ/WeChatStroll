@@ -32,7 +32,7 @@ async function setup(routeType = 'point_to_point', count = 3) {
     polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
   }))
   const session = createRoutePlanningSession({ start, routeType,
-    verifiedWaypointPool: pois, segmentResolver: resolver, providerMinIntervalMs: 0 })
+    verifiedWaypointPool: pois, segmentResolver: resolver })
   const ids = pois.slice(0, count).map(poi => poi.poiId)
   const walkingRoute = await session.buildRouteForOrder({
     allowedWaypointIds: ids, orderedWaypointIds: ids, source: 'recommended'

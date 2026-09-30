@@ -1,384 +1,164 @@
-const axios = require('axios')
-
-process.env.AMAP_API_KEY = 'test-api-key'
-
+jest.mock('@cloudbase/node-sdk', () => ({ init: jest.fn(() => ({ callFunction: mockInvoke })), SYMBOL_CURRENT_ENV: Symbol('current-env') }))
+const mockInvoke = jest.fn()
+const fs = require('fs')
+const path = require('path')
+const cloud = { callFunction: mockInvoke }
 const { main } = require('./index')
+const ACTION = 'nearbyPois'
+const failure = { success: false, error: {
+  code: 'PROVIDER_GATEWAY_FAILED', message: 'Unable to contact the provider gateway'
+} }
 
-const originalAxiosGet = axios.get
+beforeEach(() => {
+  jest.useFakeTimers()
+  jest.clearAllMocks()
+  jest.spyOn(console, 'info').mockImplementation(() => {})
+})
+afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks() })
 
-function createAMapSuccessResponse(pois = []) {
-  return {
-    data: {
-      status: '1',
-      info: 'OK',
-      infocode: '10000',
-      pois
-    }
-  }
-}
+test('forwards to the canonical gateway with fixed action and explicit Node SDK transport timeout', async () => {
+  const result = { success: true, value: 'unchanged' }
+  cloud.callFunction.mockResolvedValue({ result })
+  expect(await main({ action: 'override', input: 'trusted-by-gateway' })).toBe(result)
+  expect(cloud.callFunction).toHaveBeenCalledWith({ name: 'amapProvider',
+    data: { action: ACTION, input: 'trusted-by-gateway' } },
+    { timeout: 60000, retryOptions: { retries: 0 } })
+  expect(cloud.callFunction.mock.calls[0]).toHaveLength(2)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-describe('getNearbyPois', () => {
-  afterEach(() => {
-    axios.get = originalAxiosGet
+test.each(['AMAP_RATE_LIMITED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
+  'preserves child business failure %s without remapping', async code => {
+    const result = { success: false, error: { code, message: 'Child failure' } }
+    cloud.callFunction.mockResolvedValue({ result })
+    expect(await main({})).toBe(result)
+    expect(jest.getTimerCount()).toBe(0)
   })
 
-  test('Case 1: Valid location + normalization', async () => {
-    axios.get = async () => {
-      return createAMapSuccessResponse([
-        {
-          id: 'poi_001',
-          name: 'Test Park',
-          location: '116.473168,39.993015',
-          distance: '350',
-          type: '风景名胜;公园广场;公园',
-          typecode: '110101',
-          address: 'Test Address'
-        }
-      ])
-    }
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(true)
-
-    expect(result.poisByCategory).toBeDefined()
-    expect(typeof result.poisByCategory).toBe('object')
-
-    expect(Array.isArray(result.poisByCategory.park)).toBe(true)
-    expect(Array.isArray(result.poisByCategory.water)).toBe(true)
-    expect(Array.isArray(result.poisByCategory.shoppingStreet)).toBe(true)
-
-    expect(result.poisByCategory.park.length).toBeGreaterThan(0)
-
-    const poi = result.poisByCategory.park[0]
-
-    expect(poi.poiId).toBe('poi_001')
-    expect(poi.name).toBe('Test Park')
-    expect(poi.category).toBe('park')
-    expect(poi.longitude).toBe(116.473168)
-    expect(poi.latitude).toBe(39.993015)
-    expect(poi.distanceInMeters).toBe(350)
-    expect(poi.address).toBe('Test Address')
-
-    expect(poi.providerMeta).toEqual({
-      type: '风景名胜;公园广场;公园',
-      typecode: '110101'
-    })
+test.each([{ success: true, route: { distanceMeters: 100 } },
+  { success: false, error: { code: 'AMAP_RATE_LIMITED', message: 'Busy' } }])(
+  'accepts a JSON string business result without extra response wrapping', async result => {
+    cloud.callFunction.mockResolvedValue({ result: JSON.stringify(result) })
+    expect(await main({})).toEqual(result)
   })
 
-  test('Case 2: Missing coordinates', async () => {
-    let result = await main({
-      latitude: 39.993015
+test.each([undefined, null, '', 'not JSON', 'null', '[]', 'true', 17, true, [], {},
+  { success: 'true' }, { success: false }, { success: false, error: { code: 5, message: 'bad' } },
+  JSON.stringify(JSON.stringify({ success: true }))])('invalid child result %p fails neutrally', async result => {
+    cloud.callFunction.mockResolvedValue({ result })
+    expect(await main({})).toEqual(failure)
+    expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+      event: 'forward_failed', action: ACTION, code: 'INVALID_GATEWAY_RESULT'
     })
-
-    expect(result.success).toBe(false)
-
-    expect(result.error).toEqual({
-      code: 'INVALID_COORDINATES',
-      message: 'Missing longitude or latitude'
-    })
-
-    result = await main({
-      longitude: 116.473168
-    })
-
-    expect(result.success).toBe(false)
-
-    expect(result.error).toEqual({
-      code: 'INVALID_COORDINATES',
-      message: 'Missing longitude or latitude'
-    })
+    expect(jest.getTimerCount()).toBe(0)
   })
 
-  test('Case 3: Invalid coordinates', async () => {
-    let result = await main({
-      longitude: 181,
-      latitude: 39.993015
-    })
+test.each([undefined, null, {}])('missing SDK response %p is handled', async response => {
+  cloud.callFunction.mockResolvedValue(response)
+  expect(await main()).toEqual(failure)
+})
 
-    expect(result.success).toBe(false)
+test.each(['ETIMEDOUT', 'ECONNRESET', 'secret-code'])('transport rejection %s is sanitized', async code => {
+  cloud.callFunction.mockRejectedValue(Object.assign(new Error('secret transport details'), {
+    code, config: { url: 'secret-url', key: 'secret-key' }
+  }))
+  expect(await main({ latitude: 31.23456, longitude: 121.45678 })).toEqual(failure)
+  const logs = JSON.stringify(console.info.mock.calls)
+  for (const forbidden of ['secret', 'latitude', 'longitude', '31.23456', '121.45678']) expect(logs).not.toContain(forbidden)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-    expect(result.error).toEqual({
-      code: 'INVALID_COORDINATES',
-      message: 'Invalid longitude or latitude'
-    })
+test('synchronous SDK throws also clear the watchdog and return a neutral failure', async () => {
+  cloud.callFunction.mockImplementation(() => { throw new Error('secret') })
+  expect(await main({})).toEqual(failure)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-    result = await main({
-      longitude: 116.473168,
-      latitude: 91
-    })
+test('a 5164 ms child POI success is forwarded without an application-level five-second cutoff', async () => {
+  const result = { success: true, poisByCategory: {
+    park: [{ poiId: 'park-1', name: 'Park', latitude: 30.12345, longitude: 120.12345 }],
+    water: [], shoppingStreet: []
+  } }
+  cloud.callFunction.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ result }), 5164)))
+  const pending = main({})
+  await jest.advanceTimersByTimeAsync(5164)
+  expect(await pending).toBe(result)
+  expect(cloud.callFunction.mock.calls[0]).toEqual([{
+    name: 'amapProvider', data: { action: ACTION }
+  }, { timeout: 60000, retryOptions: { retries: 0 } }])
+  expect(jest.getTimerCount()).toBe(0)
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/park-1|latitude|longitude|30.12345|120.12345/)
+})
 
-    expect(result.success).toBe(false)
-
-    expect(result.error).toEqual({
-      code: 'INVALID_COORDINATES',
-      message: 'Invalid longitude or latitude'
-    })
-
-    result = await main({
-      longitude: '116.473168',
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(false)
-
-    expect(result.error).toEqual({
-      code: 'INVALID_COORDINATES',
-      message: 'Invalid longitude or latitude'
-    })
+test('a successful 1.37-second child result returns immediately with no leftover watchdog', async () => {
+  const result = { success: true, route: { polyline: 'secret route' } }
+  cloud.callFunction.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ result }), 1370)))
+  const pending = main({ secret: 'location' })
+  await jest.advanceTimersByTimeAsync(1370)
+  expect(await pending).toBe(result)
+  expect(jest.getTimerCount()).toBe(0)
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_resolved', action: ACTION, hasResult: true, resultType: 'object', resultSuccessType: 'boolean'
   })
-
-  test('Case 4: Empty POIs', async () => {
-    axios.get = async () => {
-      return createAMapSuccessResponse([])
-    }
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(true)
-
-    expect(result.poisByCategory).toEqual({
-      park: [],
-      water: [],
-      shoppingStreet: []
-    })
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_return', action: ACTION, success: true
   })
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/secret|polyline|location/)
+})
 
-  test('Case 5: Provider / network failure', async () => {
-    axios.get = async () => {
-      throw new Error('Simulated AMap network failure')
-    }
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(false)
-
-    expect(result.error).toEqual({
-      code: 'POI_SEARCH_FAILED',
-      message: 'Unable to retrieve nearby places'
-    })
-
-    expect(result.details).toBeUndefined()
+test('a never-settling SDK call is bounded without retrying or invoking AMap again', async () => {
+  let lateReject
+  cloud.callFunction.mockImplementation(() => new Promise((_, reject) => { lateReject = reject }))
+  const pending = main({})
+  await jest.advanceTimersByTimeAsync(65000)
+  expect(await pending).toEqual(failure)
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_failed', action: ACTION, code: 'FORWARD_DEADLINE_EXCEEDED'
   })
+  expect(cloud.callFunction).toHaveBeenCalledTimes(1)
+  expect(jest.getTimerCount()).toBe(0)
+  lateReject(new Error('secret late rejection'))
+  await Promise.resolve() // Promise.race observes late rejection as well.
+})
 
-  test('Case 6: Malformed provider data', async () => {
-    axios.get = async () => {
-      return createAMapSuccessResponse([
-        {
-          id: 'valid-poi',
-          name: 'Valid Park',
-          location: '116.473168,39.993015',
-          distance: '100'
-        },
+test('wrapper has no direct provider dependency and remains independently deployable', () => {
+  expect(require('./package.json').dependencies).toEqual({ '@cloudbase/node-sdk': '3.17.2' })
+  const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8')
+  expect(source.match(/require\([^)]*\)/g)).toEqual(["require('@cloudbase/node-sdk')"])
+  expect(source).not.toMatch(/axios|restapi\.amap|AMAP_API_KEY/)
+})
 
-        {
-          name: 'Missing ID',
-          location: '116.47,39.99'
-        },
-
-        {
-          id: 'missing-name',
-          location: '116.47,39.99'
-        },
-
-        {
-          id: 'bad-location',
-          name: 'Bad Location',
-          location: 'abc,xyz'
-        },
-
-        {
-          id: 'bad-location-format',
-          name: 'Bad Location Format',
-          location: '116.47,39.99,123'
-        },
-
-        {
-          id: 'out-of-range-location',
-          name: 'Out of Range Location',
-          location: '200,100'
-        },
-
-        {
-          id: 'no-location',
-          name: 'No Location'
-        },
-
-        {
-          id: 'bad-distance',
-          name: 'Bad Distance',
-          location: '116.473168,39.993015',
-          distance: 'not-a-number'
-        }
-      ])
-    }
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(true)
-
-    const allPois = Object.values(
-      result.poisByCategory
-    ).flat()
-
-    for (const returnedPoi of allPois) {
-      expect(returnedPoi.poiId).toBeTruthy()
-      expect(returnedPoi.name).toBeTruthy()
-      expect(returnedPoi.category).toBeTruthy()
-      expect(Number.isFinite(returnedPoi.longitude)).toBe(true)
-      expect(Number.isFinite(returnedPoi.latitude)).toBe(true)
-    }
-
-    expect(
-      allPois.some(
-        poi => poi.poiId === 'bad-location'
-      )
-    ).toBe(false)
-
-    expect(
-      allPois.some(
-        poi => poi.poiId === 'bad-location-format'
-      )
-    ).toBe(false)
-
-    expect(
-      allPois.some(
-        poi => poi.poiId === 'out-of-range-location'
-      )
-    ).toBe(false)
-
-    expect(
-      allPois.some(
-        poi => poi.poiId === 'no-location'
-      )
-    ).toBe(false)
-
-    const badDistancePoi = allPois.find(
-      poi => poi.poiId === 'bad-distance'
-    )
-
-    expect(badDistancePoi).toBeTruthy()
-
-    expect(
-      badDistancePoi.distanceInMeters
-    ).toBeNull()
+test('pending diagnostics distinguish an unsettled SDK promise and stop after completion', async () => {
+  let resolve
+  cloud.callFunction.mockImplementation(() => new Promise(done => { resolve = done }))
+  const pending = main({ secret: 'private-input' })
+  await jest.advanceTimersByTimeAsync(10000)
+  const records = console.info.mock.calls.map(call => call[1])
+  expect(records.filter(record => record.event === 'forward_pending')).toEqual([
+    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 5000, action: ACTION },
+    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 10000, action: ACTION }
+  ])
+  expect(records.map(record => record.event).slice(0, 3)).toEqual([
+    'forward_start', 'forward_initialized', 'forward_dispatched'
+  ])
+  resolve({ result: { success: true } })
+  expect(await pending).toEqual({ success: true })
+  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_finished', stage: 'processing_result', elapsedMs: 10000, action: ACTION
   })
+  const count = console.info.mock.calls.length
+  await jest.advanceTimersByTimeAsync(70000)
+  expect(console.info).toHaveBeenCalledTimes(count)
+  expect(jest.getTimerCount()).toBe(0)
+  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-input')
+})
 
-  test('Case 7: Valid provided radius reaches AMap', async () => {
-    const axiosGetMock = jest.fn(async () => {
-      return createAMapSuccessResponse([])
-    })
-
-    axios.get = axiosGetMock
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015,
-      radius: 1125
-    })
-
-    expect(result.success).toBe(true)
-    expect(axiosGetMock).toHaveBeenCalledTimes(3)
-
-    for (const call of axiosGetMock.mock.calls) {
-      expect(call[1].params.radius).toBe(1125)
-    }
+test('initialization failure reports its stage without leaking context or leaving timers', async () => {
+  require('@cloudbase/node-sdk').init.mockImplementationOnce(() => { throw new Error('private-init-error') })
+  expect(await main({})).toEqual(failure)
+  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_finished', stage: 'initializing', elapsedMs: 0, action: ACTION
   })
-
-  test('Case 8: Missing radius uses default radius', async () => {
-    const axiosGetMock = jest.fn(async () => {
-      return createAMapSuccessResponse([])
-    })
-
-    axios.get = axiosGetMock
-
-    const result = await main({
-      longitude: 116.473168,
-      latitude: 39.993015
-    })
-
-    expect(result.success).toBe(true)
-
-    for (const call of axiosGetMock.mock.calls) {
-      expect(call[1].params.radius).toBe(3000)
-    }
-  })
-
-  test.each([
-    0,
-    -100,
-    NaN,
-    Infinity,
-    -Infinity,
-    15001,
-    999999,
-    '1125'
-  ])(
-    'Case 9: Invalid radius %p uses default radius',
-    async radius => {
-      const axiosGetMock = jest.fn(async () => {
-        return createAMapSuccessResponse([])
-      })
-
-      axios.get = axiosGetMock
-
-      const result = await main({
-        longitude: 116.473168,
-        latitude: 39.993015,
-        radius
-      })
-
-      expect(result.success).toBe(true)
-
-      for (const call of axiosGetMock.mock.calls) {
-        expect(call[1].params.radius).toBe(3000)
-      }
-    }
-  )
-
-  test('Case 10: Radius boundaries are accepted', async () => {
-    const minimumRadiusMock = jest.fn(async () => {
-      return createAMapSuccessResponse([])
-    })
-
-    axios.get = minimumRadiusMock
-
-    await main({
-      longitude: 116.473168,
-      latitude: 39.993015,
-      radius: 200
-    })
-
-    for (const call of minimumRadiusMock.mock.calls) {
-      expect(call[1].params.radius).toBe(200)
-    }
-
-    const maximumRadiusMock = jest.fn(async () => {
-      return createAMapSuccessResponse([])
-    })
-
-    axios.get = maximumRadiusMock
-
-    await main({
-      longitude: 116.473168,
-      latitude: 39.993015,
-      radius: 15000
-    })
-
-    for (const call of maximumRadiusMock.mock.calls) {
-      expect(call[1].params.radius).toBe(15000)
-    }
-  })
+  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-init-error')
+  expect(jest.getTimerCount()).toBe(0)
 })

@@ -206,8 +206,9 @@ async function getWalkingSegment(
 
   try {
     result = await callCloudFunction(
-      'getWalkingRoute',
+      'amapProvider',
       {
+        action: 'walkingRoute',
         start: copyGeoPoint(fromPoint),
         destination: copyGeoPoint(toPoint)
       },

@@ -1,13 +1,10 @@
 const { isValidGeoPoint } = require('../utils/geo')
 const { createCodedError } = require('../utils/errors')
 const { getWalkingSegment } = require('./walking-segment')
-const { createWalkingProviderScheduler } = require('./walking-provider-scheduler')
 
 const {
   EXACT_ORDERING_MAX_WAYPOINTS,
-  SEGMENT_FETCH_CONCURRENCY,
-  WALKING_PROVIDER_MIN_INTERVAL_MS,
-  WALKING_PROVIDER_RETRY_DELAYS_MS
+  SEGMENT_FETCH_CONCURRENCY
 } = require('../config/route-planning')
 
 const { ROUTE_TYPES } = require('../constants/route-types')
@@ -83,8 +80,7 @@ function createRoutePlanningSession({
   start,
   verifiedWaypointPool,
   routeType = ROUTE_TYPES.POINT_TO_POINT,
-  segmentResolver = getWalkingSegment,
-  providerMinIntervalMs = WALKING_PROVIDER_MIN_INTERVAL_MS
+  segmentResolver = getWalkingSegment
 }) {
   if (!isValidGeoPoint(start)) {
     throw createCodedError(
@@ -119,28 +115,6 @@ function createRoutePlanningSession({
   const segmentCache = new Map()
   // Small settled-cost projection; Promise ownership and dedup stay above.
   const resolvedSegmentCosts = new Map()
-  const scheduleProvider = createWalkingProviderScheduler(providerMinIntervalMs)
-
-  async function requestSegment(fromNode, toNode) {
-    for (let attempt = 0; ; attempt++) {
-      let result
-      try {
-        result = await scheduleProvider(() => segmentResolver({ ...fromNode }, { ...toNode }))
-      } catch (error) {
-        result = { success: false, error: 'WALKING_SEGMENT_FAILED',
-          causeCode: error && typeof error.code === 'string' && error.code.trim() ? error.code.trim() : 'SEGMENT_RESOLVER_ERROR' }
-      }
-      const rateLimited = result && (result.error === 'AMAP_RATE_LIMITED' || result.causeCode === 'AMAP_RATE_LIMITED')
-      if (!rateLimited) return result
-      const retryDelayMs = WALKING_PROVIDER_RETRY_DELAYS_MS[attempt]
-      console.warn('[Route Segment] Rate limited:', {
-        from: getNodeId(fromNode), to: getNodeId(toNode), attempt: attempt + 1,
-        error: 'AMAP_RATE_LIMITED', retryDelayMs: retryDelayMs === undefined ? null : retryDelayMs
-      })
-      if (retryDelayMs === undefined) return { success: false, error: 'AMAP_RATE_LIMITED', causeCode: 'AMAP_RATE_LIMITED' }
-      await new Promise(resolve => setTimeout(resolve, retryDelayMs))
-    }
-  }
 
   function registerVerifiedWaypoints(verifiedWaypoints) {
     return registerWaypoints(
@@ -161,14 +135,16 @@ function createRoutePlanningSession({
 
     const segmentPromise = Promise.resolve()
       .then(() =>
-        requestSegment(
+        segmentResolver(
           { ...fromNode },
           { ...toNode }
         )
       )
       .then((result) => {
         if (!result || result.success !== true) {
-          return normalizeSegmentFailure(result)
+          const failure = normalizeSegmentFailure(result)
+          if (failure.causeCode === 'AMAP_RATE_LIMITED') failure.error = 'AMAP_RATE_LIMITED'
+          return failure
         }
 
         const normalizedSegment =
@@ -185,7 +161,7 @@ function createRoutePlanningSession({
       })
       .catch((error) => ({
         success: false,
-        error: 'WALKING_SEGMENT_FAILED',
+        error: error && error.code === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED' : 'WALKING_SEGMENT_FAILED',
 
         causeCode:
           error &&

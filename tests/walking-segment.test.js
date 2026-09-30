@@ -112,7 +112,7 @@ describe('walking-segment', () => {
   )
 
   test(
-    'sends only trusted coordinates to getWalkingRoute',
+    'sends only action and trusted coordinates to amapProvider',
     async () => {
       let receivedRequest
 
@@ -146,9 +146,10 @@ describe('walking-segment', () => {
       )
 
       expect(receivedRequest).toEqual({
-        name: 'getWalkingRoute',
+        name: 'amapProvider',
 
         data: {
+          action: 'walkingRoute',
           start: {
             latitude: 31.2304,
             longitude: 121.4737

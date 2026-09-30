@@ -1,10 +1,9 @@
 {
   "name": "getNearbyPois",
   "version": "1.0.0",
-  "description": "Get nearby POIs from AMap",
+  "description": "Legacy nearbyPois forwarding to amapProvider",
   "main": "index.js",
   "dependencies": {
-    "wx-server-sdk": "4.0.2",
-    "axios": "1.20.0"
+    "@cloudbase/node-sdk": "3.17.2"
   }
 }

@@ -1,630 +1,160 @@
-const axios = require('axios')
-
-process.env.AMAP_API_KEY = 'test-api-key'
-
+jest.mock('@cloudbase/node-sdk', () => ({ init: jest.fn(() => ({ callFunction: mockInvoke })), SYMBOL_CURRENT_ENV: Symbol('current-env') }))
+const mockInvoke = jest.fn()
+const fs = require('fs')
+const path = require('path')
+const cloud = { callFunction: mockInvoke }
 const { main } = require('./index')
+const ACTION = 'walkingRoute'
+const failure = { success: false, error: {
+  code: 'PROVIDER_GATEWAY_FAILED', message: 'Unable to contact the provider gateway'
+} }
 
-const originalAxiosGet = axios.get
-const originalConsoleError = console.error
+beforeEach(() => {
+  jest.useFakeTimers()
+  jest.clearAllMocks()
+  jest.spyOn(console, 'info').mockImplementation(() => {})
+})
+afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks() })
 
-function createAMapRouteResponse() {
-  return {
-    data: {
-      status: '1',
-      info: 'OK',
-      infocode: '10000',
-      count: '1',
+test('forwards to the canonical gateway with fixed action and explicit Node SDK transport timeout', async () => {
+  const result = { success: true, value: 'unchanged' }
+  cloud.callFunction.mockResolvedValue({ result })
+  expect(await main({ action: 'override', input: 'trusted-by-gateway' })).toBe(result)
+  expect(cloud.callFunction).toHaveBeenCalledWith({ name: 'amapProvider',
+    data: { action: ACTION, input: 'trusted-by-gateway' } },
+    { timeout: 60000, retryOptions: { retries: 0 } })
+  expect(cloud.callFunction.mock.calls[0]).toHaveLength(2)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-      route: {
-        paths: [
-          {
-            distance: '2400',
-
-            cost: {
-              duration: '1920'
-            },
-
-            steps: [
-              {
-                step_distance: '800',
-                polyline:
-                  '121.456000,31.123000;121.458000,31.124000',
-                navi: {
-                  walk_type: '0'
-                }
-              },
-              {
-                step_distance: '1600',
-                polyline:
-                  '121.458000,31.124000;121.470000,31.130000',
-                navi: {
-                  walk_type: '6'
-                }
-              }
-            ]
-          }
-        ]
-      }
-    }
-  }
-}
-
-function createValidEvent() {
-  return {
-    start: {
-      latitude: 31.123,
-      longitude: 121.456
-    },
-
-    destination: {
-      latitude: 31.13,
-      longitude: 121.47
-    }
-  }
-}
-
-function expectWalkingRouteFailure(result, code = 'INVALID_WALKING_ROUTE_RESPONSE') {
-  expect(result).toEqual({
-    success: false,
-    error: {
-      code,
-      message: 'Unable to generate walking route'
-    }
-  })
-}
-
-describe('getWalkingRoute', () => {
-  test('provider diagnostics do not expose request URLs, keys, coordinates or raw payloads', async () => {
-    const log = jest.spyOn(console, 'error').mockImplementation(() => {})
-    axios.get = async () => { throw Object.assign(new Error('secret URL and coordinates'), {
-      config: { url: 'secret-url', params: { key: 'secret-key', origin: '121.456,31.123' } },
-      response: { status: 429, data: { infocode: '10021', payload: 'secret-payload' } }
-    }) }
-    try {
-      expect(await main(createValidEvent())).toMatchObject({ error: { code: 'AMAP_RATE_LIMITED' } })
-      expect(log).toHaveBeenCalledWith('[Walking Provider] Rate limited:', {
-        code: 'AMAP_RATE_LIMITED', providerCode: '10021', httpStatus: 429
-      })
-      expect(JSON.stringify(log.mock.calls)).not.toContain('secret')
-      expect(JSON.stringify(log.mock.calls)).not.toContain('121.456')
-    } finally { log.mockRestore() }
+test.each(['AMAP_RATE_LIMITED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
+  'preserves child business failure %s without remapping', async code => {
+    const result = { success: false, error: { code, message: 'Child failure' } }
+    cloud.callFunction.mockResolvedValue({ result })
+    expect(await main({})).toBe(result)
+    expect(jest.getTimerCount()).toBe(0)
   })
 
-  test.each(['10021', 10021])('AMap %s is classified as temporary rate limiting', async infocode => {
-    axios.get = async () => ({ data: { status: '0', infocode, info: 'CUQPS_HAS_EXCEEDED_THE_LIMIT' } })
-    expect(await main(createValidEvent())).toMatchObject({ success: false, error: { code: 'AMAP_RATE_LIMITED' } })
+test.each([{ success: true, route: { distanceMeters: 100 } },
+  { success: false, error: { code: 'AMAP_RATE_LIMITED', message: 'Busy' } }])(
+  'accepts a JSON string business result without extra response wrapping', async result => {
+    cloud.callFunction.mockResolvedValue({ result: JSON.stringify(result) })
+    expect(await main({})).toEqual(result)
   })
 
-  beforeEach(() => {
-    // Expected failure tests intentionally trigger console.error.
-    // Silence it so the Jest output stays readable.
-    console.error = () => {}
-  })
-
-  afterEach(() => {
-    axios.get = originalAxiosGet
-    console.error = originalConsoleError
-  })
-
-  test('Case 1: Valid walking route + normalization', async () => {
-    axios.get = async () => {
-      return createAMapRouteResponse()
-    }
-
-    const result = await main(createValidEvent())
-
-    expect(result.success).toBe(true)
-
-    expect(result.route.distanceMeters).toBe(2400)
-    expect(result.route.durationSeconds).toBe(1920)
-    expect(result.route).not.toHaveProperty('durationMinutes')
-
-    expect(result.route.polyline).toEqual([
-      {
-        latitude: 31.123,
-        longitude: 121.456
-      },
-      {
-        latitude: 31.124,
-        longitude: 121.458
-      },
-      {
-        latitude: 31.124,
-        longitude: 121.458
-      },
-      {
-        latitude: 31.13,
-        longitude: 121.47
-      }
-    ])
-
-    expect(result.route.environmentStats).toEqual({
-      totalStepDistanceMeters: 2400,
-      analyzedDistanceMeters: 2400,
-      unknownWalkTypeDistanceMeters: 0,
-      normalRoadDistanceMeters: 800,
-      normalRoadRatio: 800 / 2400,
-      walkTypeCoverageRatio: 1,
-      walkTypeDistanceMeters: {
-        '0': 800,
-        '6': 1600
-      }
+test.each([undefined, null, '', 'not JSON', 'null', '[]', 'true', 17, true, [], {},
+  { success: 'true' }, { success: false }, { success: false, error: { code: 5, message: 'bad' } },
+  JSON.stringify(JSON.stringify({ success: true }))])('invalid child result %p fails neutrally', async result => {
+    cloud.callFunction.mockResolvedValue({ result })
+    expect(await main({})).toEqual(failure)
+    expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+      event: 'forward_failed', action: ACTION, code: 'INVALID_GATEWAY_RESULT'
     })
+    expect(jest.getTimerCount()).toBe(0)
   })
 
-  test('Case 2: Sends correct request to AMap', async () => {
-    let requestedUrl
-    let requestedConfig
+test.each([undefined, null, {}])('missing SDK response %p is handled', async response => {
+  cloud.callFunction.mockResolvedValue(response)
+  expect(await main()).toEqual(failure)
+})
 
-    axios.get = async (url, config) => {
-      requestedUrl = url
-      requestedConfig = config
+test.each(['ETIMEDOUT', 'ECONNRESET', 'secret-code'])('transport rejection %s is sanitized', async code => {
+  cloud.callFunction.mockRejectedValue(Object.assign(new Error('secret transport details'), {
+    code, config: { url: 'secret-url', key: 'secret-key' }
+  }))
+  expect(await main({ latitude: 31.23456, longitude: 121.45678 })).toEqual(failure)
+  const logs = JSON.stringify(console.info.mock.calls)
+  for (const forbidden of ['secret', 'latitude', 'longitude', '31.23456', '121.45678']) expect(logs).not.toContain(forbidden)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-      return createAMapRouteResponse()
-    }
+test('synchronous SDK throws also clear the watchdog and return a neutral failure', async () => {
+  cloud.callFunction.mockImplementation(() => { throw new Error('secret') })
+  expect(await main({})).toEqual(failure)
+  expect(jest.getTimerCount()).toBe(0)
+})
 
-    await main(createValidEvent())
+test('forwards the walking route business result without wrapping it', async () => {
+  const result = { success: true, route: {
+    distanceMeters: 100, durationSeconds: 80,
+    polyline: [{ latitude: 30, longitude: 120 }, { latitude: 30.001, longitude: 120.001 }]
+  } }
+  cloud.callFunction.mockResolvedValue({ result })
+  expect(await main({})).toBe(result)
+  expect(cloud.callFunction.mock.calls[0]).toEqual([{
+    name: 'amapProvider', data: { action: ACTION }
+  }, { timeout: 60000, retryOptions: { retries: 0 } }])
+})
 
-    expect(requestedUrl).toBe(
-      'https://restapi.amap.com/v5/direction/walking'
-    )
-
-    expect(requestedConfig).toEqual({
-      params: {
-        key: 'test-api-key',
-        origin: '121.456000,31.123000',
-        destination: '121.470000,31.130000',
-        show_fields: 'cost,polyline,navi'
-      },
-      timeout: 60000
-    })
+test('a successful 1.37-second child result returns immediately with no leftover watchdog', async () => {
+  const result = { success: true, route: { polyline: 'secret route' } }
+  cloud.callFunction.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ result }), 1370)))
+  const pending = main({ secret: 'location' })
+  await jest.advanceTimersByTimeAsync(1370)
+  expect(await pending).toBe(result)
+  expect(jest.getTimerCount()).toBe(0)
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_resolved', action: ACTION, hasResult: true, resultType: 'object', resultSuccessType: 'boolean'
   })
-
-  test('Case 3: Missing start or destination', async () => {
-    axios.get = async () => {
-      throw new Error('Axios should not be called')
-    }
-
-    const result = await main({
-      start: {
-        latitude: 31.123,
-        longitude: 121.456
-      }
-    })
-
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'INVALID_COORDINATES',
-        message: 'Missing start or destination'
-      }
-    })
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_return', action: ACTION, success: true
   })
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/secret|polyline|location/)
+})
 
-  test('Case 4: Invalid coordinates', async () => {
-    axios.get = async () => {
-      throw new Error('Axios should not be called')
-    }
-
-    const result = await main({
-      start: {
-        latitude: 31.123,
-        longitude: 121.456
-      },
-
-      destination: {
-        latitude: 200,
-        longitude: 121.47
-      }
-    })
-
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'INVALID_COORDINATES',
-        message: 'Invalid start or destination coordinates'
-      }
-    })
+test('a never-settling SDK call is bounded without retrying or invoking AMap again', async () => {
+  let lateReject
+  cloud.callFunction.mockImplementation(() => new Promise((_, reject) => { lateReject = reject }))
+  const pending = main({})
+  await jest.advanceTimersByTimeAsync(65000)
+  expect(await pending).toEqual(failure)
+  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_failed', action: ACTION, code: 'FORWARD_DEADLINE_EXCEEDED'
   })
+  expect(cloud.callFunction).toHaveBeenCalledTimes(1)
+  expect(jest.getTimerCount()).toBe(0)
+  lateReject(new Error('secret late rejection'))
+  await Promise.resolve() // Promise.race observes late rejection as well.
+})
 
-  test('Case 5: Route not found', async () => {
-    axios.get = async () => {
-      return {
-        data: {
-          status: '1',
-          info: 'OK',
-          infocode: '10000',
-          count: '0',
-          route: {
-            paths: []
-          }
-        }
-      }
-    }
+test('wrapper has no direct provider dependency and remains independently deployable', () => {
+  expect(require('./package.json').dependencies).toEqual({ '@cloudbase/node-sdk': '3.17.2' })
+  const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8')
+  expect(source.match(/require\([^)]*\)/g)).toEqual(["require('@cloudbase/node-sdk')"])
+  expect(source).not.toMatch(/axios|restapi\.amap|AMAP_API_KEY/)
+})
 
-    const result = await main(createValidEvent())
-
-    expect(result).toEqual({
-      success: false,
-      error: {
-        code: 'ROUTE_NOT_FOUND',
-        message: 'No walking route was found'
-      }
-    })
+test('pending diagnostics distinguish an unsettled SDK promise and stop after completion', async () => {
+  let resolve
+  cloud.callFunction.mockImplementation(() => new Promise(done => { resolve = done }))
+  const pending = main({ secret: 'private-input' })
+  await jest.advanceTimersByTimeAsync(10000)
+  const records = console.info.mock.calls.map(call => call[1])
+  expect(records.filter(record => record.event === 'forward_pending')).toEqual([
+    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 5000, action: ACTION },
+    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 10000, action: ACTION }
+  ])
+  expect(records.map(record => record.event).slice(0, 3)).toEqual([
+    'forward_start', 'forward_initialized', 'forward_dispatched'
+  ])
+  resolve({ result: { success: true } })
+  expect(await pending).toEqual({ success: true })
+  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_finished', stage: 'processing_result', elapsedMs: 10000, action: ACTION
   })
+  const count = console.info.mock.calls.length
+  await jest.advanceTimersByTimeAsync(70000)
+  expect(console.info).toHaveBeenCalledTimes(count)
+  expect(jest.getTimerCount()).toBe(0)
+  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-input')
+})
 
-  test('Case 6: AMap provider error', async () => {
-    axios.get = async () => {
-      return {
-        data: {
-          status: '0',
-          info: 'INVALID_USER_KEY',
-          infocode: '10001'
-        }
-      }
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result, 'WALKING_ROUTE_FAILED')
+test('initialization failure reports its stage without leaking context or leaving timers', async () => {
+  require('@cloudbase/node-sdk').init.mockImplementationOnce(() => { throw new Error('private-init-error') })
+  expect(await main({})).toEqual(failure)
+  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
+    event: 'forward_finished', stage: 'initializing', elapsedMs: 0, action: ACTION
   })
-
-  test('Case 7: Network or Axios failure', async () => {
-    axios.get = async () => {
-      throw new Error('Network failure')
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result, 'WALKING_ROUTE_FAILED')
-  })
-
-  test('Case 8: Invalid response data', async () => {
-    axios.get = async () => {
-      return {
-        data: null
-      }
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 9: Invalid route count', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.count = null
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 10: Route count is positive but paths are missing', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      delete response.data.route.paths
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 11: Invalid path object', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths = [null]
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 12: Invalid walking distance', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].distance = ''
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 13: Invalid walking duration', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      delete response.data.route.paths[0].cost.duration
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 14: Missing route steps', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps = []
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 15: Step is missing polyline', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      delete response.data.route.paths[0].steps[0].polyline
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 16: Polyline coordinate has invalid format', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps[0].polyline =
-        '121.456000,31.123000,999;121.458000,31.124000'
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 17: Polyline coordinate contains empty value', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps[0].polyline =
-        ',31.123000;121.458000,31.124000'
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 18: Polyline coordinate is outside valid range', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps[0].polyline =
-        '999.000000,31.123000;121.458000,31.124000'
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 19: Polyline contains fewer than two points', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps = [
-        {
-          step_distance: '2400',
-          polyline: '121.456000,31.123000',
-          navi: {
-            walk_type: '0'
-          }
-        }
-      ]
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 20: Duration preserves exact seconds', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].cost.duration = '1921'
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expect(result.success).toBe(true)
-    expect(result.route.durationSeconds).toBe(1921)
-    expect(result.route).not.toHaveProperty('durationMinutes')
-  })
-
-  test(
-    'Case 21: Normal-road ratio is based on distance, not step count',
-    async () => {
-      axios.get = async () => {
-        const response = createAMapRouteResponse()
-
-        response.data.route.paths[0].distance = '1000'
-
-        response.data.route.paths[0].steps = [
-          {
-            step_distance: '10',
-            polyline:
-              '121.456000,31.123000;121.457000,31.123500',
-            navi: {
-              walk_type: '0'
-            }
-          },
-          {
-            step_distance: '10',
-            polyline:
-              '121.457000,31.123500;121.458000,31.124000',
-            navi: {
-              walk_type: '0'
-            }
-          },
-          {
-            step_distance: '10',
-            polyline:
-              '121.458000,31.124000;121.459000,31.124500',
-            navi: {
-              walk_type: '0'
-            }
-          },
-          {
-            step_distance: '970',
-            polyline:
-              '121.459000,31.124500;121.470000,31.130000',
-            navi: {
-              walk_type: '6'
-            }
-          }
-        ]
-
-        return response
-      }
-
-      const result = await main(createValidEvent())
-
-      expect(result.success).toBe(true)
-
-      expect(
-        result.route.environmentStats.normalRoadDistanceMeters
-      ).toBe(30)
-
-      expect(
-        result.route.environmentStats.normalRoadRatio
-      ).toBe(0.03)
-
-      expect(
-        result.route.environmentStats.walkTypeDistanceMeters
-      ).toEqual({
-        '0': 30,
-        '6': 970
-      })
-    }
-  )
-
-  test(
-    'Case 22: Missing walk_type is tracked as unknown coverage',
-    async () => {
-      axios.get = async () => {
-        const response = createAMapRouteResponse()
-
-        delete response.data.route.paths[0].steps[0].navi
-
-        response.data.route.paths[0].steps[1].navi.walk_type =
-          '0'
-
-        return response
-      }
-
-      const result = await main(createValidEvent())
-
-      expect(result.success).toBe(true)
-
-      expect(result.route.environmentStats).toEqual({
-        totalStepDistanceMeters: 2400,
-        analyzedDistanceMeters: 1600,
-        unknownWalkTypeDistanceMeters: 800,
-        normalRoadDistanceMeters: 1600,
-        normalRoadRatio: 1600 / 2400,
-        walkTypeCoverageRatio: 1600 / 2400,
-        walkTypeDistanceMeters: {
-          '0': 1600
-        }
-      })
-    }
-  )
-
-  test(
-    'Case 23: Numeric walk_type is normalized to a string key',
-    async () => {
-      axios.get = async () => {
-        const response = createAMapRouteResponse()
-
-        response.data.route.paths[0].steps[0].navi.walk_type =
-          0
-
-        return response
-      }
-
-      const result = await main(createValidEvent())
-
-      expect(result.success).toBe(true)
-
-      expect(
-        result.route.environmentStats.normalRoadDistanceMeters
-      ).toBe(800)
-
-      expect(
-        result.route.environmentStats.walkTypeDistanceMeters
-      ).toEqual({
-        '0': 800,
-        '6': 1600
-      })
-    }
-  )
-
-  test('Case 24: Missing step distance', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      delete response.data.route.paths[0].steps[0].step_distance
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
-
-  test('Case 25: Invalid negative step distance', async () => {
-    axios.get = async () => {
-      const response = createAMapRouteResponse()
-
-      response.data.route.paths[0].steps[0].step_distance = '-1'
-
-      return response
-    }
-
-    const result = await main(createValidEvent())
-
-    expectWalkingRouteFailure(result)
-  })
+  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-init-error')
+  expect(jest.getTimerCount()).toBe(0)
 })
