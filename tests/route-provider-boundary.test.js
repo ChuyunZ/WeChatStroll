@@ -47,24 +47,24 @@ test('same directed edge shares its in-flight request and settled L1 value', asy
   expect(resolver).toHaveBeenCalledTimes(1)
 })
 
-test('backend busy is not retried locally or recorded as an unreachable edge', async () => {
-  const resolver = jest.fn(async () => ({ success: false, error: 'AMAP_RATE_LIMITED' }))
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('backend busy is not retried locally or recorded as an unreachable edge', async code => {
+  const resolver = jest.fn(async () => ({ success: false, error: code }))
   const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool, segmentResolver: resolver })
   expect(await optimizeWaypointOrder({ session, waypointIds: ['A'] }))
-    .toMatchObject({ success: false, error: 'AMAP_RATE_LIMITED' })
+    .toMatchObject({ success: false, error: code })
   expect(resolver).toHaveBeenCalledTimes(1)
   expect(session.getCachedSegmentCosts()).toEqual([])
-  expect((await session.evaluateRouteOrder(order)).error).toBe('AMAP_RATE_LIMITED')
+  expect((await session.evaluateRouteOrder(order)).error).toBe(code)
   expect(resolver).toHaveBeenCalledTimes(1)
 })
 
-test('cloud busy response crosses walking-segment and engine in one backend call', async () => {
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('cloud busy response crosses walking-segment and engine in one backend call', async code => {
   global.wx = { cloud: { callFunction: jest.fn().mockResolvedValue({ result: {
-    success: false, error: { code: 'AMAP_RATE_LIMITED', message: 'Provider is temporarily busy' }
+    success: false, error: { code: code, message: 'Provider is temporarily busy' }
   } }) } }
   try {
     const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool })
-    expect(await session.evaluateRouteOrder(order)).toMatchObject({ error: 'AMAP_RATE_LIMITED' })
+    expect(await session.evaluateRouteOrder(order)).toMatchObject({ error: code })
     expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
     expect(wx.cloud.callFunction).toHaveBeenCalledWith({ name: 'amapProvider', data: {
       action: 'walkingRoute', start, destination: { latitude: pool[0].latitude, longitude: pool[0].longitude }
@@ -72,13 +72,13 @@ test('cloud busy response crosses walking-segment and engine in one backend call
   } finally { delete global.wx }
 })
 
-test.each(['throw', 'causeCode'])('temporary %s resolver failures retain their classification without local retries', async mode => {
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'].flatMap(code => ['throw', 'causeCode'].map(mode => [mode, code])))('temporary %s resolver failures retain their classification without local retries', async (mode, code) => {
   const resolver = jest.fn(async () => {
-    if (mode === 'throw') throw Object.assign(new Error('busy'), { code: 'AMAP_RATE_LIMITED' })
-    return { success: false, error: 'WALKING_SEGMENT_FAILED', causeCode: 'AMAP_RATE_LIMITED' }
+    if (mode === 'throw') throw Object.assign(new Error('busy'), { code: code })
+    return { success: false, error: 'WALKING_SEGMENT_FAILED', causeCode: code }
   })
   const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool, segmentResolver: resolver })
-  expect(await session.evaluateRouteOrder(order)).toMatchObject({ error: 'AMAP_RATE_LIMITED' })
+  expect(await session.evaluateRouteOrder(order)).toMatchObject({ error: code })
   expect(resolver).toHaveBeenCalledTimes(1)
   expect(session.getCachedSegmentCosts()).toEqual([])
 })

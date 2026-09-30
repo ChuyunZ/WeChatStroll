@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('./errors')
 
 const DEFAULT_POI_SEARCH_RADIUS_METERS = 3000
 const MIN_POI_SEARCH_RADIUS_METERS = 200
@@ -173,7 +174,7 @@ function createNearbyHandler({ apiKey: AMAP_API_KEY, request }) {
       return {
         success: false,
         error: {
-          code: error.code === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED' : 'POI_SEARCH_FAILED',
+          code: isTemporaryProviderCode(error && error.code) ? error.code : 'POI_SEARCH_FAILED',
           message: 'Unable to retrieve nearby places'
         }
       }

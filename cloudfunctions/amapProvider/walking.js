@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('./errors')
 const AMAP_WALKING_URL = 'https://restapi.amap.com/v5/direction/walking'
 const NORMAL_ROAD_WALK_TYPE = '0'
 
@@ -439,7 +440,7 @@ function createWalkingHandler({ apiKey: AMAP_API_KEY, request }) {
         }
       }
     } catch (error) {
-      const code = error.code === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED'
+      const code = isTemporaryProviderCode(error && error.code) ? error.code
         : receivedResponse && !error.code ? 'INVALID_WALKING_ROUTE_RESPONSE' : 'WALKING_ROUTE_FAILED'
       // Parser details and transport errors may contain locations or credentials.
 

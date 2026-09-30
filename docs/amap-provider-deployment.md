@@ -115,10 +115,25 @@ are not automatically retried and do not publish cooldowns.
 The attempt limit is per physical category/route request; a successful POI
 operation has three category requests, each with its own attempt counter.
 
-For compatibility with existing route failure handling, queue expiry, exhausted
-QPS retries and unavailable limiter storage return `AMAP_RATE_LIMITED`, the
-application's existing recoverable provider-busy equivalent. They are not treated
-as unreachable edges and do not trigger additional client retries/replanning.
+Temporary provider errors have distinct meanings:
+
+| Code | Meaning |
+| --- | --- |
+| AMAP_RATE_LIMITED | Recognized AMap QPS feedback (10019-10023) exhausted the provider attempt budget |
+| PROVIDER_BUSY | Queue budget or bounded transaction-conflict retries exhausted |
+| PROVIDER_GATEWAY_FAILED | Storage, corrupt state, configuration initialization, or unexpected gateway failure |
+
+If a retry cannot acquire permission before the queue deadline, it returns
+PROVIDER_BUSY even when earlier attempts received QPS feedback. Failed bookkeeping
+or cooldown publication preserves contention as PROVIDER_BUSY; other infrastructure
+failures return PROVIDER_GATEWAY_FAILED. No new HTTP attempt bypasses the limiter.
+
+All three codes remain temporary throughout walking segments, Route Engine,
+optimizer, generation/fallback, agentic planning and edit preview. They stay in
+the request-local Promise cache to avoid repeated requests, but are never written
+as unreachable facts into resolved segment costs. Generation stops rather than
+asking AI to repair waypoints for a provider outage. Edit preview uses the same
+safe service-busy message. Existing validation/business codes remain unchanged.
 No internal limiter fields are added to business responses.
 
 All coordination uses backend `Date.now()` milliseconds, never client timestamps.
@@ -214,105 +229,37 @@ walking requests and a POI query; compare actual start times across all instance
 Check that lease fields clear after recorded starts, or expire/recover after an
 interrupted worker. Never clear rows or shorten a live lease to speed up recovery.
 
-### Legacy forwarding diagnostics and deployment
+### Legacy forwarding deployment
 
-Deploy **both getWalkingRoute and getNearbyPois with dependency installation**.
-Their package manifests and lockfiles now pin @cloudbase/node-sdk 3.17.2 directly.
-Uploading index.js alone is insufficient. The gateway, limiter, parsers and Mini
-Program do not need redeployment for this wrapper-only change. Keep both outer
-functions at an **80-second execution timeout**.
+Deploy both getWalkingRoute and getNearbyPois **with dependency installation**.
+Each function pins @cloudbase/node-sdk 3.17.2 in its own package and lockfile.
+Keep their execution timeout at **80 seconds**, above the explicit 60-second
+nested SDK timeout and independent 65-second forwarding watchdog.
 
-wx-server-sdk 4.0.2 declares slow in its types but ignores it in its runtime adapter.
-The wrappers now use the [documented Node SDK call options](https://docs.cloudbase.net/api-reference/server/node-sdk/functions)
-directly: app.callFunction({ name, data }, { timeout: 60000, retryOptions: { retries: 0 } }).
-Initialization uses the current CloudBase environment and runtime credentials.
-Keepalive is disabled, and callbackWaitsForEmptyEventLoop is false: the handler
-awaits the child result but does not need idle network sockets to keep it alive.
-Neither wrapper retries, calls AMap directly, or changes provider business results.
+The wrappers use the current CloudBase environment and runtime credentials.
+SDK retries and keepalive are disabled; callbackWaitsForEmptyEventLoop is false.
+The watchdog is cleared on completion and does not cancel an already-running
+child. Neither wrapper calls AMap directly or retries the gateway.
 
-An independent 65-second watchdog bounds a stuck SDK promise. It cannot cancel an
-already-running child or catch platform termination. SDK errors and invalid child
-envelopes become PROVIDER_GATEWAY_FAILED. Valid child failures, including real
-AMAP_RATE_LIMITED errors, pass through unchanged. String results are parsed once.
+Valid child business results, including all temporary provider failures, pass
+through unchanged. Malformed results and actual wrapper transport/infrastructure
+failures return PROVIDER_GATEWAY_FAILED without exposing raw exceptions.
 
-Safe diagnostics remain:
+Only three diagnostic events are emitted: forward_start (target, action,
+transport and numeric timeout configuration), forward_return (success boolean),
+and forward_failed (fixed sanitized failure category). No heartbeat or stage
+tracking is needed. Never log coordinates, request/result payloads, POIs, routes,
+URLs, API keys, raw errors or the CloudBase context.
 
-| Event | Fields / interpretation |
-| --- | --- |
-| forward_start | Target, fixed action, transport cloudbase-node-3.17.2, timeoutMs 60000, executionLimitMs from numeric context.time_limit_in_ms (null if absent) |
-| forward_resolved | Result presence and types only |
-| forward_return | Business success boolean only |
-| forward_failed | Fixed sanitized category: TRANSPORT_TIMEOUT, TRANSPORT_NETWORK_FAILED, SDK_CALL_FAILED, FORWARD_DEADLINE_EXCEEDED, or INVALID_GATEWAY_RESULT |
-| forward_initialized | SDK initialization completed; elapsed milliseconds only |
-| forward_dispatched | callFunction returned a promise; this does not prove a network request or child execution |
-| forward_pending | Every 5 seconds while awaiting the SDK; fixed stage and elapsed milliseconds only |
-| forward_finished | Handler cleanup reached; fixed stage and elapsed milliseconds only, not proof of platform delivery |
+In the CloudBase console, enable **Enable synchronous testing** when inspecting
+the returned business result. Asynchronous testing can show an apparent failure
+even when the parent function succeeds. Verify the parent's final report and
+business result in the Logs page; a child's success or a partial test-panel log
+alone does not establish the parent's outcome.
 
-Diagnostic revision `forward-diagnostics-v2` appears in forward_start. All
-diagnostic timers are cleared on success, failure or watchdog expiry.
-
-No coordinates, payloads, raw results, raw errors, URLs, keys or full context are
-logged. Never print the runtime context: it can contain credentials.
-
-The latest supplied child report succeeds in 5240 ms with status_code 200 and
-ret_code 0. Its parent test panel shows failure with only forward_start and no
-final REPORT/ERROR. This does **not** prove a five-second SDK timeout or platform
-termination. The installed Node SDK default is 15 seconds; the explicit timeout
-removes ambiguity but is not proof that it caused this particular failure.
-
-After deployment, verify the new transport field and executionLimitMs in parent
-logs. Test both wrappers and an invalid-coordinate business failure. For a short
-POI smoke test, also enable synchronous testing in the console. Inspect the parent
-function log by its own request ID, not just the successful child log. If
-forward_return exists but the panel fails, investigate the test/result-return path.
-If logs stop at forward_start, obtain the parent REPORT/ERROR and check its effective
-execution timeout. Preserve that evidence before making further provider changes.
-
-The final **parent** report for request e31e0f9a-bf2b-49e7-9acc-7a532f5a38bb
-confirms function_name getNearbyPois, duration 6778 ms, status_code 200, ret_code 0,
-and a business result with success:true and populated poisByCategory. This is the
-same request that the test panel labeled failed. The deployed parent successfully
-completed forwarding; there was no parent execution timeout or business failure
-for this request. Its startup log confirms cloudbase-node-3.17.2 and an 80000 ms
-execution limit. This establishes that this deployment works for this request,
-but does not establish whether earlier SDK changes were necessary.
-
-The observed failure is a discrepancy in the console test/result-reporting path.
-The screenshot has synchronous testing unchecked and an empty execution summary.
-The exact console cause (polling, result retrieval, or rendering) is not established
-without its network/error evidence. Do not change the SDK, provider or limiter to
-address this successful invocation. Diagnostic revision v2 is optional and does
-not need to be deployed to establish this request's outcome.
-
-Before further behavioral changes:
-
-1. For a new failure, in the parent's **Logs** page query its request ID after at least
-   80 seconds. Obtain the final REPORT/ERROR, duration, status_code, ret_code and
-   sanitized error information. Do not substitute the child's successful report.
-2. Repeat once with **Enable synchronous testing** checked, using the same input.
-   Avoid repeated concurrent clicks, which produce additional child requests.
-3. With diagnostic revision v2 deployed, interpret the complete parent log:
-   initialized without dispatched points to invoking the SDK; dispatched and
-   pending indicate an unsettled SDK promise. failed followed by finished means
-   JavaScript handled the failure. return followed by finished with a successful
-   parent report points to the caller/test-result path.
-4. If the final platform report says the process exited or timed out, use that
-   error and duration to diagnose the runtime. Missing heartbeat entries alone
-   do not prove process termination: logs themselves may be incomplete.
-
-The additional diagnostic events add observability only; they do not fix the
-console discrepancy. No provider, limiter, parser or routing behavior is changed.
-If synchronous testing still reports failure despite a successful parent report,
-inspect the console's failed network request and raise a CloudBase console issue
-with the request ID and sanitized status/timing evidence. Do not share credentials
-or the full POI payload. Also verify the actual Mini Program caller independently;
-a successful backend report alone does not prove client-side delivery.
-
-Tests exercise the real pinned SDK with only the HTTP transport mocked, verifying
-a 5240 ms success, the actual 60000 ms HTTP timeout, disabled retries, business
-failure passthrough, infrastructure error envelopes, and transport rejection.
-Wrapper tests also cover malformed results, stuck promises, late rejection and
-absence of sensitive diagnostics. These tests do not reproduce the live platform.
+After deploying the refined error contract, verify the Mini Program end to end,
+both legacy wrappers, and safe service-busy feedback. Deploy the Mini Program's
+temporary-error handling before exposing the new gateway error codes to clients.
 
 ## Manual verification and single-developer diagnosis
 

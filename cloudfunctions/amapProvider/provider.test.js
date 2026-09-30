@@ -131,7 +131,7 @@ test('queue deadline stops before HTTP and does not reserve a future slot', asyn
   await client(store).limiter.cooldown('amap:key', 6000, 'walkingRoute')
   const before = JSON.stringify([...store.documents])
   const instance = client(store)
-  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   expect(instance.request).not.toHaveBeenCalled()
   expect(JSON.stringify([...store.documents])).toBe(before)
   expect(instance.log).toHaveBeenCalledWith(expect.objectContaining({ event: 'queue_deadline_exceeded' }))
@@ -141,7 +141,7 @@ test('retry shares original deadline instead of resetting its queue budget', asy
   const instance = client(createTestStore(), jest.fn(async () => limited('10021')), {
     walkingRoute: { maxQueueWaitMs: 200 }
   })
-  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   expect(instance.request).toHaveBeenCalledTimes(1)
 })
 
@@ -165,7 +165,7 @@ test('transaction conflicts have a separate bounded budget and no HTTP on exhaus
   const store = createTestStore()
   store.forcedConflicts = 100
   const instance = client(store)
-  const assertion = expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  const assertion = expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   await jest.runAllTimersAsync()
   await assertion
   expect(store.transactions).toBe(6)
@@ -190,7 +190,7 @@ test('database failure fails closed with sanitized recoverable error', async () 
   store.failure = new Error('secret DB internals')
   const instance = client(store)
   await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({
-    code: 'AMAP_RATE_LIMITED', message: 'Provider is temporarily busy'
+    code: 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
   })
   expect(instance.request).not.toHaveBeenCalled()
   expect(store.transactions).toBe(1)
@@ -203,7 +203,7 @@ test('failed cooldown publication never allows another HTTP attempt', async () =
     store.failure = new Error('secret')
     return limited('10021')
   }))
-  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   expect(instance.request).toHaveBeenCalledTimes(1)
   expect(instance.log).toHaveBeenCalledWith(expect.objectContaining({ event: 'cooldown_failed' }))
 })
@@ -256,7 +256,7 @@ test('corrupt shared state fails closed rather than silently disabling coordinat
   const store = createTestStore()
   store.documents.set('amap:key', { nextAllowedAtMs: 'wrong', cooldownUntilMs: 0 })
   const instance = client(store)
-  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   expect(instance.request).not.toHaveBeenCalled()
 })
 
@@ -292,7 +292,7 @@ test('transaction backoff cannot overrun the queue deadline', async () => {
   const store = createTestStore()
   store.forcedConflicts = 100
   const instance = client(store, undefined, { walkingRoute: { maxQueueWaitMs: 1 } })
-  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.provider('walkingRoute')('unused', {})).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   expect(store.transactions).toBe(1)
   expect(instance.request).not.toHaveBeenCalled()
 })
@@ -301,4 +301,37 @@ test('the transport timeout is owned by centralized provider configuration', asy
   const instance = client(createTestStore(), undefined, { common: { requestTimeoutMs: 1234 } })
   await instance.provider('walkingRoute')('unused', { timeout: 999999, params: {} })
   expect(instance.request).toHaveBeenCalledWith('unused', { timeout: 1234, params: {} })
+})
+
+test.each(['record', 'cooldown'])('transaction contention during %s fails busy without another HTTP attempt', async phase => {
+  const store = createTestStore()
+  const instance = client(store, jest.fn(async () => {
+    if (phase === 'record') store.forcedConflicts = 100
+    return phase === 'cooldown' ? limited('10023') : success
+  }))
+  if (phase === 'cooldown') {
+    const original = instance.limiter.cooldown
+    jest.spyOn(instance.limiter, 'cooldown').mockImplementation((...args) => {
+      store.forcedConflicts = 100
+      return original(...args)
+    })
+  }
+  const assertion = expect(instance.provider('walkingRoute')('unused', {}))
+    .rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
+  await jest.runAllTimersAsync()
+  await assertion
+  expect(instance.request).toHaveBeenCalledTimes(1)
+  expect(instance.log.mock.calls.filter(([record]) => record.event === 'transaction_conflict')).toHaveLength(6)
+})
+
+test.each(['10021', '10023'])('exhausted %s retries reacquire and publish the final cooldown', async infocode => {
+  const store = createTestStore()
+  const instance = client(store, jest.fn(async () => limited(infocode)))
+  const assertion = expect(instance.provider('walkingRoute')('unused', {}))
+    .rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await jest.runAllTimersAsync()
+  await assertion
+  expect(instance.request).toHaveBeenCalledTimes(2)
+  expect(store.documents.get(infocode === '10023' ? 'amap:key' : 'amap:walking').cooldownUntilMs).toBe(100900)
+  expect(instance.log.mock.calls.filter(([record]) => record.event === 'provider_start')).toHaveLength(2)
 })

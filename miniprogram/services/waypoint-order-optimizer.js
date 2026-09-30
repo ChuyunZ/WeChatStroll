@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('../utils/provider-errors')
 const {
   EXACT_ORDERING_MAX_WAYPOINTS,
   MAX_WAYPOINTS,
@@ -170,7 +171,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
       allowedWaypointIds: ids,
       orderedWaypointIds: order
     })
-    if (cost.error === 'AMAP_RATE_LIMITED') temporaryFailure = cost
+    if (isTemporaryProviderCode(cost.error)) temporaryFailure = cost
     if (!cost.success && cost.failedSegment) failedSegment = cost.failedSegment
     const result = cost.success ? { ...cost, order: [...order] } : null
     // Failed orders also consume the budget; never compare partial routes.
@@ -247,7 +248,7 @@ async function optimizeWaypointOrder({ session, waypointIds, requestedDurationMi
   }
   if (!best) {
     return { success: false,
-      error: temporaryFailure ? 'AMAP_RATE_LIMITED' : 'WAYPOINT_ORDER_NOT_FOUND',
+      error: temporaryFailure ? temporaryFailure.error : 'WAYPOINT_ORDER_NOT_FOUND',
       ...(temporaryFailure ? { failedSegment: temporaryFailure.failedSegment }
         : failedSegment ? { failedSegment } : {}), optimization }
   }

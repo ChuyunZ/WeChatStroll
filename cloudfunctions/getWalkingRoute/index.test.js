@@ -27,7 +27,7 @@ test('forwards to the canonical gateway with fixed action and explicit Node SDK 
   expect(jest.getTimerCount()).toBe(0)
 })
 
-test.each(['AMAP_RATE_LIMITED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
   'preserves child business failure %s without remapping', async code => {
     const result = { success: false, error: { code, message: 'Child failure' } }
     cloud.callFunction.mockResolvedValue({ result })
@@ -94,9 +94,6 @@ test('a successful 1.37-second child result returns immediately with no leftover
   expect(await pending).toBe(result)
   expect(jest.getTimerCount()).toBe(0)
   expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
-    event: 'forward_resolved', action: ACTION, hasResult: true, resultType: 'object', resultSuccessType: 'boolean'
-  })
-  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
     event: 'forward_return', action: ACTION, success: true
   })
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/secret|polyline|location/)
@@ -124,37 +121,11 @@ test('wrapper has no direct provider dependency and remains independently deploy
   expect(source).not.toMatch(/axios|restapi\.amap|AMAP_API_KEY/)
 })
 
-test('pending diagnostics distinguish an unsettled SDK promise and stop after completion', async () => {
-  let resolve
-  cloud.callFunction.mockImplementation(() => new Promise(done => { resolve = done }))
-  const pending = main({ secret: 'private-input' })
-  await jest.advanceTimersByTimeAsync(10000)
-  const records = console.info.mock.calls.map(call => call[1])
-  expect(records.filter(record => record.event === 'forward_pending')).toEqual([
-    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 5000, action: ACTION },
-    { event: 'forward_pending', stage: 'awaiting_sdk', elapsedMs: 10000, action: ACTION }
-  ])
-  expect(records.map(record => record.event).slice(0, 3)).toEqual([
-    'forward_start', 'forward_initialized', 'forward_dispatched'
-  ])
-  resolve({ result: { success: true } })
-  expect(await pending).toEqual({ success: true })
-  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
-    event: 'forward_finished', stage: 'processing_result', elapsedMs: 10000, action: ACTION
-  })
-  const count = console.info.mock.calls.length
-  await jest.advanceTimersByTimeAsync(70000)
-  expect(console.info).toHaveBeenCalledTimes(count)
-  expect(jest.getTimerCount()).toBe(0)
-  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-input')
-})
 
-test('initialization failure reports its stage without leaking context or leaving timers', async () => {
-  require('@cloudbase/node-sdk').init.mockImplementationOnce(() => { throw new Error('private-init-error') })
-  expect(await main({})).toEqual(failure)
-  expect(console.info).toHaveBeenLastCalledWith('[AMap Legacy Wrapper]', {
-    event: 'forward_finished', stage: 'initializing', elapsedMs: 0, action: ACTION
-  })
-  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-init-error')
+test('successful forwarding emits only minimal safe diagnostics', async () => {
+  cloud.callFunction.mockResolvedValue({ result: { success: true, private: 'private-result' } })
+  await main({ private: 'private-input' }, { private: 'private-context' })
+  expect(console.info.mock.calls.map(call => call[1].event)).toEqual(['forward_start', 'forward_return'])
+  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private')
   expect(jest.getTimerCount()).toBe(0)
 })

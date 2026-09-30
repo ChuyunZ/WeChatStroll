@@ -27,7 +27,7 @@ exports.main = async event => {
   } catch (_) {
     console.info('[AMap Provider]', { event: 'gateway_unavailable', operation })
     return { success: false, error: {
-      code: 'AMAP_RATE_LIMITED', message: 'Provider is temporarily busy'
+      code: 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
     } }
   }
 }

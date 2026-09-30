@@ -102,19 +102,19 @@ test('a failed prefetched edge only invalidates orders that need it; final build
   expect(resolver).toHaveBeenCalledTimes(4)
 })
 
-test.each(['A->B', 'B->A', 'all'])('exact search tolerates unused throttled edges but reports required throttles (%s)', async throttled => {
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'].flatMap(code => ['A->B', 'B->A', 'all'].map(edge => [edge, code])))('exact search tolerates unused throttled edges but reports required throttles (%s)', async (throttled, code) => {
   jest.useFakeTimers()
   try {
     const { session, resolver } = fixture()
     const resolve = resolver.getMockImplementation()
     resolver.mockImplementation((from, to) => throttled === 'all' || `${from.nodeId}->${to.nodeId}` === throttled
-      ? { success: false, error: 'AMAP_RATE_LIMITED' }
+      ? { success: false, error: code }
       : resolve(from, to))
     const pending = optimizeWaypointOrder({ session, waypointIds: ['A', 'B'] })
     await jest.runAllTimersAsync()
     const result = await pending
     if (throttled === 'all') {
-      expect(result).toMatchObject({ success: false, error: 'AMAP_RATE_LIMITED' })
+      expect(result).toMatchObject({ success: false, error: code })
     } else {
       const expected = throttled === 'A->B' ? ['B', 'A'] : ['A', 'B']
       expect(result).toMatchObject({ success: true, recommendedWaypointIds: expected })

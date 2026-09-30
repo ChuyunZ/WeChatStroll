@@ -126,7 +126,7 @@ test('start recording failure fails closed, retains the lease and later recovers
     backing.failure = new Error('secret database internals')
     return ok
   }) })
-  await expect(first.call()).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(first.call()).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   expect(first.request).toHaveBeenCalledTimes(1)
   expect(first.log).toHaveBeenCalledWith({ event: 'start_record_failed', operation: 'walkingRoute' })
   const state = backing.documents.get('amap:walking')
@@ -155,7 +155,7 @@ test('late finalizer cannot overwrite or release a successor lease', async () =>
     }
   } })
   const first = worker(backing)
-  const firstAssertion = expect(first.call()).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  const firstAssertion = expect(first.call()).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   await jest.advanceTimersByTimeAsync(450)
   const oldOwner = backing.documents.get('amap:walking').leaseOwner
   const second = worker(backing)
@@ -197,7 +197,7 @@ test('waiting for another lease respects the fixed queue deadline', async () => 
   const backing = createTestStore()
   await worker(backing).limiter.acquire(scopes, Date.now() + 5000, 'walkingRoute')
   const second = worker(backing, { service: { maxQueueWaitMs: 150 } })
-  const assertion = expect(second.call()).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  const assertion = expect(second.call()).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   await jest.runAllTimersAsync()
   await assertion
   expect(Date.now()).toBe(100150)
@@ -230,7 +230,7 @@ test('late QPS response publishes cooldown but cannot reset the original queue d
   const backing = createTestStore()
   const instance = worker(backing, { service: { maxQueueWaitMs: 100 },
     request: jest.fn(async () => { await sleep(1000); return { data: { infocode: '10021' } } }) })
-  const assertion = expect(instance.call()).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  const assertion = expect(instance.call()).rejects.toMatchObject({ code: 'PROVIDER_BUSY' })
   await jest.runAllTimersAsync()
   await assertion
   expect(instance.request).toHaveBeenCalledTimes(1)
@@ -259,7 +259,7 @@ test('record failure still publishes QPS cooldown and never retries HTTP directl
     }
   } })
   const instance = worker(backing, { request: jest.fn(async () => ({ data: { infocode: '10023' } })) })
-  await expect(instance.call()).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+  await expect(instance.call()).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   expect(instance.request).toHaveBeenCalledTimes(1)
   expect(backing.documents.get('amap:key').cooldownUntilMs).toBe(100300)
   expect(backing.documents.get('amap:walking').leaseOwner).toEqual(expect.any(String))

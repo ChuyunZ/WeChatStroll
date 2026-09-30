@@ -209,11 +209,11 @@ test('route-build failures emit their stage and directed edge instead of bypassi
   } finally { warn.mockRestore() }
 })
 
-test('exhausted rate limiting produces a temporary generation error, not an empty geographic result', async () => {
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('exhausted rate limiting produces a temporary generation error, not an empty geographic result', async code => {
   jest.useFakeTimers()
   try {
-    getWalkingSegment.mockResolvedValue({ success: false, error: 'AMAP_RATE_LIMITED' })
-    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+    getWalkingSegment.mockResolvedValue({ success: false, error: code })
+    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: code })
     await jest.runAllTimersAsync()
     await assertion
   } finally { jest.useRealTimers() }
@@ -440,11 +440,11 @@ test('directed unwalkable observations omit provider data and precise location',
   } finally { log.mockRestore(); warn.mockRestore() }
 })
 
-test('rate limiting stops before another candidate, another AI call, or fallback', async () => {
+test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('rate limiting stops before another candidate, another AI call, or fallback', async code => {
   jest.useFakeTimers()
   try {
-    getWalkingSegment.mockResolvedValue({ success: false, error: 'AMAP_RATE_LIMITED' })
-    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+    getWalkingSegment.mockResolvedValue({ success: false, error: code })
+    const assertion = expect(generateRoutes(preferences)).rejects.toMatchObject({ code: code })
     await jest.runAllTimersAsync()
     await assertion
     expect(aiCalls()).toHaveLength(1)

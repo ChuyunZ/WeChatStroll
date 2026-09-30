@@ -25,12 +25,9 @@ function businessResult(value) {
 
 exports.main = async (event, context = {}) => {
   const log = record => console.info('[AMap Legacy Wrapper]', { ...record, action: ACTION })
-  const startedAt = Date.now()
   let timer
-  let heartbeat
-  let stage = 'initializing'
   context.callbackWaitsForEmptyEventLoop = false
-  log({ event: 'forward_start', target: 'amapProvider', transport: 'cloudbase-node-3.17.2', revision: 'forward-diagnostics-v2',
+  log({ event: 'forward_start', target: 'amapProvider', transport: 'cloudbase-node-3.17.2',
     timeoutMs: 60000, executionLimitMs: Number.isFinite(context.time_limit_in_ms) ? context.time_limit_in_ms : null })
   try {
     // The watchdog bounds a never-settling SDK promise independently of the
@@ -42,23 +39,13 @@ exports.main = async (event, context = {}) => {
     // Use documented Node SDK transport options; wx-server-sdk ignores slow.
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV,
       timeout: 60000, retries: 0, keepalive: false })
-    log({ event: 'forward_initialized', elapsedMs: Date.now() - startedAt })
-    stage = 'invoking_sdk'
     const invocation = app.callFunction({
       name: 'amapProvider', data: { ...(event || {}), action: ACTION }
     }, { timeout: 60000, retryOptions: { retries: 0 } })
-    stage = 'awaiting_sdk'
-    // This confirms only that the SDK returned a promise, not child execution.
-    log({ event: 'forward_dispatched', elapsedMs: Date.now() - startedAt })
-    heartbeat = setInterval(() => log({ event: 'forward_pending', stage,
-      elapsedMs: Date.now() - startedAt }), 5000)
     const response = await Promise.race([invocation, deadline])
-    stage = 'processing_result'
     // The Node SDK can resolve infrastructure failures as error envelopes.
     if (response && response.code) throw new Error('Gateway invocation failed')
     const raw = response && response.result
-    log({ event: 'forward_resolved', hasResult: raw != null,
-      resultType: typeof raw, resultSuccessType: raw == null ? 'missing' : typeof raw.success })
     const result = businessResult(raw)
     if (result) {
       log({ event: 'forward_return', success: result.success })
@@ -69,8 +56,6 @@ exports.main = async (event, context = {}) => {
     log({ event: 'forward_failed', code: diagnosticCode(error) })
   } finally {
     clearTimeout(timer)
-    clearInterval(heartbeat)
-    log({ event: 'forward_finished', stage, elapsedMs: Date.now() - startedAt })
   }
   return { success: false, error: {
     code: 'PROVIDER_GATEWAY_FAILED', message: 'Unable to contact the provider gateway'

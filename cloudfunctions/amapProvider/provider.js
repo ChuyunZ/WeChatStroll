@@ -1,4 +1,4 @@
-const { busy } = require('./limiter')
+const { rateLimited, gatewayFailed, infrastructureFailure } = require('./errors')
 const QPS_CODES = new Set(['10019', '10020', '10021', '10022', '10023'])
 
 function rateLimitCode(data) {
@@ -23,9 +23,9 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
             log({ event: 'provider_start', operation, scope: config.scope, startedAtMs, waitMs, attempt })
             return request(url, { ...options, timeout: limits.requestTimeoutMs })
           })
-        } catch (_) {
+        } catch (error) {
           log({ event: 'acquisition_failed', operation })
-          throw busy() // Fail closed on DB outages, corrupt state and contention.
+          throw infrastructureFailure(error) // Fail closed without claiming AMap QPS feedback.
         }
         // The queue deadline controls new starts, not completion of in-flight
         // HTTP or its start record. Still publish QPS feedback if recording failed.
@@ -34,7 +34,7 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
         const error = outcome.error
         const infocode = rateLimitCode(error ? error.response && error.response.data : response && response.data)
         if (!infocode) {
-          if (!execution.recorded) throw busy()
+          if (!execution.recorded) throw infrastructureFailure(execution.recordingError)
           if (error) {
             log({ event: 'provider_failed', operation, attempt })
             throw error
@@ -45,14 +45,15 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
         log({ event: 'rate_limited', operation, scope, attempt, infocode })
         try {
           await limiter.cooldown(scope, config.cooldownBaseMs * attempt, operation)
-        } catch (_) {
+        } catch (error) {
           log({ event: 'cooldown_failed', operation, scope })
-          throw busy() // Never retry without successfully publishing feedback.
+          throw infrastructureFailure(error) // Never retry without successfully publishing feedback.
         }
-        if (!execution.recorded || attempt === config.maxProviderAttempts) throw busy()
+        if (!execution.recorded) throw infrastructureFailure(execution.recordingError)
+        if (attempt === config.maxProviderAttempts) throw rateLimited()
         // Every retry reacquires all scopes; no direct HTTP retry path.
       }
-      throw busy()
+      throw gatewayFailed()
     }
   }
 }

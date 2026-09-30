@@ -1,9 +1,7 @@
 const { randomBytes } = require('crypto')
 const { isTransactionConflict } = require('./cloudbase-store')
 
-function busy() {
-  return Object.assign(new Error('Provider is temporarily busy'), { code: 'AMAP_RATE_LIMITED' })
-}
+const { providerBusy, gatewayFailed, infrastructureFailure } = require('./errors')
 
 function stateOf(data) {
   const state = data || { nextAllowedAtMs: 0, cooldownUntilMs: 0 }
@@ -14,11 +12,11 @@ function stateOf(data) {
     leaseUntilMs: state.leaseUntilMs === undefined ? 0 : state.leaseUntilMs
   }
   for (const value of [state.nextAllowedAtMs, state.cooldownUntilMs, lease.leaseStartBeforeMs, lease.leaseUntilMs]) {
-    if (!Number.isSafeInteger(value) || value < 0) throw busy()
+    if (!Number.isSafeInteger(value) || value < 0) throw gatewayFailed()
   }
   if (lease.leaseOwner !== null && (typeof lease.leaseOwner !== 'string' || !lease.leaseOwner ||
-    lease.leaseUntilMs <= lease.leaseStartBeforeMs)) throw busy()
-  if (lease.leaseOwner === null && (lease.leaseUntilMs || lease.leaseStartBeforeMs)) throw busy()
+    lease.leaseUntilMs <= lease.leaseStartBeforeMs)) throw gatewayFailed()
+  if (lease.leaseOwner === null && (lease.leaseUntilMs || lease.leaseStartBeforeMs)) throw gatewayFailed()
   return { nextAllowedAtMs: state.nextAllowedAtMs, cooldownUntilMs: state.cooldownUntilMs, ...lease }
 }
 
@@ -32,7 +30,7 @@ function createLimiter({ store, now = Date.now,
   transactionMaxAttempts = 6, transactionJitterMs = 40 }) {
   function queueExpired(operation, startedAt) {
     log({ event: 'queue_deadline_exceeded', operation, waitMs: now() - startedAt })
-    return busy()
+    return providerBusy()
   }
 
   async function transact(work, deadline, operation) {
@@ -42,9 +40,9 @@ function createLimiter({ store, now = Date.now,
       try {
         return await store.transaction(work)
       } catch (error) {
-        if (!isTransactionConflict(error)) throw error
+        if (!isTransactionConflict(error)) throw infrastructureFailure(error)
         log({ event: 'transaction_conflict', operation, transactionAttempt: attempt })
-        if (attempt === transactionMaxAttempts) throw busy()
+        if (attempt === transactionMaxAttempts) throw providerBusy()
         const delay = 1 + Math.floor(random() * transactionJitterMs)
         if (now() + delay > deadline) throw queueExpired(operation, startedAt)
         await sleep(delay) // The store has already rolled back.
@@ -143,7 +141,7 @@ function createLimiter({ store, now = Date.now,
     return transact(async tx => {
       const states = await readScopes(tx, lease.scopes)
       if (!lease.scopes.every((scope, i) => scope.minIntervalMs === 0 ||
-        states[i].leaseOwner === lease.owner)) throw busy()
+        states[i].leaseOwner === lease.owner)) throw gatewayFailed()
       for (let i = 0; i < lease.scopes.length; i++) {
         const scope = lease.scopes[i]
         if (scope.minIntervalMs === 0) continue
@@ -179,14 +177,16 @@ function createLimiter({ store, now = Date.now,
       catch (error) { response = Promise.reject(error) }
       const outcome = response.then(value => ({ value }), error => ({ error }))
       let recorded = true
+      let recordingError
       try { await recordStart(lease, startedAtMs, operation) }
-      catch (_) {
+      catch (error) {
         recorded = false
+        recordingError = infrastructureFailure(error)
         log({ event: 'start_record_failed', operation })
         // Never blindly unlock after HTTP. The safety tail protects crash/failure
         // recovery even if neither start time nor response can be persisted.
       }
-      return { outcome, recorded }
+      return { outcome, recorded, recordingError }
     }
     throw queueExpired(operation, queuedAt)
   }
@@ -206,4 +206,4 @@ function createLimiter({ store, now = Date.now,
   return { acquire, execute, cooldown }
 }
 
-module.exports = { createLimiter, busy }
+module.exports = { createLimiter }

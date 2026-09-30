@@ -104,7 +104,7 @@ test('queue exhaustion returns normalized business error and sanitized logs', as
   store.documents.set('amap:key', { nextAllowedAtMs: 0, cooldownUntilMs: 200000 })
   for (const event of [walking, nearby]) {
     const result = await main(event)
-    expect(result).toMatchObject({ success: false, error: { code: 'AMAP_RATE_LIMITED' } })
+    expect(result).toMatchObject({ success: false, error: { code: 'PROVIDER_BUSY' } })
     expect(Object.keys(result).sort()).toEqual(['error', 'success'])
   }
   expect(axios.get).not.toHaveBeenCalled()
@@ -120,4 +120,24 @@ test('gateway retry normalizes HTTP QPS failure without leaking raw request or p
   expect(result).toMatchObject({ success: false, error: { code: 'AMAP_RATE_LIMITED' } })
   expect(axios.get).toHaveBeenCalledTimes(2)
   expect(JSON.stringify([result, console.info.mock.calls])).not.toMatch(/secret|coordinates|payload|120,30/)
+})
+
+test.each([walking, nearby])('unexpected gateway initialization failure is sanitized (%j)', async event => {
+  createCloudBaseStore.mockImplementationOnce(() => { throw new Error('private database internals') })
+  const result = await main(event)
+  expect(result).toMatchObject({ success: false, error: { code: 'PROVIDER_GATEWAY_FAILED' } })
+  expect(axios.get).not.toHaveBeenCalled()
+  expect(JSON.stringify([result, console.info.mock.calls])).not.toContain('private')
+})
+
+test('invalid limiter configuration fails neutrally before HTTP', async () => {
+  const previous = process.env.AMAP_WALKING_MIN_INTERVAL_MS
+  process.env.AMAP_WALKING_MIN_INTERVAL_MS = 'invalid'
+  try {
+    expect(await main(walking)).toMatchObject({ success: false, error: { code: 'PROVIDER_GATEWAY_FAILED' } })
+    expect(axios.get).not.toHaveBeenCalled()
+  } finally {
+    if (previous === undefined) delete process.env.AMAP_WALKING_MIN_INTERVAL_MS
+    else process.env.AMAP_WALKING_MIN_INTERVAL_MS = previous
+  }
 })
