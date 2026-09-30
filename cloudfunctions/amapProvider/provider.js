@@ -1,21 +1,29 @@
 const { rateLimited, gatewayFailed, infrastructureFailure } = require('./errors')
 const QPS_CODES = new Set(['10019', '10020', '10021', '10022', '10023'])
+const QPS_INFOS = new Map([
+  ['CQPS_HAS_EXCEEDED_THE_LIMIT', '10019'],
+  ['CKQPS_HAS_EXCEEDED_THE_LIMIT', '10020'],
+  ['CUQPS_HAS_EXCEEDED_THE_LIMIT', '10021'],
+  ['CIKQPS_HAS_EXCEEDED_THE_LIMIT', '10022'],
+  ['KQPS_HAS_EXCEEDED_THE_LIMIT', '10023']
+])
 
 function rateLimitCode(data) {
   const code = String(data && data.infocode)
-  return QPS_CODES.has(code) ? code : null
+  if (QPS_CODES.has(code)) return code
+  const info = data && typeof data.info === 'string' ? data.info.trim() : ''
+  return QPS_INFOS.get(info) || null
 }
 
 function createProvider({ limiter, limits, request, now = Date.now, log = () => {} }) {
-  // One context per cloud invocation; POI categories and retries share deadline.
   return function forOperation(operation) {
     const config = limits[operation]
-    const deadline = now() + config.maxQueueWaitMs
     const scopes = [
       { id: 'amap:key', minIntervalMs: limits.keyMinIntervalMs },
       { id: config.scope, minIntervalMs: config.minIntervalMs }
     ]
     return async function providerRequest(url, options) {
+      const deadline = now() + config.maxQueueWaitMs
       for (let attempt = 1; attempt <= config.maxProviderAttempts; attempt++) {
         let execution
         try {

@@ -5,6 +5,7 @@ const { loadLimits } = require('./config')
 
 const success = { data: { status: '1' } }
 const limited = infocode => ({ data: { status: '0', infocode } })
+const limitedInfo = info => ({ data: { status: '0', info } })
 const scopes = [{ id: 'amap:key', minIntervalMs: 0 }, { id: 'amap:walking', minIntervalMs: 100 }]
 
 function client(store, request = jest.fn(async () => success), overrides = {}) {
@@ -74,6 +75,25 @@ test.each(['10019', '10020', '10021', '10022', '10023', 10021])(
     expect(poi.request).toHaveBeenCalledTimes(1)
   })
 
+test.each([
+  ['CQPS_HAS_EXCEEDED_THE_LIMIT', 'amap:walking'],
+  ['CKQPS_HAS_EXCEEDED_THE_LIMIT', 'amap:walking'],
+  ['CUQPS_HAS_EXCEEDED_THE_LIMIT', 'amap:walking'],
+  ['CIKQPS_HAS_EXCEEDED_THE_LIMIT', 'amap:walking'],
+  ['KQPS_HAS_EXCEEDED_THE_LIMIT', 'amap:key']
+])('%s publishes cooldown to %s', async (info, expectedScope) => {
+  const store = createTestStore()
+  const instance = client(store, jest.fn(async () => limitedInfo(info)), {
+    walkingRoute: { maxProviderAttempts: 1 }
+  })
+
+  await expect(instance.provider('walkingRoute')('unused', {}))
+    .rejects.toMatchObject({ code: 'AMAP_RATE_LIMITED' })
+
+  expect(store.documents.get(expectedScope).cooldownUntilMs).toBe(100300)
+  expect(instance.request).toHaveBeenCalledTimes(1)
+})
+
 test('waiting callers recheck a newly published cooldown instead of using old future reservations', async () => {
   const store = createTestStore()
   await client(store).limiter.execute(scopes, Date.now() + 5000, 'walkingRoute', async () => success)
@@ -135,6 +155,38 @@ test('queue deadline stops before HTTP and does not reserve a future slot', asyn
   expect(instance.request).not.toHaveBeenCalled()
   expect(JSON.stringify([...store.documents])).toBe(before)
   expect(instance.log).toHaveBeenCalledWith(expect.objectContaining({ event: 'queue_deadline_exceeded' }))
+})
+
+test('each provider request gets a fresh queue deadline', async () => {
+  const store = createTestStore()
+
+  const request = jest.fn()
+    .mockImplementationOnce(() =>
+      new Promise(resolve =>
+        setTimeout(() => resolve(success), 6000)
+      )
+    )
+    .mockResolvedValue(success)
+
+  const instance = client(store, request, {
+    walkingRoute: { maxQueueWaitMs: 5000 }
+  })
+
+  const providerRequest =
+    instance.provider('walkingRoute')
+
+  const first =
+    providerRequest('unused', {})
+
+  await jest.runAllTimersAsync()
+
+  expect(await first).toBe(success)
+
+  await expect(
+    providerRequest('unused', {})
+  ).resolves.toBe(success)
+
+  expect(request).toHaveBeenCalledTimes(2)
 })
 
 test('retry shares original deadline instead of resetting its queue budget', async () => {
