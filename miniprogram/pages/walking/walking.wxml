@@ -1,3 +1,12 @@
+<view class="custom-navigation" style="padding-top: {{statusBarHeight}}px;">
+  <view class="custom-navigation-bar" style="height: {{navigationBarHeight}}px;">
+    <view class="custom-back" bindtap="handleNavigationBack">
+      <text class="custom-back-icon">‹</text>
+    </view>
+    <text class="custom-navigation-title">正在散步</text>
+  </view>
+</view>
+
 <view class="page">
 
   <!-- Loading -->

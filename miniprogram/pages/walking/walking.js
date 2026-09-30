@@ -57,7 +57,10 @@ Page({
     mapPolyline: [],
     markers: [],
 
-    displayPois: []
+    displayPois: [],
+
+    statusBarHeight: 20,
+    navigationBarHeight: 44
   },
 
   onLoad(options = {}) {
@@ -67,6 +70,8 @@ Page({
     this._timer = null;
     this._route = null;
     this._startTimeMs = null;
+
+    this.initializeNavigationBar();
 
     const routeId = options.routeId;
 
@@ -145,6 +150,44 @@ Page({
   onHide() {
     this._pageVisible = false;
     this.stopTimer();
+  },
+
+  initializeNavigationBar() {
+    let statusBarHeight = 20;
+    let navigationBarHeight = 44;
+
+    try {
+      const windowInfo =
+        typeof wx.getWindowInfo === "function"
+          ? wx.getWindowInfo()
+          : typeof wx.getSystemInfoSync === "function"
+            ? wx.getSystemInfoSync()
+            : {};
+
+      if (Number.isFinite(windowInfo.statusBarHeight)) {
+        statusBarHeight = windowInfo.statusBarHeight;
+      }
+
+      if (typeof wx.getMenuButtonBoundingClientRect === "function") {
+        const menuButton = wx.getMenuButtonBoundingClientRect();
+
+        if (
+          menuButton &&
+          Number.isFinite(menuButton.top) &&
+          Number.isFinite(menuButton.height)
+        ) {
+          const verticalGap = Math.max(0, menuButton.top - statusBarHeight);
+          navigationBarHeight = menuButton.height + verticalGap * 2;
+        }
+      }
+    } catch (error) {
+      // Keep safe defaults when navigation metrics are unavailable.
+    }
+
+    this.setData({
+      statusBarHeight,
+      navigationBarHeight
+    });
   },
 
   onUnload() {
@@ -377,6 +420,30 @@ Page({
     wx.disableAlertBeforeUnload();
   },
 
+  handleNavigationBack() {
+    if (!this._active || this.data.ended) {
+      wx.navigateBack();
+      return;
+    }
+
+    if (this._finishing) {
+      return;
+    }
+
+    wx.showModal({
+      title: "散步正在进行",
+      content: "当前路线已锁定。如需更换路线，请先提前结束本次散步。",
+      confirmText: "提前结束",
+      cancelText: "继续散步",
+
+      success: res => {
+        if (res.confirm) {
+          this.completeWalk("ended_early");
+        }
+      }
+    });
+  },
+
   finishWalk() {
     this.completeWalk("completed");
   },
@@ -429,11 +496,14 @@ Page({
     };
 
     try {
+      activeWalkSessionService.savePendingWalkResult(walkResult);
+
       const cleared = activeWalkSessionService.clearActiveWalkSession(
         this._route.routeId
       );
 
       if (!cleared) {
+        activeWalkSessionService.clearPendingWalkResult();
         throw new Error("Active walk session changed.");
       }
     } catch (error) {
@@ -457,17 +527,14 @@ Page({
       ended: true
     });
 
-    wx.navigateTo({
+    wx.reLaunch({
       url: `/pages/feedback/feedback?routeId=${encodeURIComponent(
         this._route.routeId
       )}`,
 
-      success(res) {
-        res.eventChannel.emit("walkResult", walkResult);
-      },
-
       fail: () => {
         try {
+          activeWalkSessionService.clearPendingWalkResult();
           activeWalkSessionService.createActiveWalkSession(
             this._route,
             this._startTimeMs

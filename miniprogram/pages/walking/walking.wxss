@@ -2,6 +2,48 @@ page {
   background: #f7f8f5;
 }
 
+.custom-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: #ffffff;
+}
+
+.custom-navigation-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.custom-back {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 96rpx;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding-left: 24rpx;
+  box-sizing: border-box;
+}
+
+.custom-back-icon {
+  margin-top: -4rpx;
+  font-size: 56rpx;
+  line-height: 1;
+  font-weight: 300;
+  color: #222222;
+}
+
+.custom-navigation-title {
+  font-size: 28rpx;
+  line-height: 40rpx;
+  font-weight: 600;
+  color: #222222;
+  pointer-events: none;
+}
+
 .page {
   min-height: 100vh;
   padding: 36rpx 30rpx 60rpx;

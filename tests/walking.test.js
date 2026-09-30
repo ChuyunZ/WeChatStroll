@@ -41,6 +41,7 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     disableAlertBeforeUnload: jest.fn(),
     navigateBack: jest.fn(),
     navigateTo: jest.fn(),
+    reLaunch: jest.fn(),
     showModal: jest.fn(),
     showToast: jest.fn(),
     getStorageSync: jest.fn(key => storage[key]),
@@ -49,7 +50,14 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     }),
     removeStorageSync: jest.fn(key => {
       delete storage[key];
-    })
+    }),
+    getWindowInfo: jest.fn(() => ({
+      statusBarHeight: 20
+    })),
+    getMenuButtonBoundingClientRect: jest.fn(() => ({
+      top: 24,
+      height: 32
+    }))
   };
 
   require("../miniprogram/pages/walking/walking");
@@ -258,15 +266,9 @@ describe("Walking page", () => {
   expect(jest.getTimerCount()).toBe(1);
 });
 
-  test("finishing a walk sends the walk result to Feedback", () => {
-    const feedbackEventChannel = {
-      emit: jest.fn()
-    };
-
-    wx.navigateTo.mockImplementation(options => {
-      options.success({
-        eventChannel: feedbackEventChannel
-      });
+  test("finishing a walk stores the result and resets navigation to Feedback", () => {
+    wx.reLaunch.mockImplementation(options => {
+      if (options.success) options.success();
     });
 
     page.loadWalkingRoute(TEST_ROUTE);
@@ -275,16 +277,15 @@ describe("Walking page", () => {
 
     page.finishWalk();
 
-    expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+    expect(wx.reLaunch).toHaveBeenCalledTimes(1);
 
-    const navigateOptions = wx.navigateTo.mock.calls[0][0];
+    const navigationOptions = wx.reLaunch.mock.calls[0][0];
 
-    expect(navigateOptions.url).toBe(
+    expect(navigationOptions.url).toBe(
       `/pages/feedback/feedback?routeId=${encodeURIComponent(TEST_ROUTE.routeId)}`
     );
 
-    expect(feedbackEventChannel.emit).toHaveBeenCalledWith(
-      "walkResult",
+    expect(wx.getStorageSync("pendingWalkResult")).toEqual(
       expect.objectContaining({
         routeId: TEST_ROUTE.routeId,
         route: TEST_ROUTE,
@@ -303,14 +304,8 @@ describe("Walking page", () => {
   });
 
   test("finishing clears the local active-walk lock", () => {
-    const feedbackEventChannel = {
-      emit: jest.fn()
-    };
-
-    wx.navigateTo.mockImplementation(options => {
-      options.success({
-        eventChannel: feedbackEventChannel
-      });
+    wx.reLaunch.mockImplementation(options => {
+      if (options.success) options.success();
     });
 
     page.onLoad({
@@ -325,10 +320,6 @@ describe("Walking page", () => {
   });
 
   test("confirming early end records ended_early", () => {
-    const feedbackEventChannel = {
-      emit: jest.fn()
-    };
-
     wx.showModal.mockImplementation(options => {
       options.success({
         confirm: true,
@@ -336,10 +327,8 @@ describe("Walking page", () => {
       });
     });
 
-    wx.navigateTo.mockImplementation(options => {
-      options.success({
-        eventChannel: feedbackEventChannel
-      });
+    wx.reLaunch.mockImplementation(options => {
+      if (options.success) options.success();
     });
 
     page.loadWalkingRoute(TEST_ROUTE);
@@ -353,12 +342,13 @@ describe("Walking page", () => {
       })
     );
 
-    expect(feedbackEventChannel.emit).toHaveBeenCalledWith(
-      "walkResult",
+    expect(wx.getStorageSync("pendingWalkResult")).toEqual(
       expect.objectContaining({
         completionStatus: "ended_early"
       })
     );
+
+    expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
   test("canceling early end keeps the walk active", () => {
@@ -372,7 +362,7 @@ describe("Walking page", () => {
     page.loadWalkingRoute(TEST_ROUTE);
     page.endWalkEarly();
 
-    expect(wx.navigateTo).not.toHaveBeenCalled();
+    expect(wx.reLaunch).not.toHaveBeenCalled();
     expect(page._active).toBe(true);
     expect(page.data.ended).toBe(false);
   });
@@ -383,11 +373,11 @@ describe("Walking page", () => {
     page.finishWalk();
     page.finishWalk();
 
-    expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+    expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
   test("restores the active walk when opening Feedback fails", () => {
-  wx.navigateTo.mockImplementation(options => {
+  wx.reLaunch.mockImplementation(options => {
     options.fail();
   });
 
@@ -413,8 +403,36 @@ describe("Walking page", () => {
       startTimeMs: new Date("2026-10-01T12:00:00.000Z").getTime()
     })
   );
+  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
   expect(jest.getTimerCount()).toBe(1);
 });
+
+  test("custom back keeps the active route locked unless the user ends early", () => {
+    wx.showModal.mockImplementation(options => {
+      options.success({
+        confirm: false,
+        cancel: true
+      });
+    });
+
+    page.onLoad({
+      routeId: TEST_ROUTE.routeId
+    });
+
+    page.handleNavigationBack();
+
+    expect(wx.showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "散步正在进行",
+        confirmText: "提前结束",
+        cancelText: "继续散步"
+      })
+    );
+
+    expect(wx.navigateBack).not.toHaveBeenCalled();
+    expect(wx.reLaunch).not.toHaveBeenCalled();
+    expect(page._active).toBe(true);
+  });
 
   test("protects an active walk from accidental page exit", () => {
     page.loadWalkingRoute(TEST_ROUTE);
