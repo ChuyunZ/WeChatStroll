@@ -342,9 +342,9 @@ async function searchNearbyPois(
         radius
       },
       {
-        fallbackCode: 'POI_SEARCH_FAILED',
+        fallbackCode: 'PROVIDER_GATEWAY_FAILED',
         fallbackMessage:
-          'Unable to retrieve nearby places.'
+          'Route service is temporarily unavailable.'
       }
     )
 

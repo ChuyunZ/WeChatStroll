@@ -123,6 +123,42 @@ afterEach(() => {
   delete global.wx
 })
 
+test.each(['transport', 'missing', 'empty', 'invalid-failure', 'business'])(
+  'POI gateway boundary preserves the distinction for %s', async mode => {
+    if (mode === 'transport') wx.cloud.callFunction.mockRejectedValue(new Error('private network details'))
+    else wx.cloud.callFunction.mockResolvedValue({
+      missing: undefined,
+      empty: {},
+      'invalid-failure': { result: { success: false } },
+      business: { result: { success: false, error: { code: 'POI_SEARCH_FAILED', message: 'Unable to retrieve nearby places' } } }
+    }[mode])
+    await expect(routeGenerationService.generateRoutes({ durationMinutes: 45, routeType: 'point_to_point' }))
+      .rejects.toMatchObject({ code: mode === 'business' ? 'POI_SEARCH_FAILED' : 'PROVIDER_GATEWAY_FAILED' })
+    expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
+    expect(wx.cloud.callFunction).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'amapProvider', data: expect.objectContaining({ action: 'nearbyPois' })
+    }))
+  })
+
+test('walking transport failure stops generation without retry, AI replanning or fallback', async () => {
+  wx.cloud.callFunction.mockImplementation(async ({ name, data }) => {
+    if (name === 'aiRoutePlanner') return { result: { success: true, plan: {
+      candidates: [
+        { waypoints: [{ poiId: PARK_POI.poiId }] },
+        { waypoints: [{ poiId: WATER_POI.poiId }] }
+      ]
+    } } }
+    if (name === 'amapProvider' && data.action === 'nearbyPois') {
+      return { result: { success: true, poisByCategory: createPoisByCategory() } }
+    }
+    throw new Error('private transport details')
+  })
+  await expect(routeGenerationService.generateRoutes({ durationMinutes: 45, routeType: 'point_to_point' }))
+    .rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED', message: 'Route service is temporarily unavailable.' })
+  expect(wx.cloud.callFunction.mock.calls.map(([{ name, data }]) => data.action || name))
+    .toEqual(['nearbyPois', 'aiRoutePlanner', 'walkingRoute'])
+})
+
 describe('route-generation service', () => {
   test(
     'selectNearestPoi returns the nearest valid POI',

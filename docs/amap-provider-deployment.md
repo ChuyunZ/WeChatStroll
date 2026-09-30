@@ -16,8 +16,9 @@ limiter. Function directories remain independently deployable.
 The old client scheduler, its 400 ms interval, retry delays and obsolete tests
 are removed. Route Engine still permits four logical segment requests in parallel
 and deduplicates directed edges with its session Promise cache. Each segment calls
-the backend once. No optimizer, validation threshold, agentic replanning, editing
-UX or persistent L2 cache (#64) was changed.
+the backend once. No optimizer algorithm, validation threshold, agentic replanning
+strategy, editing UX or persistent L2 cache (#64) behavior was changed; only
+temporary-provider error propagation was extended.
 
 ## Shared state and transactions
 

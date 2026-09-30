@@ -6,6 +6,21 @@ const pool = ['A', 'B', 'C'].map((poiId, i) => ({ poiId, latitude: 30 + i / 100,
 const order = { allowedWaypointIds: ['A'], orderedWaypointIds: ['A'] }
 const success = (from, to) => ({ success: true, durationSeconds: 10, distanceMeters: 20, polyline: [from, to] })
 
+test('cloud transport rejection stays temporary through optimization and repeated evaluation', async () => {
+  global.wx = { cloud: { callFunction: jest.fn().mockRejectedValue(new Error('private transport details')) } }
+  try {
+    const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool })
+    expect(await optimizeWaypointOrder({ session, waypointIds: ['A'] }))
+      .toMatchObject({ success: false, error: 'PROVIDER_GATEWAY_FAILED' })
+    expect(await session.evaluateRouteOrder(order)).toMatchObject({
+      error: 'PROVIDER_GATEWAY_FAILED',
+      failedSegment: { error: 'PROVIDER_GATEWAY_FAILED', causeCode: 'PROVIDER_GATEWAY_FAILED' }
+    })
+    expect(session.getCachedSegmentCosts()).toEqual([])
+    expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
+  } finally { delete global.wx }
+})
+
 test('logical segment concurrency stays bounded and has no client QPS timers', async () => {
   jest.useFakeTimers()
   try {

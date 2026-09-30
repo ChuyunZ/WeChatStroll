@@ -214,8 +214,8 @@ async function getWalkingSegment(
         destination: copyGeoPoint(toPoint)
       },
       {
-        fallbackCode: 'WALKING_ROUTE_FAILED',
-        fallbackMessage: 'Unable to retrieve walking route.'
+        fallbackCode: 'PROVIDER_GATEWAY_FAILED',
+        fallbackMessage: 'Route service is temporarily unavailable.'
       }
     )
   } catch (error) {
