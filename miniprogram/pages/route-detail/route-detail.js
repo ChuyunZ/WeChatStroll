@@ -2,6 +2,7 @@ const { mockRoutes } = require("../../data/mock-routes");
 const { isValidGeoPoint } = require("../../utils/geo");
 const { buildRouteMap } = require("../../utils/route-map");
 const { isValidEditableOrder } = require("../../services/route-editing");
+const activeWalkSessionService = require("../../services/active-walk-session");
 const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
@@ -31,6 +32,7 @@ Page({
   },
 
   onLoad(options = {}) {
+    this._unloaded = false;
     const routeId = options.id;
 
     // 正常从 Routes 页面进入时，
@@ -79,6 +81,48 @@ Page({
     );
 
     this.loadRoute(mockRoute);
+  },
+
+  onShow() {
+    if (this._unloaded || this._startingWalk || this._activeWalkRedirecting) {
+      return;
+    }
+
+    let activeSession;
+
+    try {
+      activeSession = activeWalkSessionService.getActiveWalkSession();
+    } catch (error) {
+      console.warn("[Route Detail] Unable to read active walk session.");
+      return;
+    }
+
+    if (activeSession) {
+      this.resumeActiveWalk(activeSession);
+    }
+  },
+
+  resumeActiveWalk(activeSession) {
+    if (!activeSession || this._activeWalkRedirecting) {
+      return;
+    }
+
+    this._activeWalkRedirecting = true;
+
+    wx.navigateTo({
+      url: `/pages/walking/walking?routeId=${encodeURIComponent(activeSession.routeId)}`,
+
+      fail: () => {
+        wx.showToast({
+          title: "暂时无法恢复正在进行的散步",
+          icon: "none"
+        });
+      },
+
+      complete: () => {
+        this._activeWalkRedirecting = false;
+      }
+    });
   },
 
   loadRoute(route) {
@@ -371,10 +415,114 @@ Page({
   },
 
   startWalk() {
-    if (this.data.editing) return;
-    wx.showToast({
-      title: "准备开始散步",
-      icon: "none"
+    if (
+      this.data.editing ||
+      this._startPromptOpen ||
+      this._startingWalk ||
+      !this.isValidRoute(this._confirmedRoute)
+    ) {
+      return;
+    }
+
+    let activeSession;
+
+    try {
+      activeSession = activeWalkSessionService.getActiveWalkSession();
+    } catch (error) {
+      wx.showToast({
+        title: "暂时无法读取散步状态",
+        icon: "none"
+      });
+      return;
+    }
+
+    if (activeSession) {
+      this.resumeActiveWalk(activeSession);
+      return;
+    }
+
+    const route = this._confirmedRoute;
+    const distanceKm = (route.distanceMeters / 1000).toFixed(1);
+
+    this._startPromptOpen = true;
+
+    wx.showModal({
+      title: "确认开始这次散步？",
+      content:
+        `开始后将锁定当前路线，结束本次散步前无法更换路线。\n预计 ${route.durationMinutes} 分钟 · ${distanceKm} 公里`,
+      confirmText: "开始散步",
+      cancelText: "再看看",
+
+      success: res => {
+        this._startPromptOpen = false;
+
+        if (!res.confirm) {
+          return;
+        }
+
+        this._startingWalk = true;
+
+        let sessionResult;
+
+        try {
+          sessionResult = activeWalkSessionService.createActiveWalkSession(route);
+        } catch (error) {
+          this._startingWalk = false;
+          wx.showToast({
+            title: "暂时无法开始散步",
+            icon: "none"
+          });
+          return;
+        }
+
+        const { session, created } = sessionResult;
+
+        if (!created && session.routeId !== route.routeId) {
+          this._startingWalk = false;
+          this.resumeActiveWalk(session);
+          return;
+        }
+
+        wx.navigateTo({
+          url: `/pages/walking/walking?routeId=${encodeURIComponent(session.routeId)}`,
+
+          success(navigateResult) {
+            if (
+              navigateResult.eventChannel &&
+              typeof navigateResult.eventChannel.emit === "function"
+            ) {
+              navigateResult.eventChannel.emit("walkingRoute", session.route);
+            }
+          },
+
+          fail: () => {
+            if (created) {
+              try {
+                activeWalkSessionService.clearActiveWalkSession(session.routeId);
+              } catch (error) {
+                console.warn("[Route Detail] Unable to clear failed walk session.");
+              }
+            }
+
+            wx.showToast({
+              title: "暂时无法打开散步页面",
+              icon: "none"
+            });
+          },
+
+          complete: () => {
+            this._startingWalk = false;
+          }
+        });
+      },
+
+      fail: () => {
+        this._startPromptOpen = false;
+        wx.showToast({
+          title: "暂时无法打开开始确认",
+          icon: "none"
+        });
+      }
     });
   }
 });

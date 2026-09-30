@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "Walking"
+  "navigationStyle": "custom",
+  "navigationBarTitleText": "正在散步",
+  "navigationBarBackgroundColor": "#ffffff",
+  "navigationBarTextStyle": "black"
 }
