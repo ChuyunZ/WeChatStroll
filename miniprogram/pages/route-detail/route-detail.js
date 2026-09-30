@@ -417,6 +417,7 @@ Page({
   startWalk() {
     if (
       this.data.editing ||
+      this._startPromptOpen ||
       this._startingWalk ||
       !this.isValidRoute(this._confirmedRoute)
     ) {
@@ -443,6 +444,8 @@ Page({
     const route = this._confirmedRoute;
     const distanceKm = (route.distanceMeters / 1000).toFixed(1);
 
+    this._startPromptOpen = true;
+
     wx.showModal({
       title: "确认开始这次散步？",
       content:
@@ -451,6 +454,8 @@ Page({
       cancelText: "再看看",
 
       success: res => {
+        this._startPromptOpen = false;
+
         if (!res.confirm) {
           return;
         }
@@ -508,6 +513,14 @@ Page({
           complete: () => {
             this._startingWalk = false;
           }
+        });
+      },
+
+      fail: () => {
+        this._startPromptOpen = false;
+        wx.showToast({
+          title: "暂时无法打开开始确认",
+          icon: "none"
         });
       }
     });
