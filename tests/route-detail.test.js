@@ -682,6 +682,36 @@ describe(
 
 
     test(
+      "rapid duplicate Start Walk taps open only one confirmation and one Walking page",
+      () => {
+        let confirmStart;
+
+        wx.showModal.mockImplementation(options => {
+          confirmStart = () => {
+            options.success({
+              confirm: true,
+              cancel: false
+            });
+          };
+        });
+
+        page.loadRoute(GENERATED_ROUTE);
+
+        page.startWalk();
+        page.startWalk();
+
+        expect(wx.showModal).toHaveBeenCalledTimes(1);
+        expect(wx.navigateTo).not.toHaveBeenCalled();
+
+        confirmStart();
+
+        expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+        expect(wx.setStorageSync).toHaveBeenCalledTimes(1);
+      }
+    );
+
+
+    test(
       "canceling the start confirmation does not create an active walk",
       () => {
         wx.showModal.mockImplementation(options => {
