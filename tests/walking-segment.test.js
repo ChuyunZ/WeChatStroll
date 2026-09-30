@@ -6,6 +6,21 @@ const {
 
 const originalWx = global.wx
 
+test.each([
+  [{ result: { success: false, error: { code: 'WALKING_ROUTE_FAILED', message: 'Unable to generate walking route' } } }, 'WALKING_SEGMENT_FAILED', 'WALKING_ROUTE_FAILED'],
+  [undefined, 'PROVIDER_GATEWAY_FAILED', 'PROVIDER_GATEWAY_FAILED'],
+  [{}, 'PROVIDER_GATEWAY_FAILED', 'PROVIDER_GATEWAY_FAILED'],
+  [{ result: { success: false } }, 'PROVIDER_GATEWAY_FAILED', 'PROVIDER_GATEWAY_FAILED']
+])('walking boundary distinguishes business failures from unusable envelopes (%j)', async (response, error, causeCode) => {
+  global.wx = { cloud: { callFunction: jest.fn().mockResolvedValue(response) } }
+  try {
+    expect(await getWalkingSegment(
+      { latitude: 30, longitude: 120 }, { latitude: 31, longitude: 121 }
+    )).toEqual({ success: false, error, causeCode })
+    expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
+  } finally { global.wx = originalWx }
+})
+
 function createSuccessfulWalkingResult() {
   return {
     success: true,
@@ -112,7 +127,7 @@ describe('walking-segment', () => {
   )
 
   test(
-    'sends only trusted coordinates to getWalkingRoute',
+    'sends only action and trusted coordinates to amapProvider',
     async () => {
       let receivedRequest
 
@@ -146,9 +161,10 @@ describe('walking-segment', () => {
       )
 
       expect(receivedRequest).toEqual({
-        name: 'getWalkingRoute',
+        name: 'amapProvider',
 
         data: {
+          action: 'walkingRoute',
           start: {
             latitude: 31.2304,
             longitude: 121.4737
@@ -274,9 +290,9 @@ describe('walking-segment', () => {
       expect(result).toEqual({
         success: false,
         error:
-          'WALKING_SEGMENT_FAILED',
+          'PROVIDER_GATEWAY_FAILED',
         causeCode:
-          'WALKING_ROUTE_FAILED'
+          'PROVIDER_GATEWAY_FAILED'
       })
     }
   )

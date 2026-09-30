@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('../utils/provider-errors')
 const locationService = require('./location')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
 const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
@@ -333,16 +334,17 @@ async function searchNearbyPois(
 ) {
   const result =
     await callCloudFunction(
-      'getNearbyPois',
+      'amapProvider',
       {
+        action: 'nearbyPois',
         longitude: location.longitude,
         latitude: location.latitude,
         radius
       },
       {
-        fallbackCode: 'POI_SEARCH_FAILED',
+        fallbackCode: 'PROVIDER_GATEWAY_FAILED',
         fallbackMessage:
-          'Unable to retrieve nearby places.'
+          'Route service is temporarily unavailable.'
       }
     )
 
@@ -1048,11 +1050,11 @@ async function buildFallbackGenerationResult({
 
       if (
         walkingRoute &&
-        walkingRoute.error === 'AMAP_RATE_LIMITED'
+        isTemporaryProviderCode(walkingRoute.error)
       ) {
         throw createRouteGenerationError(
-          'AMAP_RATE_LIMITED',
-          'Walking provider is temporarily rate limited.'
+          walkingRoute.error,
+          'Route service is temporarily unavailable.'
         )
       }
 
@@ -1192,7 +1194,7 @@ async function generateRoutes(
         attempt === 1 ? undefined : { attempt, previousFailures: [...observations] })
       if (!hasValidWaypointPlanShape(plan)) planFailure = { error: 'INVALID_AI_ROUTE_PLAN' }
     } catch (error) {
-      if (error && error.code === 'AMAP_RATE_LIMITED') throw error
+      if (error && isTemporaryProviderCode(error.code)) throw error
       trigger = error && error.code || 'AI_ROUTE_PLANNING_FAILED'
       planFailure = { error: trigger }
     }
@@ -1231,8 +1233,8 @@ async function generateRoutes(
           session, candidateCache, candidate, location, candidateIndex,
           requestedDurationMinutes: preferences.durationMinutes
         })
-        if (result.error === 'AMAP_RATE_LIMITED') {
-          throw createRouteGenerationError('AMAP_RATE_LIMITED', 'Walking provider is temporarily rate limited.')
+        if (isTemporaryProviderCode(result.error)) {
+          throw createRouteGenerationError(result.error, 'Route service is temporarily unavailable.')
         }
         if (result.success) {
           const source = attempt === 1 ? 'ai' : 'ai-replanned'

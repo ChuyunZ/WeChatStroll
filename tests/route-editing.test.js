@@ -32,7 +32,7 @@ async function setup(routeType = 'point_to_point', count = 3) {
     polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
   }))
   const session = createRoutePlanningSession({ start, routeType,
-    verifiedWaypointPool: pois, segmentResolver: resolver, providerMinIntervalMs: 0 })
+    verifiedWaypointPool: pois, segmentResolver: resolver })
   const ids = pois.slice(0, count).map(poi => poi.poiId)
   const walkingRoute = await session.buildRouteForOrder({
     allowedWaypointIds: ids, orderedWaypointIds: ids, source: 'recommended'
@@ -209,7 +209,9 @@ test.each([2, 3])('supports a variable pool of %i waypoints', async count => {
 
 test.each([
   { success: false, error: 'MULTI_SEGMENT_ROUTE_FAILED', message: 'secret provider payload' },
-  { success: false, error: 'AMAP_RATE_LIMITED' }
+  { success: false, error: 'AMAP_RATE_LIMITED' },
+  { success: false, error: 'PROVIDER_BUSY' },
+  { success: false, error: 'PROVIDER_GATEWAY_FAILED' }
 ])('failed preview remains recoverable and preserves confirmed route (%j)', async failure => {
   const { detail, session, route, routes } = await setup()
   jest.spyOn(session, 'buildRouteForOrder').mockResolvedValueOnce(failure)
@@ -223,7 +225,7 @@ test.each([
   expect(detail.data.draftWaypointIds).toEqual(['B', 'A'])
   expect(detail._confirmedRoute).toBe(route)
   expect(routes._rawRoutes[0]).toBe(route)
-  expect(detail.data.editMessage).toContain(failure.error === 'AMAP_RATE_LIMITED' ? '繁忙' : '调整地点')
+  expect(detail.data.editMessage).toContain(failure.error !== 'MULTI_SEGMENT_ROUTE_FAILED' ? '繁忙' : '调整地点')
   expect(detail.data.editMessage).not.toContain('secret')
   detail.restoreRecommendation()
   await flush()

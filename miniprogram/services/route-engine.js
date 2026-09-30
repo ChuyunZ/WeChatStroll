@@ -1,13 +1,11 @@
+const { isTemporaryProviderCode } = require('../utils/provider-errors')
 const { isValidGeoPoint } = require('../utils/geo')
 const { createCodedError } = require('../utils/errors')
 const { getWalkingSegment } = require('./walking-segment')
-const { createWalkingProviderScheduler } = require('./walking-provider-scheduler')
 
 const {
   EXACT_ORDERING_MAX_WAYPOINTS,
-  SEGMENT_FETCH_CONCURRENCY,
-  WALKING_PROVIDER_MIN_INTERVAL_MS,
-  WALKING_PROVIDER_RETRY_DELAYS_MS
+  SEGMENT_FETCH_CONCURRENCY
 } = require('../config/route-planning')
 
 const { ROUTE_TYPES } = require('../constants/route-types')
@@ -83,8 +81,7 @@ function createRoutePlanningSession({
   start,
   verifiedWaypointPool,
   routeType = ROUTE_TYPES.POINT_TO_POINT,
-  segmentResolver = getWalkingSegment,
-  providerMinIntervalMs = WALKING_PROVIDER_MIN_INTERVAL_MS
+  segmentResolver = getWalkingSegment
 }) {
   if (!isValidGeoPoint(start)) {
     throw createCodedError(
@@ -119,28 +116,6 @@ function createRoutePlanningSession({
   const segmentCache = new Map()
   // Small settled-cost projection; Promise ownership and dedup stay above.
   const resolvedSegmentCosts = new Map()
-  const scheduleProvider = createWalkingProviderScheduler(providerMinIntervalMs)
-
-  async function requestSegment(fromNode, toNode) {
-    for (let attempt = 0; ; attempt++) {
-      let result
-      try {
-        result = await scheduleProvider(() => segmentResolver({ ...fromNode }, { ...toNode }))
-      } catch (error) {
-        result = { success: false, error: 'WALKING_SEGMENT_FAILED',
-          causeCode: error && typeof error.code === 'string' && error.code.trim() ? error.code.trim() : 'SEGMENT_RESOLVER_ERROR' }
-      }
-      const rateLimited = result && (result.error === 'AMAP_RATE_LIMITED' || result.causeCode === 'AMAP_RATE_LIMITED')
-      if (!rateLimited) return result
-      const retryDelayMs = WALKING_PROVIDER_RETRY_DELAYS_MS[attempt]
-      console.warn('[Route Segment] Rate limited:', {
-        from: getNodeId(fromNode), to: getNodeId(toNode), attempt: attempt + 1,
-        error: 'AMAP_RATE_LIMITED', retryDelayMs: retryDelayMs === undefined ? null : retryDelayMs
-      })
-      if (retryDelayMs === undefined) return { success: false, error: 'AMAP_RATE_LIMITED', causeCode: 'AMAP_RATE_LIMITED' }
-      await new Promise(resolve => setTimeout(resolve, retryDelayMs))
-    }
-  }
 
   function registerVerifiedWaypoints(verifiedWaypoints) {
     return registerWaypoints(
@@ -161,14 +136,16 @@ function createRoutePlanningSession({
 
     const segmentPromise = Promise.resolve()
       .then(() =>
-        requestSegment(
+        segmentResolver(
           { ...fromNode },
           { ...toNode }
         )
       )
       .then((result) => {
         if (!result || result.success !== true) {
-          return normalizeSegmentFailure(result)
+          const failure = normalizeSegmentFailure(result)
+          if (isTemporaryProviderCode(failure.causeCode)) failure.error = failure.causeCode
+          return failure
         }
 
         const normalizedSegment =
@@ -185,7 +162,7 @@ function createRoutePlanningSession({
       })
       .catch((error) => ({
         success: false,
-        error: 'WALKING_SEGMENT_FAILED',
+        error: error && isTemporaryProviderCode(error.code) ? error.code : 'WALKING_SEGMENT_FAILED',
 
         causeCode:
           error &&
@@ -195,13 +172,13 @@ function createRoutePlanningSession({
             : 'SEGMENT_RESOLVER_ERROR'
       }))
       .then(segment => {
-        // Exhausted throttles remain explicitly temporary in the Promise cache,
+        // Provider outages remain explicitly temporary in the Promise cache,
         // avoiding retry storms. They are NOT unreachable-edge priority facts.
-        if (segment.error !== 'AMAP_RATE_LIMITED') resolvedSegmentCosts.set(edgeKey, segment.success
+        if (!isTemporaryProviderCode(segment.error)) resolvedSegmentCosts.set(edgeKey, segment.success
           ? { success: true, durationSeconds: segment.durationSeconds, distanceMeters: segment.distanceMeters }
           : { success: false })
 
-        if (segment.success !== true && segment.error !== 'AMAP_RATE_LIMITED') {
+        if (segment.success !== true && !isTemporaryProviderCode(segment.error)) {
           console.warn(
             '[Route Segment] Failed:',
             {
@@ -390,7 +367,7 @@ function createRoutePlanningSession({
 
     const resolvedEdges = await resolveEdgePairs(edgePairs)
 
-    const failedEdge = resolvedEdges.find(({ segment }) => segment.error === 'AMAP_RATE_LIMITED') || resolvedEdges.find(
+    const failedEdge = resolvedEdges.find(({ segment }) => isTemporaryProviderCode(segment.error)) || resolvedEdges.find(
       ({ segment }) => segment.success !== true
     )
 
@@ -403,7 +380,7 @@ function createRoutePlanningSession({
 
       return {
         success: false,
-        error: segment.error === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED' : 'MULTI_SEGMENT_ROUTE_FAILED',
+        error: isTemporaryProviderCode(segment.error) ? segment.error : 'MULTI_SEGMENT_ROUTE_FAILED',
 
         failedSegment: {
           from: getNodeId(fromNode),

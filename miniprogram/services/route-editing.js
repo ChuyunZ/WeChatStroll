@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('../utils/provider-errors')
 // The route-local pool, not the session-wide registry, defines edit permissions.
 function isValidEditableOrder(route, ids) {
   const pool = route && route.editableWaypoints
@@ -18,7 +19,7 @@ function copyEditableWaypoint(poi) {
 }
 
 function routeEditErrorMessage(error) {
-  if (error && [error.code, error.error, error.causeCode].includes('AMAP_RATE_LIMITED')) {
+  if (error && [error.code, error.error, error.causeCode].some(isTemporaryProviderCode)) {
     return '路线服务暂时繁忙，请稍后重试'
   }
   return '这个路线组合暂时无法构建完整步行路线，请调整地点或顺序后重试'

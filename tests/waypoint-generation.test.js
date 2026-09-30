@@ -1,8 +1,3 @@
-// Synthetic tests skip real-time pacing; fake-timer tests cover production intervals.
-jest.mock('../miniprogram/config/route-planning', () => ({
-  ...jest.requireActual('../miniprogram/config/route-planning'), WALKING_PROVIDER_MIN_INTERVAL_MS: 0
-}))
-
 jest.mock(
   '../miniprogram/services/location',
   () => ({
@@ -116,8 +111,8 @@ describe('waypoint generation service', () => {
 
   test('generateWaypointPlan sends verified flattened POIs to aiRoutePlanner', async () => {
     wx.cloud.callFunction.mockImplementation(
-      async ({ name }) => {
-        if (name === 'getNearbyPois') {
+      async ({ name, data }) => {
+        if (name === 'amapProvider' && data.action === 'nearbyPois') {
           return {
             result: {
               success: true,
@@ -219,8 +214,8 @@ describe('waypoint generation service', () => {
 
   test('generateWaypointPlan preserves string AI error codes', async () => {
     wx.cloud.callFunction.mockImplementation(
-      async ({ name }) => {
-        if (name === 'getNearbyPois') {
+      async ({ name, data }) => {
+        if (name === 'amapProvider' && data.action === 'nearbyPois') {
           return {
             result: {
               success: true,

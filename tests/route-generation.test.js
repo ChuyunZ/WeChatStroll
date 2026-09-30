@@ -1,8 +1,3 @@
-// Synthetic tests skip real-time pacing; fake-timer tests cover production intervals.
-jest.mock('../miniprogram/config/route-planning', () => ({
-  ...jest.requireActual('../miniprogram/config/route-planning'), WALKING_PROVIDER_MIN_INTERVAL_MS: 0
-}))
-
 jest.mock(
   '../miniprogram/services/location',
   () => ({
@@ -126,6 +121,42 @@ beforeEach(() => {
 
 afterEach(() => {
   delete global.wx
+})
+
+test.each(['transport', 'missing', 'empty', 'invalid-failure', 'business'])(
+  'POI gateway boundary preserves the distinction for %s', async mode => {
+    if (mode === 'transport') wx.cloud.callFunction.mockRejectedValue(new Error('private network details'))
+    else wx.cloud.callFunction.mockResolvedValue({
+      missing: undefined,
+      empty: {},
+      'invalid-failure': { result: { success: false } },
+      business: { result: { success: false, error: { code: 'POI_SEARCH_FAILED', message: 'Unable to retrieve nearby places' } } }
+    }[mode])
+    await expect(routeGenerationService.generateRoutes({ durationMinutes: 45, routeType: 'point_to_point' }))
+      .rejects.toMatchObject({ code: mode === 'business' ? 'POI_SEARCH_FAILED' : 'PROVIDER_GATEWAY_FAILED' })
+    expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
+    expect(wx.cloud.callFunction).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'amapProvider', data: expect.objectContaining({ action: 'nearbyPois' })
+    }))
+  })
+
+test('walking transport failure stops generation without retry, AI replanning or fallback', async () => {
+  wx.cloud.callFunction.mockImplementation(async ({ name, data }) => {
+    if (name === 'aiRoutePlanner') return { result: { success: true, plan: {
+      candidates: [
+        { waypoints: [{ poiId: PARK_POI.poiId }] },
+        { waypoints: [{ poiId: WATER_POI.poiId }] }
+      ]
+    } } }
+    if (name === 'amapProvider' && data.action === 'nearbyPois') {
+      return { result: { success: true, poisByCategory: createPoisByCategory() } }
+    }
+    throw new Error('private transport details')
+  })
+  await expect(routeGenerationService.generateRoutes({ durationMinutes: 45, routeType: 'point_to_point' }))
+    .rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED', message: 'Route service is temporarily unavailable.' })
+  expect(wx.cloud.callFunction.mock.calls.map(([{ name, data }]) => data.action || name))
+    .toEqual(['nearbyPois', 'aiRoutePlanner', 'walkingRoute'])
 })
 
 describe('route-generation service', () => {
@@ -374,8 +405,8 @@ describe('route-generation service', () => {
     'generateFirstRoute runs the real pipeline and passes duration-based radius',
     async () => {
       wx.cloud.callFunction.mockImplementation(
-        async ({ name }) => {
-          if (name === 'getNearbyPois') {
+        async ({ name, data }) => {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -385,7 +416,7 @@ describe('route-generation service', () => {
             }
           }
 
-          if (name === 'getWalkingRoute') {
+          if (name === 'amapProvider' && data.action === 'walkingRoute') {
             return {
               result: {
                 success: true,
@@ -435,8 +466,9 @@ describe('route-generation service', () => {
       ).toHaveBeenNthCalledWith(
         1,
         {
-          name: 'getNearbyPois',
+          name: 'amapProvider',
           data: {
+            action: 'nearbyPois',
             longitude: 113.264939,
             latitude: 23.129158,
             radius: 1125
@@ -449,8 +481,9 @@ describe('route-generation service', () => {
       ).toHaveBeenNthCalledWith(
         2,
         {
-          name: 'getWalkingRoute',
+          name: 'amapProvider',
           data: {
+            action: 'walkingRoute',
             start: {
               latitude: 23.129158,
               longitude: 113.264939
@@ -469,8 +502,8 @@ describe('route-generation service', () => {
     'generateFirstRoute returns the live planning session with the first route cache still available',
     async () => {
       wx.cloud.callFunction.mockImplementation(
-        async ({ name }) => {
-          if (name === 'getNearbyPois') {
+        async ({ name, data }) => {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -480,7 +513,7 @@ describe('route-generation service', () => {
             }
           }
 
-          if (name === 'getWalkingRoute') {
+          if (name === 'amapProvider' && data.action === 'walkingRoute') {
             return {
               result: {
                 success: true,
@@ -563,7 +596,7 @@ describe('route-generation service', () => {
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {
-          if (name === 'getNearbyPois') {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -573,7 +606,7 @@ describe('route-generation service', () => {
             }
           }
 
-          if (name === 'getWalkingRoute') {
+          if (name === 'amapProvider' && data.action === 'walkingRoute') {
             return {
               result: {
                 success: true,
@@ -636,8 +669,7 @@ describe('route-generation service', () => {
           .map(([request]) => request)
           .filter(
             request =>
-              request.name ===
-              'getWalkingRoute'
+              request.name === 'amapProvider' && request.data.action === 'walkingRoute'
           )
 
       expect(walkingCalls).toHaveLength(2)
@@ -650,8 +682,9 @@ describe('route-generation service', () => {
       expect(walkingCalls).toEqual(
         expect.arrayContaining([
           {
-            name: 'getWalkingRoute',
+            name: 'amapProvider',
             data: {
+              action: 'walkingRoute',
               start: {
                 latitude: TEST_LOCATION.latitude,
                 longitude: TEST_LOCATION.longitude
@@ -663,8 +696,9 @@ describe('route-generation service', () => {
             }
           },
           {
-            name: 'getWalkingRoute',
+            name: 'amapProvider',
             data: {
+              action: 'walkingRoute',
               start: {
                 latitude: PARK_POI.latitude,
                 longitude: PARK_POI.longitude
@@ -713,8 +747,9 @@ describe('route-generation service', () => {
       expect(
         wx.cloud.callFunction
       ).toHaveBeenCalledWith({
-        name: 'getNearbyPois',
+        name: 'amapProvider',
         data: {
+          action: 'nearbyPois',
           longitude: 113.264939,
           latitude: 23.129158,
           radius: 3000
@@ -786,8 +821,8 @@ describe('route-generation service', () => {
     'generateFirstRoute rejects an invalid walking route response',
     async () => {
       wx.cloud.callFunction.mockImplementation(
-        async ({ name }) => {
-          if (name === 'getNearbyPois') {
+        async ({ name, data }) => {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -853,7 +888,7 @@ describe('route-generation service', () => {
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {
-          if (name === 'getNearbyPois') {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -890,7 +925,7 @@ describe('route-generation service', () => {
             }
           }
   
-          if (name === 'getWalkingRoute') {
+          if (name === 'amapProvider' && data.action === 'walkingRoute') {
             return {
               result: {
                 success: true,
@@ -949,7 +984,7 @@ describe('route-generation service', () => {
   
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {
-          if (name === 'getNearbyPois') {
+          if (name === 'amapProvider' && data.action === 'nearbyPois') {
             return {
               result: {
                 success: true,
@@ -980,7 +1015,7 @@ describe('route-generation service', () => {
             }
           }
   
-          if (name === 'getWalkingRoute') {
+          if (name === 'amapProvider' && data.action === 'walkingRoute') {
             return {
               result: {
                 success: true,

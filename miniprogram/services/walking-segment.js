@@ -1,3 +1,4 @@
+const { isTemporaryProviderCode } = require('../utils/provider-errors')
 const {
   isValidGeoPoint,
   copyGeoPoint
@@ -206,20 +207,21 @@ async function getWalkingSegment(
 
   try {
     result = await callCloudFunction(
-      'getWalkingRoute',
+      'amapProvider',
       {
+        action: 'walkingRoute',
         start: copyGeoPoint(fromPoint),
         destination: copyGeoPoint(toPoint)
       },
       {
-        fallbackCode: 'WALKING_ROUTE_FAILED',
-        fallbackMessage: 'Unable to retrieve walking route.'
+        fallbackCode: 'PROVIDER_GATEWAY_FAILED',
+        fallbackMessage: 'Route service is temporarily unavailable.'
       }
     )
   } catch (error) {
     return {
       success: false,
-      error: error.code === 'AMAP_RATE_LIMITED' ? 'AMAP_RATE_LIMITED' : 'WALKING_SEGMENT_FAILED',
+      error: isTemporaryProviderCode(error.code) ? error.code : 'WALKING_SEGMENT_FAILED',
 
       causeCode:
         typeof error.code === 'string'
