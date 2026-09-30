@@ -407,6 +407,67 @@ describe("Walking page", () => {
   expect(jest.getTimerCount()).toBe(1);
 });
 
+  test("restores the active route lock even when pending-result cleanup fails", () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    wx.removeStorageSync.mockImplementation(key => {
+      if (key === "pendingWalkResult") {
+        throw new Error("Pending cleanup failed");
+      }
+
+      delete storage[key];
+    });
+
+    wx.reLaunch.mockImplementation(options => {
+      options.fail();
+    });
+
+    page.onLoad({
+      routeId: TEST_ROUTE.routeId
+    });
+
+    page.finishWalk();
+
+    expect(wx.getStorageSync("activeWalkSession")).toEqual(
+      expect.objectContaining({
+        routeId: TEST_ROUTE.routeId,
+        startTimeMs: new Date("2026-10-01T12:00:00.000Z").getTime()
+      })
+    );
+    expect(page._active).toBe(true);
+    expect(page.data.ended).toBe(false);
+    expect(page.data.finishing).toBe(false);
+    expect(jest.getTimerCount()).toBe(1);
+
+    warnSpy.mockRestore();
+  });
+
+  test("cleans the pending result when completion fails after it was saved", () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+    wx.removeStorageSync.mockImplementation(key => {
+      if (key === "activeWalkSession") {
+        throw new Error("Active session cleanup failed");
+      }
+
+      delete storage[key];
+    });
+
+    page.onLoad({
+      routeId: TEST_ROUTE.routeId
+    });
+
+    page.finishWalk();
+
+    expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+    expect(wx.reLaunch).not.toHaveBeenCalled();
+    expect(page._active).toBe(true);
+    expect(page.data.ended).toBe(false);
+    expect(page.data.finishing).toBe(false);
+
+    warnSpy.mockRestore();
+  });
+
   test("custom back keeps the active route locked unless the user ends early", () => {
     wx.showModal.mockImplementation(options => {
       options.success({
