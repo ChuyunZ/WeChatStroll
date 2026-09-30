@@ -507,6 +507,12 @@ Page({
         throw new Error("Active walk session changed.");
       }
     } catch (error) {
+      try {
+        activeWalkSessionService.clearPendingWalkResult();
+      } catch (cleanupError) {
+        console.warn("[Walking] Unable to clear pending walk result after completion failure.");
+      }
+
       this._finishing = false;
       wx.showToast({
         title: "暂时无法结束散步，请重试",
@@ -534,13 +540,18 @@ Page({
 
       fail: () => {
         try {
-          activeWalkSessionService.clearPendingWalkResult();
           activeWalkSessionService.createActiveWalkSession(
             this._route,
             this._startTimeMs
           );
         } catch (error) {
           console.warn("[Walking] Unable to restore active session after navigation failure.");
+        }
+
+        try {
+          activeWalkSessionService.clearPendingWalkResult();
+        } catch (error) {
+          console.warn("[Walking] Unable to clear pending walk result after navigation failure.");
         }
 
         this._active = true;
