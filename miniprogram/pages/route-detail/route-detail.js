@@ -371,10 +371,26 @@ Page({
   },
 
   startWalk() {
-    if (this.data.editing) return;
-    wx.showToast({
-      title: "准备开始散步",
-      icon: "none"
+    if (
+      this.data.editing ||
+      !this.isValidRoute(this._confirmedRoute)
+    ) {
+      return;
+    }
+
+    const route =
+      this._confirmedRoute;
+
+    wx.navigateTo({
+      url:
+        `/pages/walking/walking?routeId=${encodeURIComponent(route.routeId)}`,
+
+      success(res) {
+        res.eventChannel.emit(
+          "walkingRoute",
+          route
+        );
+      }
     });
   }
 });

@@ -1,4 +1,167 @@
-<view class="container">
-  <text class="title">Walking</text>
-  <text class="subtitle">Active walking session will go here.</text>
+<view class="page">
+
+  <!-- Loading -->
+  <view class="state-container" wx:if="{{loading}}">
+    <text class="state-title">正在准备散步...</text>
+    <text class="state-description">正在加载路线信息</text>
+  </view>
+
+  <!-- Error -->
+  <view class="state-container" wx:elif="{{error}}">
+    <text class="state-title">无法开始这次散步</text>
+    <text class="state-description">路线数据可能已经失效，请返回后重新选择路线</text>
+
+    <button class="back-button" bindtap="returnToRoute">
+      返回路线详情
+    </button>
+  </view>
+
+  <!-- Active walking session -->
+  <block wx:else>
+
+    <!-- Header -->
+    <view class="walking-header">
+      <view class="header-content">
+        <text class="header-small">正在散步</text>
+        <text class="route-title">{{route.title}}</text>
+      </view>
+
+      <view class="walking-status">
+        <view class="status-dot"></view>
+        <text class="status-text">进行中</text>
+      </view>
+    </view>
+
+    <!-- Timer -->
+    <view class="timer-card">
+      <text class="timer-label">已散步</text>
+      <text class="timer-value">{{elapsedText}}</text>
+      <text class="timer-start">开始于 {{startTimeText}}</text>
+    </view>
+
+    <!-- Route summary -->
+    <view class="summary-card">
+      <view class="summary-item">
+        <text class="summary-value">{{route.durationMinutes}}</text>
+        <text class="summary-label">预计分钟</text>
+      </view>
+
+      <view class="summary-divider"></view>
+
+      <view class="summary-item">
+        <text class="summary-value">{{route.distanceKm}}</text>
+        <text class="summary-label">公里</text>
+      </view>
+
+      <view class="summary-divider"></view>
+
+      <view class="summary-item">
+        <text class="summary-value">{{displayPois.length}}</text>
+        <text class="summary-label">途经地点</text>
+      </view>
+    </view>
+
+    <!-- Map -->
+    <view class="map-section">
+      <view class="section-header">
+        <text class="section-title">散步路线</text>
+        <text class="section-hint">可拖动和缩放</text>
+      </view>
+
+      <map
+        class="walking-map"
+        latitude="{{mapLatitude}}"
+        longitude="{{mapLongitude}}"
+        scale="16"
+        polyline="{{mapPolyline}}"
+        markers="{{markers}}"
+        include-points="{{mapPoints}}"
+        show-location="{{showUserLocation}}"
+        enable-scroll="{{true}}"
+        enable-zoom="{{true}}"
+        enable-rotate="{{false}}"
+      >
+      </map>
+
+      <text class="location-message" wx:if="{{locationMessage}}">
+        {{locationMessage}}
+      </text>
+
+      <view class="map-legend">
+        <view class="legend-item">
+          <view class="legend-dot start-dot"></view>
+          <text class="legend-text">起点</text>
+        </view>
+
+        <view class="legend-item">
+          <view class="legend-line"></view>
+          <text class="legend-text">步行路线</text>
+        </view>
+
+        <view class="legend-item">
+          <view class="legend-dot poi-dot"></view>
+          <text class="legend-text">途经地点</text>
+        </view>
+
+        <view class="legend-item" wx:if="{{showUserLocation}}">
+          <view class="legend-dot current-dot"></view>
+          <text class="legend-text">当前位置</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- POIs -->
+    <view class="poi-card" wx:if="{{displayPois.length}}">
+      <text class="card-title">途经地点</text>
+
+      <view
+        class="poi-row"
+        wx:for="{{displayPois}}"
+        wx:for-item="poi"
+        wx:key="poiId"
+      >
+        <view class="poi-number">
+          {{poi.visitNumber}}
+        </view>
+
+        <view class="poi-content">
+          <text class="poi-name">{{poi.displayName}}</text>
+
+          <text class="poi-address" wx:if="{{poi.address}}">
+            {{poi.address}}
+          </text>
+        </view>
+      </view>
+    </view>
+
+    <!-- Hint -->
+    <view class="walking-hint">
+      <text class="hint-title">散步小提示</text>
+      <text class="hint-text">
+        地图会显示你的当前位置和规划路线。请根据实际道路情况安全通行。
+      </text>
+    </view>
+
+    <!-- Actions -->
+    <view class="action-buttons">
+      <button
+        class="end-button"
+        disabled="{{finishing}}"
+        bindtap="endWalkEarly"
+      >
+        提前结束
+      </button>
+
+      <button
+        class="finish-button"
+        loading="{{finishing}}"
+        disabled="{{finishing}}"
+        bindtap="finishWalk"
+      >
+        {{finishing ? '正在完成...' : '完成散步'}}
+      </button>
+    </view>
+
+  </block>
+
 </view>

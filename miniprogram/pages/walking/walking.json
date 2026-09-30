@@ -1,3 +1,5 @@
 {
-  "navigationBarTitleText": "Walking"
+  "navigationBarTitleText": "正在散步",
+  "navigationBarBackgroundColor": "#ffffff",
+  "navigationBarTextStyle": "black"
 }

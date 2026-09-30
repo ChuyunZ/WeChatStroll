@@ -145,6 +145,9 @@ function loadRouteDetailPage({
     navigateBack:
       jest.fn(),
 
+    navigateTo:
+      jest.fn(),
+
     showToast:
       jest.fn()
   };
@@ -604,20 +607,44 @@ describe(
 
 
     test(
-      "startWalk shows the current placeholder toast",
+      "startWalk opens Walking and passes the confirmed route through EventChannel",
       () => {
+        const walkingEventChannel = {
+          emit: jest.fn()
+        };
+
+        page.loadRoute(GENERATED_ROUTE);
         page.startWalk();
 
+        expect(wx.navigateTo).toHaveBeenCalledTimes(1);
 
-        expect(
-          wx.showToast
-        ).toHaveBeenCalledWith({
-          title:
-            "准备开始散步",
+        const navigateOptions = wx.navigateTo.mock.calls[0][0];
 
-          icon:
-            "none"
+        expect(navigateOptions.url).toBe(
+          `/pages/walking/walking?routeId=${encodeURIComponent(GENERATED_ROUTE.routeId)}`
+        );
+
+        navigateOptions.success({
+          eventChannel: walkingEventChannel
         });
+
+        expect(walkingEventChannel.emit).toHaveBeenCalledWith(
+          "walkingRoute",
+          GENERATED_ROUTE
+        );
+      }
+    );
+
+
+    test(
+      "startWalk does nothing while route editing is active",
+      () => {
+        page.loadRoute(GENERATED_ROUTE);
+        page.data.editing = true;
+
+        page.startWalk();
+
+        expect(wx.navigateTo).not.toHaveBeenCalled();
       }
     );
 
