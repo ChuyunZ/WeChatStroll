@@ -24,7 +24,11 @@ function isValidActiveWalkSession(session) {
     isValidRouteSnapshot(session.route) &&
     session.route.routeId === session.routeId &&
     Number.isFinite(session.startTimeMs) &&
-    session.startTimeMs > 0
+    session.startTimeMs > 0 &&
+    (
+      session.trackingEnabled === undefined ||
+      typeof session.trackingEnabled === "boolean"
+    )
   );
 }
 
@@ -43,7 +47,11 @@ function getActiveWalkSession() {
   return session;
 }
 
-function createActiveWalkSession(route, startTimeMs = Date.now()) {
+function createActiveWalkSession(
+  route,
+  startTimeMs = Date.now(),
+  { trackingEnabled = false } = {}
+) {
   const existingSession = getActiveWalkSession();
 
   if (existingSession) {
@@ -66,7 +74,8 @@ function createActiveWalkSession(route, startTimeMs = Date.now()) {
     status: "active",
     routeId: route.routeId,
     route,
-    startTimeMs
+    startTimeMs,
+    trackingEnabled: trackingEnabled === true
   };
 
   wx.setStorageSync(ACTIVE_WALK_STORAGE_KEY, session);
