@@ -405,6 +405,37 @@ describe("walking-tracker", () => {
     ).toBe(false);
   });
 
+  test("uploads a current-location seed when tracking starts", async () => {
+    global.wx.getLocation = jest.fn(options => {
+      options.success({
+        latitude: 31.2304,
+        longitude: 121.4737,
+        accuracy: 9,
+        speed: 0,
+        direction: 0,
+        altitude: 5
+      });
+    });
+
+    await walkingTracker.startTracking({
+      routeId: TEST_ROUTE_ID,
+      startTimeMs: TEST_START_TIME_MS
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(global.wx.getLocation).toHaveBeenCalled();
+    expect(callCloudFunction).toHaveBeenCalledTimes(1);
+    expect(callCloudFunction.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        action: "uploadTrace",
+        routeId: TEST_ROUTE_ID,
+        walkStartTimeMs: TEST_START_TIME_MS
+      })
+    );
+  });
+
   test("uploads the first valid location callback", async () => {
     await walkingTracker.startTracking({
       routeId: TEST_ROUTE_ID,
