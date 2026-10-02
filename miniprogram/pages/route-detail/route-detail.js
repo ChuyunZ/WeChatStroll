@@ -7,6 +7,8 @@ const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
 
+const ACTIVE_WALK_REDIRECT_LOCK_MS = 3000;
+
 Page({
   data: {
     route: null,
@@ -33,6 +35,11 @@ Page({
 
   onLoad(options = {}) {
     this._unloaded = false;
+    this._startPromptOpen = false;
+    this._startingWalk = false;
+    this._activeWalkRedirecting = false;
+    this._activeWalkRedirectStartedAtMs = 0;
+
     const routeId = options.id;
 
     // 正常从 Routes 页面进入时，
@@ -103,11 +110,24 @@ Page({
   },
 
   resumeActiveWalk(activeSession) {
-    if (!activeSession || this._activeWalkRedirecting) {
+    if (!activeSession) {
       return;
     }
 
+    const nowMs = Date.now();
+
+    if (
+      this._activeWalkRedirecting &&
+      nowMs - this._activeWalkRedirectStartedAtMs <
+        ACTIVE_WALK_REDIRECT_LOCK_MS
+    ) {
+      return;
+    }
+
+    // Treat an interrupted navigation lock as stale instead of leaving
+    // Route Detail permanently unable to resume or start a walk.
     this._activeWalkRedirecting = true;
+    this._activeWalkRedirectStartedAtMs = nowMs;
 
     wx.navigateTo({
       url: `/pages/walking/walking?routeId=${encodeURIComponent(activeSession.routeId)}`,
@@ -121,6 +141,7 @@ Page({
 
       complete: () => {
         this._activeWalkRedirecting = false;
+        this._activeWalkRedirectStartedAtMs = 0;
       }
     });
   },
@@ -399,6 +420,10 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._startPromptOpen = false;
+    this._startingWalk = false;
+    this._activeWalkRedirecting = false;
+    this._activeWalkRedirectStartedAtMs = 0;
     if (this._eventChannel && typeof this._eventChannel.emit === "function") {
       this._eventChannel.emit("closeRouteEditor");
     }
