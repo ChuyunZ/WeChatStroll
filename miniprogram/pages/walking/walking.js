@@ -425,7 +425,19 @@ Page({
               code:
                 error && error.code
                   ? error.code
-                  : "TRACKING_UNAVAILABLE"
+                  : "TRACKING_UNAVAILABLE",
+              errMsg:
+                error &&
+                error.originalError &&
+                typeof error.originalError.errMsg === "string"
+                  ? error.originalError.errMsg
+                  : null,
+              errCode:
+                error &&
+                error.originalError &&
+                Number.isFinite(error.originalError.errCode)
+                  ? error.originalError.errCode
+                  : null
             }
           );
 
