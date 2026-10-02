@@ -1,5 +1,5 @@
 const TEST_ROUTE_ID = "route-test-001";
-const TEST_START_TIME_MS = 1760000000000;
+const TEST_START_TIME_MS = Date.parse("2026-10-01T11:30:00.000Z");
 
 let storage;
 let callCloudFunction;
@@ -208,6 +208,26 @@ describe("walking-tracker", () => {
     storage.activeWalkTracking = {
       version: 99,
       status: "active"
+    };
+
+    expect(
+      walkingTracker.getTrackingSession()
+    ).toBeNull();
+
+    expect(
+      wx.removeStorageSync
+    ).toHaveBeenCalledWith(
+      "activeWalkTracking"
+    );
+  });
+
+  test("removes a stored tracking session older than 12 hours", () => {
+    storage.activeWalkTracking = {
+      version: 1,
+      status: "active",
+      routeId: TEST_ROUTE_ID,
+      startTimeMs:
+        Date.now() - 13 * 60 * 60 * 1000
     };
 
     expect(
