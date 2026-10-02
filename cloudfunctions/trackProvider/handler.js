@@ -309,6 +309,10 @@ function createTrackHandler({
               ? result.durationSeconds
               : 0,
           available: points.length > 0,
+          // An empty result is not treated as permanently unavailable.
+          // Track Cloud may accept an upload before that point becomes
+          // immediately visible to a subsequent search.
+          retryable: points.length === 0,
           partial: false
         }
       };
