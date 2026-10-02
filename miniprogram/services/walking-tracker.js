@@ -6,6 +6,7 @@ const TRACKING_STORAGE_KEY = "activeWalkTracking";
 const TRACKING_VERSION = 1;
 const MIN_UPLOAD_INTERVAL_MS = 15000;
 const MAX_PENDING_RETRY_ATTEMPTS = 1;
+const MAX_TRACKING_SESSION_AGE_MS = 12 * 60 * 60 * 1000;
 
 const ERROR_CODES = {
   INVALID_SESSION: "INVALID_TRACKING_SESSION",
@@ -66,6 +67,18 @@ function createTrackingSession(routeId, startTimeMs) {
   };
 }
 
+function isStaleTrackingSession(
+  session,
+  nowMs = Date.now()
+) {
+  return (
+    Number.isFinite(nowMs) &&
+    nowMs >= session.startTimeMs &&
+    nowMs - session.startTimeMs >
+      MAX_TRACKING_SESSION_AGE_MS
+  );
+}
+
 function getTrackingSession() {
   const session = wx.getStorageSync(TRACKING_STORAGE_KEY);
 
@@ -73,7 +86,10 @@ function getTrackingSession() {
     return null;
   }
 
-  if (!isValidTrackingSession(session)) {
+  if (
+    !isValidTrackingSession(session) ||
+    isStaleTrackingSession(session)
+  ) {
     wx.removeStorageSync(TRACKING_STORAGE_KEY);
     return null;
   }
@@ -470,6 +486,7 @@ module.exports = {
   TRACKING_VERSION,
   MIN_UPLOAD_INTERVAL_MS,
   MAX_PENDING_RETRY_ATTEMPTS,
+  MAX_TRACKING_SESSION_AGE_MS,
   ERROR_CODES,
   isValidTrackingSession,
   getTrackingSession,
