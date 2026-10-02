@@ -1,6 +1,7 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
 const ACTIVE_WALK_SESSION_VERSION = 1;
+const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
 
 function isValidRouteSnapshot(route) {
   return (
@@ -32,6 +33,35 @@ function isValidActiveWalkSession(session) {
   );
 }
 
+function isCompletedActiveWalkSession(session) {
+  const pendingResult = getPendingWalkResult();
+
+  if (!pendingResult) {
+    return false;
+  }
+
+  const pendingStartTimeMs =
+    Date.parse(pendingResult.startTime);
+
+  return (
+    pendingResult.routeId === session.routeId &&
+    Number.isFinite(pendingStartTimeMs) &&
+    pendingStartTimeMs === session.startTimeMs
+  );
+}
+
+function isStaleActiveWalkSession(
+  session,
+  nowMs = Date.now()
+) {
+  return (
+    Number.isFinite(nowMs) &&
+    nowMs >= session.startTimeMs &&
+    nowMs - session.startTimeMs >
+      MAX_ACTIVE_WALK_AGE_MS
+  );
+}
+
 function getActiveWalkSession() {
   const session = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
@@ -40,6 +70,14 @@ function getActiveWalkSession() {
   }
 
   if (!isValidActiveWalkSession(session)) {
+    wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
+    return null;
+  }
+
+  if (
+    isCompletedActiveWalkSession(session) ||
+    isStaleActiveWalkSession(session)
+  ) {
     wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
     return null;
   }
@@ -150,7 +188,9 @@ module.exports = {
   ACTIVE_WALK_STORAGE_KEY,
   PENDING_WALK_RESULT_STORAGE_KEY,
   ACTIVE_WALK_SESSION_VERSION,
+  MAX_ACTIVE_WALK_AGE_MS,
   isValidActiveWalkSession,
+  isStaleActiveWalkSession,
   isValidPendingWalkResult,
   getActiveWalkSession,
   createActiveWalkSession,
