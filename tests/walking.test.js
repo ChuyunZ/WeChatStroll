@@ -80,6 +80,7 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     reLaunch: jest.fn(),
     showModal: jest.fn(),
     showToast: jest.fn(),
+    openSetting: jest.fn(),
     getStorageSync: jest.fn(key => storage[key]),
     setStorageSync: jest.fn((key, value) => {
       storage[key] = value;
@@ -308,6 +309,90 @@ describe("Walking page", () => {
       title: "轨迹记录未开启，散步仍可继续",
       icon: "none"
     });
+
+    warnSpy.mockRestore();
+  });
+
+  test("guides the user to settings after background permission denial", async () => {
+    const warnSpy =
+      jest.spyOn(console, "warn")
+        .mockImplementation(() => {});
+
+    startTracking
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error("permission denied"),
+          {
+            code:
+              "BACKGROUND_LOCATION_PERMISSION_DENIED",
+            originalError: {
+              errMsg:
+                "startLocationUpdateBackground:fail auth deny"
+            }
+          }
+        )
+      )
+      .mockImplementationOnce(async args => {
+        trackerActive = true;
+
+        return {
+          session: {
+            version: 1,
+            status: "active",
+            routeId: args.routeId,
+            startTimeMs: args.startTimeMs
+          },
+          resumed: false
+        };
+      });
+
+    wx.showModal.mockImplementation(options => {
+      options.success({
+        confirm: true,
+        cancel: false
+      });
+
+      if (options.complete) {
+        options.complete();
+      }
+    });
+
+    wx.openSetting.mockImplementation(options => {
+      options.success({
+        authSetting: {
+          "scope.userLocationBackground": true
+        }
+      });
+    });
+
+    wx.setStorageSync("activeWalkSession", {
+      version: 1,
+      status: "active",
+      routeId: TEST_ROUTE.routeId,
+      route: TEST_ROUTE,
+      startTimeMs: Date.now(),
+      trackingEnabled: true
+    });
+
+    page.onLoad({
+      routeId: TEST_ROUTE.routeId
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(wx.showModal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "需要后台定位权限",
+        confirmText: "去设置",
+        cancelText: "暂不记录"
+      })
+    );
+
+    expect(wx.openSetting).toHaveBeenCalledTimes(1);
+    expect(startTracking).toHaveBeenCalledTimes(2);
 
     warnSpy.mockRestore();
   });
