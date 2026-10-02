@@ -378,10 +378,21 @@ describe("Walking page", () => {
       routeId: TEST_ROUTE.routeId
     });
 
+    const initialStartPromise =
+      page._trackingStartPromise;
+
+    if (initialStartPromise) {
+      await initialStartPromise;
+    }
+
     await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+
+    const retryStartPromise =
+      page._trackingStartPromise;
+
+    if (retryStartPromise) {
+      await retryStartPromise;
+    }
 
     expect(wx.showModal).toHaveBeenCalledWith(
       expect.objectContaining({
