@@ -139,16 +139,34 @@ function validateWalkContext(event) {
   }
 }
 
-function validateSearchRange(event) {
+function validateSearchRange(
+  event,
+  nowMs = Date.now()
+) {
   const startTimeMs = event && event.startTimeMs;
-  const endTimeMs = event && event.endTimeMs;
+  const requestedEndTimeMs = event && event.endTimeMs;
 
   if (
     !Number.isFinite(startTimeMs) ||
-    !Number.isFinite(endTimeMs) ||
-    startTimeMs <= 0 ||
-    endTimeMs <= startTimeMs
+    !Number.isFinite(requestedEndTimeMs) ||
+    !Number.isFinite(nowMs) ||
+    startTimeMs <= 0
   ) {
+    throw codedError(
+      "INVALID_TRACK_RANGE",
+      "Invalid walking trajectory time range."
+    );
+  }
+
+  // Tencent Track Cloud behaved inconsistently when queried with a
+  // future end_time during real-device POC. Never send a future range
+  // boundary to the provider.
+  const endTimeMs = Math.min(
+    requestedEndTimeMs,
+    nowMs
+  );
+
+  if (endTimeMs <= startTimeMs) {
     throw codedError(
       "INVALID_TRACK_RANGE",
       "Invalid walking trajectory time range."
@@ -164,7 +182,7 @@ function validateSearchRange(event) {
 
   return {
     startTimeSeconds: Math.floor(startTimeMs / 1000),
-    endTimeSeconds: Math.ceil(endTimeMs / 1000)
+    endTimeSeconds: Math.floor(endTimeMs / 1000)
   };
 }
 
@@ -212,7 +230,8 @@ function createTrackHandler({
   client,
   getOpenId,
   ensuredEntityIds = new Set(),
-  log = () => {}
+  log = () => {},
+  getNowMs = () => Date.now()
 }) {
   if (!config || !client || typeof getOpenId !== "function") {
     throw new Error("Track handler dependencies are required.");
@@ -281,7 +300,10 @@ function createTrackHandler({
         };
       }
 
-      const range = validateSearchRange(event);
+      const range = validateSearchRange(
+        event,
+        getNowMs()
+      );
       const result = await client.searchTrace(
         entityId,
         range.startTimeSeconds,
