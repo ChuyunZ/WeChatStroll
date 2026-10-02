@@ -17,6 +17,18 @@ function createWxMock() {
       delete storage[key];
     }),
 
+    getSetting: jest.fn(({ success }) => {
+      success({
+        authSetting: {
+          "scope.userLocationBackground": true
+        }
+      });
+    }),
+
+    authorize: jest.fn(({ success }) => {
+      success();
+    }),
+
     startLocationUpdateBackground: jest.fn(({ success }) => {
       success();
     }),
@@ -284,6 +296,84 @@ describe("walking-tracker", () => {
     expect(
       walkingTracker.isTracking()
     ).toBe(false);
+  });
+
+  test("requests background permission before starting when it is not granted yet", async () => {
+    wx.getSetting.mockImplementation(({ success }) => {
+      success({
+        authSetting: {}
+      });
+    });
+
+    await walkingTracker.startTracking({
+      routeId: TEST_ROUTE_ID,
+      startTimeMs: TEST_START_TIME_MS
+    });
+
+    expect(wx.authorize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "scope.userLocationBackground"
+      })
+    );
+
+    expect(
+      wx.startLocationUpdateBackground
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  test("reports background permission denial separately", async () => {
+    const authError = {
+      errMsg: "authorize:fail auth deny"
+    };
+
+    wx.getSetting.mockImplementation(({ success }) => {
+      success({
+        authSetting: {
+          "scope.userLocationBackground": false
+        }
+      });
+    });
+
+    wx.authorize.mockImplementation(({ fail }) => {
+      fail(authError);
+    });
+
+    await expect(
+      walkingTracker.startTracking({
+        routeId: TEST_ROUTE_ID,
+        startTimeMs: TEST_START_TIME_MS
+      })
+    ).rejects.toMatchObject({
+      code: "BACKGROUND_LOCATION_PERMISSION_DENIED",
+      originalError: authError
+    });
+
+    expect(
+      wx.startLocationUpdateBackground
+    ).not.toHaveBeenCalled();
+  });
+
+  test("maps startLocationUpdateBackground auth deny to permission denial", async () => {
+    const authError = {
+      errMsg:
+        "startLocationUpdateBackground:fail auth deny"
+    };
+
+    wx.startLocationUpdateBackground.mockImplementation(
+      ({ fail }) => {
+        fail(authError);
+      }
+    );
+
+    await expect(
+      walkingTracker.startTracking({
+        routeId: TEST_ROUTE_ID,
+        startTimeMs: TEST_START_TIME_MS
+      })
+    ).rejects.toMatchObject({
+      code: "BACKGROUND_LOCATION_PERMISSION_DENIED",
+      originalError: authError
+    });
   });
 
   test("fails safely when starting background location fails", async () => {
