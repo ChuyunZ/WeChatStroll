@@ -208,6 +208,30 @@ describe("trackProvider handler", () => {
     );
   });
 
+  test("clamps a future search end time to the current time", async () => {
+    const client = createClient();
+    const nowMs = 1760001200000;
+
+    const handler = createTrackHandler({
+      config,
+      client,
+      getOpenId: () => "openid-one",
+      getNowMs: () => nowMs
+    });
+
+    await handler({
+      action: "searchTrace",
+      startTimeMs: 1760000000000,
+      endTimeMs: nowMs + 5 * 60 * 1000
+    });
+
+    expect(client.searchTrace).toHaveBeenCalledWith(
+      expect.stringMatching(/^usr_[a-f0-9]{32}$/),
+      1760000000,
+      1760001200
+    );
+  });
+
   test("marks an empty successful search as retryable", async () => {
     const client = createClient();
     const handler = createTrackHandler({
