@@ -625,6 +625,61 @@ describe(
 
 
     test(
+      "onLoad clears stale transient guards so Start Walk cannot remain stuck after reload",
+      () => {
+        page._startPromptOpen = true;
+        page._startingWalk = true;
+        page._activeWalkRedirecting = true;
+        page._activeWalkRedirectStartedAtMs =
+          Date.now();
+
+        page.onLoad({
+          id: mockRoutes[0].routeId
+        });
+
+        expect(page._startPromptOpen).toBe(false);
+        expect(page._startingWalk).toBe(false);
+        expect(page._activeWalkRedirecting).toBe(false);
+        expect(
+          page._activeWalkRedirectStartedAtMs
+        ).toBe(0);
+      }
+    );
+
+
+    test(
+      "Route Detail recovers from an interrupted redirect lock",
+      () => {
+        wx.setStorageSync("activeWalkSession", {
+          version: 1,
+          status: "active",
+          routeId: GENERATED_ROUTE.routeId,
+          route: GENERATED_ROUTE,
+          startTimeMs: Date.now(),
+          trackingEnabled: false
+        });
+
+        page._activeWalkRedirecting = true;
+        page._activeWalkRedirectStartedAtMs =
+          Date.now() - 4000;
+
+        wx.navigateTo.mockClear();
+
+        page.onShow();
+
+        expect(wx.navigateTo).toHaveBeenCalledWith(
+          expect.objectContaining({
+            url:
+              `/pages/walking/walking?routeId=${encodeURIComponent(
+                GENERATED_ROUTE.routeId
+              )}`
+          })
+        );
+      }
+    );
+
+
+    test(
       "startWalk confirms, locks the route, and opens Walking",
       () => {
         const walkingEventChannel = {
