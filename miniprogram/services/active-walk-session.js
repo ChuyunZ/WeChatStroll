@@ -12,6 +12,13 @@ function isValidRouteSnapshot(route) {
   );
 }
 
+function hasValidTrackingPreference(session) {
+  return (
+    session.trackingEnabled === undefined ||
+    typeof session.trackingEnabled === "boolean"
+  );
+}
+
 function isValidActiveWalkSession(session) {
   return (
     session &&
@@ -24,7 +31,8 @@ function isValidActiveWalkSession(session) {
     isValidRouteSnapshot(session.route) &&
     session.route.routeId === session.routeId &&
     Number.isFinite(session.startTimeMs) &&
-    session.startTimeMs > 0
+    session.startTimeMs > 0 &&
+    hasValidTrackingPreference(session)
   );
 }
 
@@ -43,7 +51,11 @@ function getActiveWalkSession() {
   return session;
 }
 
-function createActiveWalkSession(route, startTimeMs = Date.now()) {
+function createActiveWalkSession(
+  route,
+  startTimeMs = Date.now(),
+  { trackingEnabled = false } = {}
+) {
   const existingSession = getActiveWalkSession();
 
   if (existingSession) {
@@ -66,7 +78,8 @@ function createActiveWalkSession(route, startTimeMs = Date.now()) {
     status: "active",
     routeId: route.routeId,
     route,
-    startTimeMs
+    startTimeMs,
+    trackingEnabled: trackingEnabled === true
   };
 
   wx.setStorageSync(ACTIVE_WALK_STORAGE_KEY, session);
@@ -105,7 +118,13 @@ function isValidPendingWalkResult(result) {
     typeof result.endTime === "string" &&
     Number.isFinite(result.actualDurationSeconds) &&
     result.actualDurationSeconds >= 0 &&
-    ["completed", "ended_early"].includes(result.completionStatus)
+    ["completed", "ended_early"].includes(
+      result.completionStatus
+    ) &&
+    (
+      result.trajectoryEnabled === undefined ||
+      typeof result.trajectoryEnabled === "boolean"
+    )
   );
 }
 
@@ -114,19 +133,26 @@ function savePendingWalkResult(result) {
     throw new Error("Invalid pending walk result.");
   }
 
-  wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, result);
+  wx.setStorageSync(
+    PENDING_WALK_RESULT_STORAGE_KEY,
+    result
+  );
   return result;
 }
 
 function getPendingWalkResult() {
-  const result = wx.getStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+  const result = wx.getStorageSync(
+    PENDING_WALK_RESULT_STORAGE_KEY
+  );
 
   if (!result) {
     return null;
   }
 
   if (!isValidPendingWalkResult(result)) {
-    wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+    wx.removeStorageSync(
+      PENDING_WALK_RESULT_STORAGE_KEY
+    );
     return null;
   }
 
@@ -134,7 +160,9 @@ function getPendingWalkResult() {
 }
 
 function clearPendingWalkResult() {
-  wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+  wx.removeStorageSync(
+    PENDING_WALK_RESULT_STORAGE_KEY
+  );
 }
 
 module.exports = {
