@@ -502,8 +502,27 @@ Page({
               return;
             }
 
-            this._trackingUnavailable = false;
-            this.initializeTrajectoryTracking();
+            const pendingStart =
+              this._trackingStartPromise;
+
+            const retry = () => {
+              if (
+                !this._active ||
+                this.data.ended ||
+                this._trackingFinalizing
+              ) {
+                return;
+              }
+
+              this._trackingUnavailable = false;
+              this.initializeTrajectoryTracking();
+            };
+
+            if (pendingStart) {
+              pendingStart.finally(retry);
+            } else {
+              retry();
+            }
           }
         });
       },
