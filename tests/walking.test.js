@@ -479,8 +479,11 @@ describe("Walking page", () => {
 
     page.finishWalk();
 
-    await Promise.resolve();
-    await Promise.resolve();
+    const trackingStopPromise = page._trackingStopPromise;
+
+    if (trackingStopPromise) {
+      await trackingStopPromise;
+    }
 
     expect(stopTracking).toHaveBeenCalledTimes(1);
 
@@ -524,8 +527,11 @@ describe("Walking page", () => {
 
     page.endWalkEarly();
 
-    await Promise.resolve();
-    await Promise.resolve();
+    const trackingStopPromise = page._trackingStopPromise;
+
+    if (trackingStopPromise) {
+      await trackingStopPromise;
+    }
 
     expect(stopTracking).toHaveBeenCalledTimes(1);
     expect(
@@ -667,8 +673,12 @@ describe("Walking page", () => {
 
     page.finishWalk();
 
-    await Promise.resolve();
-    await Promise.resolve();
+    const trackingStopPromise = page._trackingStopPromise;
+
+    if (trackingStopPromise) {
+      await trackingStopPromise;
+    }
+
     await Promise.resolve();
 
     expect(stopTracking).toHaveBeenCalledTimes(1);
