@@ -389,6 +389,45 @@ async function uploadLocation(location, nowMs = Date.now()) {
   }
 }
 
+function captureInitialLocation() {
+  if (
+    !activeSession ||
+    typeof wx.getLocation !== "function"
+  ) {
+    return;
+  }
+
+  wx.getLocation({
+    type: "gcj02",
+
+    success: location => {
+      uploadLocation(location).catch(error => {
+        console.warn(
+          "[Walking Tracker] Initial location upload failed.",
+          {
+            code:
+              error && error.code
+                ? error.code
+                : "TRACK_UPLOAD_FAILED"
+          }
+        );
+      });
+    },
+
+    fail: error => {
+      console.warn(
+        "[Walking Tracker] Unable to capture initial location.",
+        {
+          errMsg:
+            error && typeof error.errMsg === "string"
+              ? error.errMsg
+              : null
+        }
+      );
+    }
+  });
+}
+
 function attachLocationListener() {
   if (locationHandler) {
     return;
@@ -465,6 +504,7 @@ async function startTracking({ routeId, startTimeMs }) {
 
     attachLocationListener();
     saveTrackingSession(session);
+    captureInitialLocation();
   } catch (error) {
     activeSession = null;
     detachLocationListener();
