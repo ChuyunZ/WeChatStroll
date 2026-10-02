@@ -195,6 +195,7 @@ describe("trackProvider handler", () => {
         mileageMeters: 123.5,
         durationSeconds: 90,
         available: true,
+        retryable: false,
         partial: false
       }
     });
@@ -205,6 +206,33 @@ describe("trackProvider handler", () => {
     expect(client.searchTrace.mock.calls[0][0]).not.toBe(
       "attacker-controlled-id"
     );
+  });
+
+  test("marks an empty successful search as retryable", async () => {
+    const client = createClient();
+    const handler = createTrackHandler({
+      config,
+      client,
+      getOpenId: () => "openid-one"
+    });
+
+    const result = await handler({
+      action: "searchTrace",
+      startTimeMs: 1760000000000,
+      endTimeMs: 1760001800000
+    });
+
+    expect(result).toEqual({
+      success: true,
+      trace: {
+        points: [],
+        mileageMeters: 0,
+        durationSeconds: 0,
+        available: false,
+        retryable: true,
+        partial: false
+      }
+    });
   });
 
   test("rejects search windows longer than 24 hours", async () => {
