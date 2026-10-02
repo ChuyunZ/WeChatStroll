@@ -12,6 +12,7 @@ const ERROR_CODES = {
   INVALID_SESSION: "INVALID_TRACKING_SESSION",
   SESSION_CONFLICT: "TRACKING_SESSION_CONFLICT",
   BACKGROUND_LOCATION_UNAVAILABLE: "BACKGROUND_LOCATION_UNAVAILABLE",
+  BACKGROUND_LOCATION_PERMISSION_DENIED: "BACKGROUND_LOCATION_PERMISSION_DENIED",
   BACKGROUND_LOCATION_FAILED: "BACKGROUND_LOCATION_FAILED"
 };
 
@@ -113,15 +114,92 @@ function clearTrackingSession() {
   wx.removeStorageSync(TRACKING_STORAGE_KEY);
 }
 
-function startBackgroundLocation() {
-  if (typeof wx.startLocationUpdateBackground !== "function") {
-    return Promise.reject(
-      createCodedError(
-        ERROR_CODES.BACKGROUND_LOCATION_UNAVAILABLE,
-        "Background location is not available."
-      )
+function getSettings() {
+  if (typeof wx.getSetting !== "function") {
+    return Promise.resolve({
+      authSetting: {}
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    wx.getSetting({
+      success: resolve,
+      fail: reject
+    });
+  });
+}
+
+function authorizeBackgroundLocation() {
+  if (typeof wx.authorize !== "function") {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    wx.authorize({
+      scope: "scope.userLocationBackground",
+      success: resolve,
+      fail: reject
+    });
+  });
+}
+
+async function ensureBackgroundLocationPermission() {
+  let settings;
+
+  try {
+    settings = await getSettings();
+  } catch (error) {
+    throw createCodedError(
+      ERROR_CODES.BACKGROUND_LOCATION_PERMISSION_DENIED,
+      "Unable to read background location permission.",
+      error
     );
   }
+
+  if (
+    settings &&
+    settings.authSetting &&
+    settings.authSetting[
+      "scope.userLocationBackground"
+    ] === true
+  ) {
+    return true;
+  }
+
+  try {
+    await authorizeBackgroundLocation();
+    return true;
+  } catch (error) {
+    throw createCodedError(
+      ERROR_CODES.BACKGROUND_LOCATION_PERMISSION_DENIED,
+      "Background location permission was denied.",
+      error
+    );
+  }
+}
+
+function isBackgroundLocationAuthError(error) {
+  const message =
+    error && typeof error.errMsg === "string"
+      ? error.errMsg.toLowerCase()
+      : "";
+
+  return (
+    message.includes("auth deny") ||
+    message.includes("unauthorized") ||
+    message.includes("permission")
+  );
+}
+
+async function startBackgroundLocation() {
+  if (typeof wx.startLocationUpdateBackground !== "function") {
+    throw createCodedError(
+      ERROR_CODES.BACKGROUND_LOCATION_UNAVAILABLE,
+      "Background location is not available."
+    );
+  }
+
+  await ensureBackgroundLocationPermission();
 
   return new Promise((resolve, reject) => {
     wx.startLocationUpdateBackground({
@@ -134,7 +212,9 @@ function startBackgroundLocation() {
       fail: error => {
         reject(
           createCodedError(
-            ERROR_CODES.BACKGROUND_LOCATION_FAILED,
+            isBackgroundLocationAuthError(error)
+              ? ERROR_CODES.BACKGROUND_LOCATION_PERMISSION_DENIED
+              : ERROR_CODES.BACKGROUND_LOCATION_FAILED,
             "Unable to start background location.",
             error
           )
@@ -490,6 +570,7 @@ module.exports = {
   ERROR_CODES,
   isValidTrackingSession,
   getTrackingSession,
+  ensureBackgroundLocationPermission,
   startTracking,
   resumeTracking,
   stopTracking,
