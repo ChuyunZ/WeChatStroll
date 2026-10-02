@@ -641,12 +641,23 @@ describe(
         page.loadRoute(GENERATED_ROUTE);
         page.startWalk();
 
-        expect(wx.showModal).toHaveBeenCalledWith(
+        expect(wx.showModal).toHaveBeenNthCalledWith(
+          1,
           expect.objectContaining({
             title: "确认开始这次散步？",
             content: expect.stringContaining("结束本次散步前无法更换路线"),
             confirmText: "开始散步",
             cancelText: "再看看"
+          })
+        );
+
+        expect(wx.showModal).toHaveBeenNthCalledWith(
+          2,
+          expect.objectContaining({
+            title: "记录实际步行轨迹？",
+            content: expect.stringContaining("腾讯轨迹服务"),
+            confirmText: "记录轨迹",
+            cancelText: "暂不记录"
           })
         );
 
@@ -657,7 +668,8 @@ describe(
             status: "active",
             routeId: GENERATED_ROUTE.routeId,
             route: GENERATED_ROUTE,
-            startTimeMs: expect.any(Number)
+            startTimeMs: expect.any(Number),
+            trackingEnabled: true
           })
         );
 
@@ -685,9 +697,20 @@ describe(
       "rapid duplicate Start Walk taps open only one confirmation and one Walking page",
       () => {
         let confirmStart;
+        let confirmTracking;
 
         wx.showModal.mockImplementation(options => {
-          confirmStart = () => {
+          if (options.title === "确认开始这次散步？") {
+            confirmStart = () => {
+              options.success({
+                confirm: true,
+                cancel: false
+              });
+            };
+            return;
+          }
+
+          confirmTracking = () => {
             options.success({
               confirm: true,
               cancel: false
@@ -705,8 +728,51 @@ describe(
 
         confirmStart();
 
+        expect(wx.showModal).toHaveBeenCalledTimes(2);
+
+        page.startWalk();
+
+        expect(wx.showModal).toHaveBeenCalledTimes(2);
+        expect(wx.navigateTo).not.toHaveBeenCalled();
+
+        confirmTracking();
+
         expect(wx.navigateTo).toHaveBeenCalledTimes(1);
         expect(wx.setStorageSync).toHaveBeenCalledTimes(1);
+      }
+    );
+
+
+    test(
+      "declining trajectory recording still starts the walk",
+      () => {
+        wx.showModal.mockImplementation(options => {
+          if (options.title === "确认开始这次散步？") {
+            options.success({
+              confirm: true,
+              cancel: false
+            });
+            return;
+          }
+
+          options.success({
+            confirm: false,
+            cancel: true
+          });
+        });
+
+        page.loadRoute(GENERATED_ROUTE);
+        page.startWalk();
+
+        expect(wx.setStorageSync).toHaveBeenCalledWith(
+          "activeWalkSession",
+          expect.objectContaining({
+            routeId: GENERATED_ROUTE.routeId,
+            trackingEnabled: false
+          })
+        );
+
+        expect(wx.navigateTo).toHaveBeenCalledTimes(1);
       }
     );
 
