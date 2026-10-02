@@ -3,7 +3,6 @@ const { isValidGeoPoint } = require("../../utils/geo");
 const { buildRouteMap } = require("../../utils/route-map");
 const locationService = require("../../services/location");
 const activeWalkSessionService = require("../../services/active-walk-session");
-const walkingTracker = require("../../services/walking-tracker");
 
 const TIMER_INTERVAL_MS = 1000;
 
@@ -71,10 +70,6 @@ Page({
     this._timer = null;
     this._route = null;
     this._startTimeMs = null;
-    this._trackingEnabled = false;
-    this._trackingUnavailable = false;
-    this._trackingFinalizing = false;
-    this._trackingStartPromise = null;
 
     this.initializeNavigationBar();
 
@@ -105,11 +100,7 @@ Page({
         return;
       }
 
-      this.loadWalkingRoute(
-        activeSession.route,
-        activeSession.startTimeMs,
-        activeSession.trackingEnabled === true
-      );
+      this.loadWalkingRoute(activeSession.route, activeSession.startTimeMs);
       return;
     }
 
@@ -153,7 +144,6 @@ Page({
     if (this._active) {
       this.updateElapsedTime();
       this.startTimer();
-      this.initializeTrajectoryTracking();
     }
   },
 
@@ -248,16 +238,11 @@ Page({
 
     this.loadWalkingRoute(
       sessionResult.session.route,
-      sessionResult.session.startTimeMs,
-      sessionResult.session.trackingEnabled === true
+      sessionResult.session.startTimeMs
     );
   },
 
-  loadWalkingRoute(
-    route,
-    startTimeMs = Date.now(),
-    trackingEnabled = false
-  ) {
+  loadWalkingRoute(route, startTimeMs = Date.now()) {
     if (!this.isValidRoute(route)) {
       this.showRouteError();
       return;
@@ -267,9 +252,6 @@ Page({
     this._startTimeMs = startTimeMs;
     this._active = true;
     this._finishing = false;
-    this._trackingEnabled = trackingEnabled === true;
-    this._trackingUnavailable = false;
-    this._trackingFinalizing = false;
 
     const routeMap = buildRouteMap(route);
     const middleIndex = Math.floor(route.polyline.length / 2);
@@ -310,7 +292,6 @@ Page({
 
     this.enableLeaveProtection();
     this.initializeUserLocation();
-    this.initializeTrajectoryTracking();
     this.updateElapsedTime();
 
     if (this._pageVisible) {
@@ -321,9 +302,6 @@ Page({
   showRouteError() {
     this._active = false;
     this._route = null;
-    this._trackingEnabled = false;
-    this._trackingUnavailable = false;
-    this._trackingFinalizing = false;
 
     this.stopTimer();
     this.disableLeaveProtection();
@@ -387,99 +365,6 @@ Page({
         locationMessage: "暂时无法显示当前位置"
       });
     }
-  },
-
-  initializeTrajectoryTracking() {
-    if (
-      !this._active ||
-      !this._trackingEnabled ||
-      this._trackingUnavailable ||
-      this._trackingFinalizing ||
-      this.data.ended ||
-      this._trackingStartPromise ||
-      walkingTracker.isTracking()
-    ) {
-      return this._trackingStartPromise;
-    }
-
-    const startPromise = walkingTracker
-      .startTracking({
-        routeId: this._route.routeId,
-        startTimeMs: this._startTimeMs
-      })
-      .then(async result => {
-        if (
-          this._trackingFinalizing ||
-          !this._active ||
-          this.data.ended
-        ) {
-          try {
-            await walkingTracker.stopTracking();
-          } catch (error) {
-            console.warn(
-              "[Walking] Unable to stop late trajectory tracking.",
-              {
-                code:
-                  error && error.code
-                    ? error.code
-                    : "TRACK_STOP_FAILED"
-              }
-            );
-          }
-        }
-
-        return result;
-      })
-      .catch(error => {
-        if (!this._trackingFinalizing) {
-          this._trackingUnavailable = true;
-
-          console.warn(
-            "[Walking] Trajectory tracking unavailable.",
-            {
-              code:
-                error && error.code
-                  ? error.code
-                  : "TRACKING_UNAVAILABLE"
-            }
-          );
-
-          wx.showToast({
-            title: "轨迹记录未开启，散步仍可继续",
-            icon: "none"
-          });
-        }
-
-        return null;
-      })
-      .finally(() => {
-        if (this._trackingStartPromise === startPromise) {
-          this._trackingStartPromise = null;
-        }
-      });
-
-    this._trackingStartPromise = startPromise;
-    return startPromise;
-  },
-
-  finalizeTrajectoryTracking() {
-    this._trackingFinalizing = true;
-
-    if (!this._trackingEnabled) {
-      return;
-    }
-
-    walkingTracker.stopTracking().catch(error => {
-      console.warn(
-        "[Walking] Unable to stop trajectory tracking.",
-        {
-          code:
-            error && error.code
-              ? error.code
-              : "TRACK_STOP_FAILED"
-        }
-      );
-    });
   },
 
   updateElapsedTime() {
@@ -594,7 +479,6 @@ Page({
     }
 
     this._finishing = true;
-    this.finalizeTrajectoryTracking();
 
     const endTimeMs = Date.now();
     const actualDurationSeconds = Math.max(
@@ -608,8 +492,7 @@ Page({
       startTime: new Date(this._startTimeMs).toISOString(),
       endTime: new Date(endTimeMs).toISOString(),
       actualDurationSeconds,
-      completionStatus,
-      trajectoryEnabled: this._trackingEnabled
+      completionStatus
     };
 
     try {
@@ -659,10 +542,7 @@ Page({
         try {
           activeWalkSessionService.createActiveWalkSession(
             this._route,
-            this._startTimeMs,
-            {
-              trackingEnabled: this._trackingEnabled
-            }
+            this._startTimeMs
           );
         } catch (error) {
           console.warn("[Walking] Unable to restore active session after navigation failure.");
@@ -676,8 +556,6 @@ Page({
 
         this._active = true;
         this._finishing = false;
-        this._trackingFinalizing = false;
-        this._trackingUnavailable = false;
 
         this.setData({
           finishing: false,
@@ -689,8 +567,6 @@ Page({
         if (this._pageVisible) {
           this.startTimer();
         }
-
-        this.initializeTrajectoryTracking();
 
         wx.showToast({
           title: "暂时无法打开评价页面",

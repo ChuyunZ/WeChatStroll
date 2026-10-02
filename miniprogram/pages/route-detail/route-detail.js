@@ -427,8 +427,7 @@ Page({
     let activeSession;
 
     try {
-      activeSession =
-        activeWalkSessionService.getActiveWalkSession();
+      activeSession = activeWalkSessionService.getActiveWalkSession();
     } catch (error) {
       wx.showToast({
         title: "暂时无法读取散步状态",
@@ -443,9 +442,7 @@ Page({
     }
 
     const route = this._confirmedRoute;
-    const distanceKm = (
-      route.distanceMeters / 1000
-    ).toFixed(1);
+    const distanceKm = (route.distanceMeters / 1000).toFixed(1);
 
     this._startPromptOpen = true;
 
@@ -457,12 +454,66 @@ Page({
       cancelText: "再看看",
 
       success: res => {
+        this._startPromptOpen = false;
+
         if (!res.confirm) {
-          this._startPromptOpen = false;
           return;
         }
 
-        this.requestTrackingPreference();
+        this._startingWalk = true;
+
+        let sessionResult;
+
+        try {
+          sessionResult = activeWalkSessionService.createActiveWalkSession(route);
+        } catch (error) {
+          this._startingWalk = false;
+          wx.showToast({
+            title: "暂时无法开始散步",
+            icon: "none"
+          });
+          return;
+        }
+
+        const { session, created } = sessionResult;
+
+        if (!created && session.routeId !== route.routeId) {
+          this._startingWalk = false;
+          this.resumeActiveWalk(session);
+          return;
+        }
+
+        wx.navigateTo({
+          url: `/pages/walking/walking?routeId=${encodeURIComponent(session.routeId)}`,
+
+          success(navigateResult) {
+            if (
+              navigateResult.eventChannel &&
+              typeof navigateResult.eventChannel.emit === "function"
+            ) {
+              navigateResult.eventChannel.emit("walkingRoute", session.route);
+            }
+          },
+
+          fail: () => {
+            if (created) {
+              try {
+                activeWalkSessionService.clearActiveWalkSession(session.routeId);
+              } catch (error) {
+                console.warn("[Route Detail] Unable to clear failed walk session.");
+              }
+            }
+
+            wx.showToast({
+              title: "暂时无法打开散步页面",
+              icon: "none"
+            });
+          },
+
+          complete: () => {
+            this._startingWalk = false;
+          }
+        });
       },
 
       fail: () => {
@@ -471,112 +522,6 @@ Page({
           title: "暂时无法打开开始确认",
           icon: "none"
         });
-      }
-    });
-  },
-
-  requestTrackingPreference() {
-    wx.showModal({
-      title: "记录实际步行轨迹？",
-      content:
-        "开启后，本次散步期间会使用后台定位记录你实际走过的 GPS 轨迹，并保存到腾讯轨迹服务，用于历史路线和实际里程。暂不记录也可以正常散步。",
-      confirmText: "记录轨迹",
-      cancelText: "暂不记录",
-
-      success: res => {
-        this._startPromptOpen = false;
-        this.beginWalk(res.confirm === true);
-      },
-
-      fail: () => {
-        this._startPromptOpen = false;
-        this.beginWalk(false);
-      }
-    });
-  },
-
-  beginWalk(trackingEnabled) {
-    if (
-      this._startingWalk ||
-      !this.isValidRoute(this._confirmedRoute)
-    ) {
-      return;
-    }
-
-    this._startingWalk = true;
-
-    const route = this._confirmedRoute;
-    let sessionResult;
-
-    try {
-      sessionResult =
-        activeWalkSessionService.createActiveWalkSession(
-          route,
-          Date.now(),
-          {
-            trackingEnabled
-          }
-        );
-    } catch (error) {
-      this._startingWalk = false;
-      wx.showToast({
-        title: "暂时无法开始散步",
-        icon: "none"
-      });
-      return;
-    }
-
-    const { session, created } = sessionResult;
-
-    if (
-      !created &&
-      session.routeId !== route.routeId
-    ) {
-      this._startingWalk = false;
-      this.resumeActiveWalk(session);
-      return;
-    }
-
-    wx.navigateTo({
-      url:
-        `/pages/walking/walking?routeId=${encodeURIComponent(
-          session.routeId
-        )}`,
-
-      success(navigateResult) {
-        if (
-          navigateResult.eventChannel &&
-          typeof navigateResult.eventChannel.emit ===
-            "function"
-        ) {
-          navigateResult.eventChannel.emit(
-            "walkingRoute",
-            session.route
-          );
-        }
-      },
-
-      fail: () => {
-        if (created) {
-          try {
-            activeWalkSessionService.clearActiveWalkSession(
-              session.routeId
-            );
-          } catch (error) {
-            console.warn(
-              "[Route Detail] Unable to clear failed walk session."
-            );
-          }
-        }
-
-        wx.showToast({
-          title: "暂时无法打开散步页面",
-          icon: "none"
-        });
-      },
-
-      complete: () => {
-        this._startingWalk = false;
       }
     });
   }
