@@ -324,7 +324,9 @@ describe("walking-tracker", () => {
           longitude: 121.4737,
           timestampMs: nowMs,
           accuracy: 8,
-          speed: 1.2
+          speed: 1.2,
+          direction: null,
+          altitude: null
         }
       },
       {
@@ -333,6 +335,196 @@ describe("walking-tracker", () => {
           "Unable to upload walking location."
       }
     );
+  });
+
+  test("preserves source timestamp and optional GPS metadata", async () => {
+    await walkingTracker.startTracking({
+      routeId: TEST_ROUTE_ID,
+      startTimeMs: TEST_START_TIME_MS
+    });
+
+    const handler =
+      wx.onLocationChange.mock.calls[0][0];
+
+    const sourceTimestampMs =
+      Date.now() - 4321;
+
+    handler(
+      validLocation({
+        accuracy: undefined,
+        horizontalAccuracy: 6,
+        timestampMs: sourceTimestampMs,
+        direction: 135,
+        altitude: 12
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledWith(
+      "trackProvider",
+      {
+        action: "uploadTrace",
+        routeId: TEST_ROUTE_ID,
+        walkStartTimeMs: TEST_START_TIME_MS,
+        point: {
+          latitude: 31.2304,
+          longitude: 121.4737,
+          timestampMs: sourceTimestampMs,
+          accuracy: 6,
+          speed: 1.2,
+          direction: 135,
+          altitude: 12
+        }
+      },
+      expect.any(Object)
+    );
+  });
+
+  test("retries one failed point on the next eligible callback", async () => {
+    const warnSpy =
+      jest.spyOn(console, "warn")
+        .mockImplementation(() => {});
+
+    callCloudFunction
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error("temporary failure"),
+          {
+            code: "TRACK_UPLOAD_FAILED"
+          }
+        )
+      )
+      .mockResolvedValueOnce({
+        success: true
+      });
+
+    await walkingTracker.startTracking({
+      routeId: TEST_ROUTE_ID,
+      startTimeMs: TEST_START_TIME_MS
+    });
+
+    const handler =
+      wx.onLocationChange.mock.calls[0][0];
+
+    handler(
+      validLocation({
+        latitude: 31.2304
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    jest.setSystemTime(
+      new Date("2026-10-01T12:00:15.000Z")
+    );
+
+    handler(
+      validLocation({
+        latitude: 31.2309
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(2);
+
+    expect(
+      callCloudFunction.mock.calls[1][1].point.latitude
+    ).toBe(31.2304);
+
+    warnSpy.mockRestore();
+  });
+
+  test("drops a point after its single buffered retry fails", async () => {
+    const warnSpy =
+      jest.spyOn(console, "warn")
+        .mockImplementation(() => {});
+
+    callCloudFunction
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error("first failure"),
+          {
+            code: "TRACK_UPLOAD_FAILED"
+          }
+        )
+      )
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error("retry failure"),
+          {
+            code: "TRACK_UPLOAD_FAILED"
+          }
+        )
+      )
+      .mockResolvedValueOnce({
+        success: true
+      });
+
+    await walkingTracker.startTracking({
+      routeId: TEST_ROUTE_ID,
+      startTimeMs: TEST_START_TIME_MS
+    });
+
+    const handler =
+      wx.onLocationChange.mock.calls[0][0];
+
+    handler(
+      validLocation({
+        latitude: 31.2304
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    jest.setSystemTime(
+      new Date("2026-10-01T12:00:15.000Z")
+    );
+
+    handler(
+      validLocation({
+        latitude: 31.2305
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    jest.setSystemTime(
+      new Date("2026-10-01T12:00:30.000Z")
+    );
+
+    handler(
+      validLocation({
+        latitude: 31.2306
+      })
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(3);
+
+    expect(
+      callCloudFunction.mock.calls[1][1].point.latitude
+    ).toBe(31.2304);
+
+    expect(
+      callCloudFunction.mock.calls[2][1].point.latitude
+    ).toBe(31.2306);
+
+    warnSpy.mockRestore();
   });
 
   test("does not upload invalid location samples", async () => {
