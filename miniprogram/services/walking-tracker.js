@@ -95,6 +95,20 @@ function clearTrackingSession() {
   wx.removeStorageSync(TRACKING_STORAGE_KEY);
 }
 
+async function ensureTrackEntity() {
+  return callCloudFunction(
+    "trackProvider",
+    {
+      action: "ensureEntity"
+    },
+    {
+      fallbackCode: "TRACK_ENTITY_FAILED",
+      fallbackMessage:
+        "Unable to prepare walking trajectory storage."
+    }
+  );
+}
+
 function startBackgroundLocation() {
   if (typeof wx.startLocationUpdateBackground !== "function") {
     return Promise.reject(
@@ -150,20 +164,49 @@ function stopBackgroundLocation() {
   });
 }
 
+function sourceTimestampMs(location, fallbackMs = Date.now()) {
+  const candidates = [
+    location && location.time,
+    location && location.timestampMs,
+    location && location.timestamp
+  ];
+
+  const timestamp = candidates.find(
+    value => Number.isFinite(value) && value > 0
+  );
+
+  return timestamp || fallbackMs;
+}
+
 function normalizeLocation(location, timestampMs = Date.now()) {
   if (!isValidGeoPoint(location)) {
     return null;
   }
 
+  const accuracy = Number.isFinite(location.accuracy)
+    ? location.accuracy
+    : Number.isFinite(location.horizontalAccuracy)
+      ? location.horizontalAccuracy
+      : null;
+
+  const direction = Number.isFinite(location.direction)
+    ? location.direction
+    : Number.isFinite(location.heading)
+      ? location.heading
+      : null;
+
   return {
     latitude: location.latitude,
     longitude: location.longitude,
-    timestampMs,
-    accuracy: Number.isFinite(location.accuracy)
-      ? location.accuracy
-      : null,
-    speed: Number.isFinite(location.speed)
-      ? location.speed
+    timestampMs: sourceTimestampMs(location, timestampMs),
+    accuracy,
+    speed:
+      Number.isFinite(location.speed) && location.speed >= 0
+        ? location.speed
+        : 0,
+    direction,
+    altitude: Number.isFinite(location.altitude)
+      ? location.altitude
       : null
   };
 }
@@ -221,7 +264,10 @@ async function uploadLocation(location, nowMs = Date.now()) {
     return true;
   } catch (error) {
     console.warn("[Walking Tracker] Location upload failed.", {
-      code: error && error.code ? error.code : "TRACK_UPLOAD_FAILED"
+      code:
+        error && error.code
+          ? error.code
+          : "TRACK_UPLOAD_FAILED"
     });
 
     return false;
@@ -244,9 +290,15 @@ function attachLocationListener() {
 
   locationHandler = location => {
     uploadLocation(location).catch(error => {
-      console.warn("[Walking Tracker] Unexpected location upload error.", {
-        code: error && error.code ? error.code : "TRACK_UPLOAD_FAILED"
-      });
+      console.warn(
+        "[Walking Tracker] Unexpected location upload error.",
+        {
+          code:
+            error && error.code
+              ? error.code
+              : "TRACK_UPLOAD_FAILED"
+        }
+      );
     });
   };
 
@@ -266,10 +318,18 @@ function detachLocationListener() {
 }
 
 async function startTracking({ routeId, startTimeMs }) {
-  const requestedSession = createTrackingSession(routeId, startTimeMs);
+  const requestedSession = createTrackingSession(
+    routeId,
+    startTimeMs
+  );
 
   if (activeSession) {
-    if (isSameTrackingSession(activeSession, requestedSession)) {
+    if (
+      isSameTrackingSession(
+        activeSession,
+        requestedSession
+      )
+    ) {
       return {
         session: activeSession,
         resumed: true
@@ -286,7 +346,10 @@ async function startTracking({ routeId, startTimeMs }) {
 
   if (
     storedSession &&
-    !isSameTrackingSession(storedSession, requestedSession)
+    !isSameTrackingSession(
+      storedSession,
+      requestedSession
+    )
   ) {
     throw createCodedError(
       ERROR_CODES.SESSION_CONFLICT,
@@ -296,6 +359,9 @@ async function startTracking({ routeId, startTimeMs }) {
 
   const session = storedSession || requestedSession;
 
+  // Resolve the authenticated user's opaque Track Cloud entity before
+  // enabling continuous location collection.
+  await ensureTrackEntity();
   await startBackgroundLocation();
 
   try {
@@ -312,12 +378,15 @@ async function startTracking({ routeId, startTimeMs }) {
     try {
       await stopBackgroundLocation();
     } catch (stopError) {
-      console.warn("[Walking Tracker] Unable to stop location after setup failure.", {
-        code:
-          stopError && stopError.code
-            ? stopError.code
-            : ERROR_CODES.BACKGROUND_LOCATION_FAILED
-      });
+      console.warn(
+        "[Walking Tracker] Unable to stop location after setup failure.",
+        {
+          code:
+            stopError && stopError.code
+              ? stopError.code
+              : ERROR_CODES.BACKGROUND_LOCATION_FAILED
+        }
+      );
     }
 
     throw error;
@@ -349,18 +418,22 @@ async function stopTracking() {
 
   activeSession = null;
   lastUploadAttemptAtMs = 0;
+  uploadInFlight = false;
 
   clearTrackingSession();
 
   try {
     await stopBackgroundLocation();
   } catch (error) {
-    console.warn("[Walking Tracker] Unable to stop background location.", {
-      code:
-        error && error.code
-          ? error.code
-          : ERROR_CODES.BACKGROUND_LOCATION_FAILED
-    });
+    console.warn(
+      "[Walking Tracker] Unable to stop background location.",
+      {
+        code:
+          error && error.code
+            ? error.code
+            : ERROR_CODES.BACKGROUND_LOCATION_FAILED
+      }
+    );
 
     throw error;
   }
