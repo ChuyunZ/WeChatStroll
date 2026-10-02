@@ -5,6 +5,7 @@ const { createCodedError } = require("../utils/errors");
 const TRACKING_STORAGE_KEY = "activeWalkTracking";
 const TRACKING_VERSION = 1;
 const MIN_UPLOAD_INTERVAL_MS = 15000;
+const MAX_PENDING_RETRY_ATTEMPTS = 1;
 
 const ERROR_CODES = {
   INVALID_SESSION: "INVALID_TRACKING_SESSION",
@@ -17,6 +18,7 @@ let activeSession = null;
 let locationHandler = null;
 let lastUploadAttemptAtMs = 0;
 let uploadInFlight = false;
+let pendingUpload = null;
 
 function isValidTrackingSession(session) {
   return (
@@ -150,20 +152,57 @@ function stopBackgroundLocation() {
   });
 }
 
-function normalizeLocation(location, timestampMs = Date.now()) {
+function normalizeTimestampMs(value, fallbackMs) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallbackMs;
+  }
+
+  // Accept either Unix seconds or milliseconds from platform callbacks.
+  return value < 1e12
+    ? Math.floor(value * 1000)
+    : Math.floor(value);
+}
+
+function normalizeLocation(location, fallbackTimestampMs = Date.now()) {
   if (!isValidGeoPoint(location)) {
     return null;
   }
 
+  const sourceTimestamp =
+    Number.isFinite(location.timestampMs)
+      ? location.timestampMs
+      : Number.isFinite(location.timestamp)
+        ? location.timestamp
+        : Number.isFinite(location.time)
+          ? location.time
+          : fallbackTimestampMs;
+
+  const accuracy = Number.isFinite(location.accuracy)
+    ? location.accuracy
+    : Number.isFinite(location.horizontalAccuracy)
+      ? location.horizontalAccuracy
+      : null;
+
   return {
     latitude: location.latitude,
     longitude: location.longitude,
-    timestampMs,
-    accuracy: Number.isFinite(location.accuracy)
-      ? location.accuracy
-      : null,
-    speed: Number.isFinite(location.speed)
-      ? location.speed
+    timestampMs: normalizeTimestampMs(
+      sourceTimestamp,
+      fallbackTimestampMs
+    ),
+    accuracy,
+    speed:
+      Number.isFinite(location.speed) && location.speed >= 0
+        ? location.speed
+        : null,
+    direction:
+      Number.isFinite(location.direction) &&
+      location.direction >= 0 &&
+      location.direction <= 360
+        ? location.direction
+        : null,
+    altitude: Number.isFinite(location.altitude)
+      ? location.altitude
       : null
   };
 }
@@ -194,11 +233,20 @@ async function uploadLocation(location, nowMs = Date.now()) {
     return false;
   }
 
-  const point = normalizeLocation(location, nowMs);
+  const currentPoint = normalizeLocation(location, nowMs);
 
-  if (!point) {
+  if (!currentPoint) {
     return false;
   }
+
+  const retrying = Boolean(
+    pendingUpload &&
+    pendingUpload.attempts <= MAX_PENDING_RETRY_ATTEMPTS
+  );
+
+  const point = retrying
+    ? pendingUpload.point
+    : currentPoint;
 
   lastUploadAttemptAtMs = nowMs;
   uploadInFlight = true;
@@ -218,8 +266,23 @@ async function uploadLocation(location, nowMs = Date.now()) {
       }
     );
 
+    if (retrying) {
+      pendingUpload = null;
+    }
+
     return true;
   } catch (error) {
+    if (retrying) {
+      // One buffered retry is enough. Drop the stale point after that
+      // so a temporary outage cannot create an unbounded retry loop.
+      pendingUpload = null;
+    } else {
+      pendingUpload = {
+        point,
+        attempts: 1
+      };
+    }
+
     console.warn("[Walking Tracker] Location upload failed.", {
       code: error && error.code ? error.code : "TRACK_UPLOAD_FAILED"
     });
@@ -302,6 +365,7 @@ async function startTracking({ routeId, startTimeMs }) {
     activeSession = session;
     lastUploadAttemptAtMs = 0;
     uploadInFlight = false;
+    pendingUpload = null;
 
     attachLocationListener();
     saveTrackingSession(session);
@@ -349,6 +413,8 @@ async function stopTracking() {
 
   activeSession = null;
   lastUploadAttemptAtMs = 0;
+  uploadInFlight = false;
+  pendingUpload = null;
 
   clearTrackingSession();
 
@@ -403,6 +469,7 @@ module.exports = {
   TRACKING_STORAGE_KEY,
   TRACKING_VERSION,
   MIN_UPLOAD_INTERVAL_MS,
+  MAX_PENDING_RETRY_ATTEMPTS,
   ERROR_CODES,
   isValidTrackingSession,
   getTrackingSession,
