@@ -821,6 +821,66 @@ describe(
 
 
     test(
+      "Route Detail clears a completed active-walk lock instead of resuming it",
+      () => {
+        const startTimeMs = Date.now() - 30 * 60 * 1000;
+
+        wx.setStorageSync("activeWalkSession", {
+          version: 1,
+          status: "active",
+          routeId: GENERATED_ROUTE.routeId,
+          route: GENERATED_ROUTE,
+          startTimeMs,
+          trackingEnabled: true
+        });
+
+        wx.setStorageSync("pendingWalkResult", {
+          routeId: GENERATED_ROUTE.routeId,
+          route: GENERATED_ROUTE,
+          startTime: new Date(startTimeMs).toISOString(),
+          endTime: new Date(startTimeMs + 10 * 60 * 1000).toISOString(),
+          actualDurationSeconds: 600,
+          completionStatus: "completed"
+        });
+
+        wx.navigateTo.mockClear();
+
+        page.onShow();
+
+        expect(wx.navigateTo).not.toHaveBeenCalled();
+        expect(
+          wx.getStorageSync("activeWalkSession")
+        ).toBeUndefined();
+      }
+    );
+
+
+    test(
+      "Route Detail clears an abandoned active-walk lock older than 12 hours",
+      () => {
+        wx.setStorageSync("activeWalkSession", {
+          version: 1,
+          status: "active",
+          routeId: GENERATED_ROUTE.routeId,
+          route: GENERATED_ROUTE,
+          startTimeMs:
+            Date.now() - 13 * 60 * 60 * 1000,
+          trackingEnabled: true
+        });
+
+        wx.navigateTo.mockClear();
+
+        page.onShow();
+
+        expect(wx.navigateTo).not.toHaveBeenCalled();
+        expect(
+          wx.getStorageSync("activeWalkSession")
+        ).toBeUndefined();
+      }
+    );
+
+
+    test(
       "startWalk does nothing while route editing is active",
       () => {
         page.loadRoute(GENERATED_ROUTE);
