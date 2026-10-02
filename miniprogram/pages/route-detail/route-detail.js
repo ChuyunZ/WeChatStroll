@@ -91,8 +91,24 @@ Page({
   },
 
   onShow() {
-    if (this._unloaded || this._startingWalk || this._activeWalkRedirecting) {
+    if (this._unloaded || this._startingWalk) {
       return;
+    }
+
+    if (this._activeWalkRedirecting) {
+      const redirectAgeMs =
+        Date.now() - this._activeWalkRedirectStartedAtMs;
+
+      if (
+        Number.isFinite(redirectAgeMs) &&
+        redirectAgeMs >= 0 &&
+        redirectAgeMs < ACTIVE_WALK_REDIRECT_LOCK_MS
+      ) {
+        return;
+      }
+
+      this._activeWalkRedirecting = false;
+      this._activeWalkRedirectStartedAtMs = 0;
     }
 
     let activeSession;
