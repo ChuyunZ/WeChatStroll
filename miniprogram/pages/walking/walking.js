@@ -441,10 +441,18 @@ Page({
             }
           );
 
-          wx.showToast({
-            title: "轨迹记录未开启，散步仍可继续",
-            icon: "none"
-          });
+          if (
+            error &&
+            error.code ===
+              "BACKGROUND_LOCATION_PERMISSION_DENIED"
+          ) {
+            this.promptBackgroundLocationPermission();
+          } else {
+            wx.showToast({
+              title: "轨迹记录未开启，散步仍可继续",
+              icon: "none"
+            });
+          }
         }
 
         return null;
@@ -457,6 +465,53 @@ Page({
 
     this._trackingStartPromise = startPromise;
     return startPromise;
+  },
+
+  promptBackgroundLocationPermission() {
+    if (this._backgroundPermissionPromptOpen) {
+      return;
+    }
+
+    this._backgroundPermissionPromptOpen = true;
+
+    wx.showModal({
+      title: "需要后台定位权限",
+      content:
+        "记录实际步行轨迹需要允许小程序在使用期间和离开后获取位置。你可以前往设置开启；不授权也可以继续散步。",
+      confirmText: "去设置",
+      cancelText: "暂不记录",
+
+      success: res => {
+        if (
+          !res.confirm ||
+          typeof wx.openSetting !== "function"
+        ) {
+          return;
+        }
+
+        wx.openSetting({
+          success: settings => {
+            const granted =
+              settings &&
+              settings.authSetting &&
+              settings.authSetting[
+                "scope.userLocationBackground"
+              ] === true;
+
+            if (!granted) {
+              return;
+            }
+
+            this._trackingUnavailable = false;
+            this.initializeTrajectoryTracking();
+          }
+        });
+      },
+
+      complete: () => {
+        this._backgroundPermissionPromptOpen = false;
+      }
+    });
   },
 
   finalizeTrajectoryTracking() {
