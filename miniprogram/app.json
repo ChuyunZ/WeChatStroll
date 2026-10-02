@@ -18,6 +18,9 @@
   "permission": {
     "scope.userLocation": {
       "desc": "你的位置信息将用于推荐附近的散步路线，并在你主动开始散步后记录实际行走轨迹和距离"
+    },
+    "scope.userLocationBackground": {
+      "desc": "你主动开启轨迹记录后，将在散步期间持续获取位置，用于记录实际行走轨迹和距离"
     }
   },
   "requiredBackgroundModes": [
