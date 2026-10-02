@@ -403,34 +403,18 @@ Page({
       return this._trackingStartPromise;
     }
 
-    const startPromise = walkingTracker
-      .startTracking({
+    let startResult;
+
+    try {
+      startResult = walkingTracker.startTracking({
         routeId: this._route.routeId,
         startTimeMs: this._startTimeMs
-      })
-      .then(async result => {
-        if (
-          this._trackingFinalizing ||
-          !this._active ||
-          this.data.ended
-        ) {
-          try {
-            await walkingTracker.stopTracking();
-          } catch (error) {
-            console.warn(
-              "[Walking] Unable to stop late trajectory tracking.",
-              {
-                code:
-                  error && error.code
-                    ? error.code
-                    : "TRACK_STOP_FAILED"
-              }
-            );
-          }
-        }
+      });
+    } catch (error) {
+      startResult = Promise.reject(error);
+    }
 
-        return result;
-      })
+    const startPromise = Promise.resolve(startResult)
       .catch(error => {
         if (!this._trackingFinalizing) {
           this._trackingUnavailable = true;
@@ -470,12 +454,18 @@ Page({
       return null;
     }
 
-    let stopPromise;
+    const startPromise = this._trackingStartPromise;
 
-    try {
-      stopPromise = Promise.resolve(
-        walkingTracker.stopTracking()
-      ).catch(error => {
+    const stopPromise = Promise.resolve(startPromise)
+      .catch(() => null)
+      .then(() => {
+        if (!walkingTracker.isTracking()) {
+          return null;
+        }
+
+        return walkingTracker.stopTracking();
+      })
+      .catch(error => {
         console.warn(
           "[Walking] Unable to stop trajectory tracking.",
           {
@@ -488,18 +478,6 @@ Page({
 
         return null;
       });
-    } catch (error) {
-      console.warn(
-        "[Walking] Unable to stop trajectory tracking.",
-        {
-          code:
-            error && error.code
-              ? error.code
-              : "TRACK_STOP_FAILED"
-        }
-      );
-      return null;
-    }
 
     this._trackingStopPromise = stopPromise;
 
