@@ -6,6 +6,7 @@ const { createLimiter } = require('./limiter')
 const { createProvider } = require('./provider')
 const { createNearbyHandler } = require('./nearby-pois')
 const { createWalkingHandler } = require('./walking')
+const { addTencentSignature } = require('./signing')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
@@ -15,14 +16,15 @@ exports.main = async event => {
     return { success: false, error: { code: 'INVALID_ACTION', message: 'Unsupported provider operation' } }
   }
   const apiKey = process.env.TENCENT_MAPS_API_KEY
-  if (!apiKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API key is not configured' } }
+  const secretKey = process.env.TENCENT_MAPS_SECRET_KEY
+  if (!apiKey || !secretKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
   const log = record => console.info('[Map Provider]', record)
   try {
     const limits = loadLimits()
     const store = createCloudBaseStore(cloud.database({ throwOnNotFound: false }))
     const limiter = createLimiter({ store, ...limits, log })
     const provider = createProvider({ limiter, limits, log,
-      request: (url, options) => axios.get(url, options) })
+      request: (url, options) => axios.get(url, addTencentSignature(url, options, secretKey)) })
     const createHandler = operation === 'walkingRoute' ? createWalkingHandler : createNearbyHandler
     return await createHandler({ apiKey, request: provider(operation) })(event)
   } catch (_) {

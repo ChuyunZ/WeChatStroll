@@ -153,8 +153,12 @@ rows, add TTL expiry or shorten active leases to accelerate rollout.
 
 ## Server-side configuration
 
-Required: `TENCENT_MAPS_API_KEY`, configured only in the `mapProvider` server
-environment. Never place keys in the Mini Program, committed files or logs.
+Required: `TENCENT_MAPS_API_KEY` and `TENCENT_MAPS_SECRET_KEY`, configured only in the
+`mapProvider` server environment. The Tencent WebService key uses SN/signature
+verification. For every GET request the gateway sorts parameter names, signs the
+unencoded raw values with the exact request pathname and Secret Key, then sends the
+lowercase MD5 result as `sig`. The Secret Key never leaves the server environment.
+Never place either credential in Mini Program code, committed files or logs.
 
 | Optional variable | Default | Allowed values |
 | --- | --- | --- |
@@ -180,7 +184,7 @@ Verify actual account limits separately and keep concurrent revisions consistent
    unresolved; successful API calls alone do not grant these permissions.
 2. Verify `provider_rate_limits` exists with client rules
    `{ "read": false, "write": false }` and trusted server transaction access.
-3. Configure the `mapProvider` server key and environment settings. Review execution
+3. Configure the `mapProvider` server key, signing Secret Key and environment settings. Review execution
    and caller timeouts against sequential POI queries, queue waits, HTTP timeouts
    and bookkeeping; one queue-wait value is not a whole invocation bound.
 4. Deploy `cloudfunctions/mapProvider` with cloud dependency installation.

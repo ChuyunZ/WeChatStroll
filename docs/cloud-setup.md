@@ -148,7 +148,9 @@ The error handling was tested by temporarily calling a non-existent cloud functi
 
 No API secret, private key, or access token is stored in the mini program frontend.
 
-`TENCENT_MAPS_API_KEY` and provider configuration belong only in the `mapProvider`
-server environment. Provider secrets must never be embedded in Mini Program code,
-committed files or logs. The wrappers use runtime cloud credentials and do not need
-the provider key. See [server-side variables](map-provider-deployment.md#server-side-configuration).
+`TENCENT_MAPS_API_KEY`, `TENCENT_MAPS_SECRET_KEY` and provider configuration belong
+only in the `mapProvider` server environment. The Secret Key is used to compute
+Tencent WebService GET request signatures (`sig`) and must never be exposed to the
+Mini Program. Provider credentials must never be committed or logged. The wrappers
+use runtime cloud credentials and do not need the provider credentials. See
+[server-side variables](map-provider-deployment.md#server-side-configuration).

@@ -53,7 +53,7 @@ test('deployment is self-contained, dependencies match lockfile, limiter/store a
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8'))
       .toBe(fs.readFileSync(path.join(__dirname, '../amapProvider', file), 'utf8'))
   }
-  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js', 'walking.js']) {
+  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js', 'walking.js', 'signing.js']) {
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8')).not.toMatch(/require\(['"]\.\.\//)
   }
 })

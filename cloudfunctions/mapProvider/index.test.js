@@ -18,6 +18,7 @@ const input = { action: 'nearbyPois', latitude: 30.123456, longitude: 120.654321
 const walking = { action: 'walkingRoute', start: { latitude: 30.123456, longitude: 120.654321 },
   destination: { latitude: 30.124456, longitude: 120.655321 } }
 let originalKey
+let originalSecretKey
 let store
 
 test('legacy and direct callers share mapProvider data and distributed pacing', async () => {
@@ -47,7 +48,9 @@ beforeEach(() => {
   jest.setSystemTime(100000)
   jest.clearAllMocks()
   originalKey = process.env.TENCENT_MAPS_API_KEY
+  originalSecretKey = process.env.TENCENT_MAPS_SECRET_KEY
   process.env.TENCENT_MAPS_API_KEY = 'private-test-key'
+  process.env.TENCENT_MAPS_SECRET_KEY = 'private-test-secret'
   store = createTestStore()
   createCloudBaseStore.mockReturnValue(store)
   axios.get.mockResolvedValue({ data: { status: 0, data: [] } })
@@ -58,6 +61,8 @@ afterEach(() => {
   jest.restoreAllMocks()
   if (originalKey === undefined) delete process.env.TENCENT_MAPS_API_KEY
   else process.env.TENCENT_MAPS_API_KEY = originalKey
+  if (originalSecretKey === undefined) delete process.env.TENCENT_MAPS_SECRET_KEY
+  else process.env.TENCENT_MAPS_SECRET_KEY = originalSecretKey
 })
 
 test.each([undefined, {}, { action: 'walking' }, { action: 'private-url' }])('rejects unsupported action %p before DB/HTTP', async event => {
@@ -73,6 +78,8 @@ test('missing credentials or invalid coordinates never acquire slots', async () 
   expect(await main({ action: 'walkingRoute' })).toMatchObject({ error: { code: 'INVALID_COORDINATES' } })
   delete process.env.TENCENT_MAPS_API_KEY
   expect(await main(input)).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
+  process.env.TENCENT_MAPS_API_KEY = 'private-test-key'
+  delete process.env.TENCENT_MAPS_SECRET_KEY
   expect(await main(walking)).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
   expect(store.transactions).toBe(0)
   expect(axios.get).not.toHaveBeenCalled()
@@ -91,8 +98,8 @@ test('all categories traverse the shared limiter and logs/state exclude provider
   const starts = console.info.mock.calls.filter(([, record]) => record.event === 'provider_start')
   expect(starts.map(([, record]) => record.startedAtMs)).toEqual([100000, 101700, 103400])
   expect(console.info.mock.calls.every(([prefix]) => prefix === '[Map Provider]')).toBe(true)
-  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|30\.123456|120\.654321|https:|raw-payload|raw-request-id/)
-  expect(JSON.stringify([...store.documents])).not.toMatch(/private-test-key|30\.123456|120\.654321|https:|raw-payload/)
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|30\.123456|120\.654321|https:|raw-payload|raw-request-id/)
+  expect(JSON.stringify([...store.documents])).not.toMatch(/private-test-key|private-test-secret|30\.123456|120\.654321|https:|raw-payload/)
   expect(JSON.stringify(result)).not.toMatch(/ad_info|providerMeta|request_id|raw-payload|private-test-key/)
 })
 
@@ -106,7 +113,7 @@ test.each([
   await jest.runAllTimersAsync()
   expect(await pending).toEqual({ success: false, error: { code, message: 'Unable to retrieve nearby places' } })
   expect(axios.get).toHaveBeenCalledTimes(calls)
-  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|raw-payload|https:|30\.123456/)
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|raw-payload|https:|30\.123456/)
 })
 
 test('HTTP rejection with QPS payload is normalized and redacted end to end', async () => {
@@ -115,7 +122,7 @@ test('HTTP rejection with QPS payload is normalized and redacted end to end', as
   const pending = main(input)
   await jest.runAllTimersAsync()
   expect(await pending).toMatchObject({ error: { code: 'PROVIDER_RATE_LIMITED' } })
-  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|raw-payload|https:|30\.123456/)
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|raw-payload|https:|30\.123456/)
 })
 
 test('store initialization failure returns only a safe gateway error', async () => {
@@ -124,7 +131,7 @@ test('store initialization failure returns only a safe gateway error', async () 
     code: 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
   } })
   expect(axios.get).not.toHaveBeenCalled()
-  expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-test-key')
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret/)
 })
 
 test('walking dispatch uses the walking scope, normalizes seconds, and redacts logs', async () => {
@@ -138,13 +145,14 @@ test('walking dispatch uses the walking scope, normalizes seconds, and redacts l
     polyline: [walking.start, { latitude: expect.closeTo(30.124456, 8), longitude: expect.closeTo(120.655321, 8) }]
   } })
   expect(axios.get).toHaveBeenCalledWith('https://apis.map.qq.com/ws/direction/v1/walking/', {
-    params: { key: 'private-test-key', from: '30.123456,120.654321', to: '30.124456,120.655321' }, timeout: 10000
+    params: { key: 'private-test-key', from: '30.123456,120.654321', to: '30.124456,120.655321',
+      sig: 'd997ddbd44dee65b751401ce88289cd0' }, timeout: 10000
   })
   expect([...store.documents.keys()].sort()).toEqual(['tencent:key', 'tencent:walking'])
   expect(console.info).toHaveBeenCalledWith('[Map Provider]', expect.objectContaining({
     event: 'provider_start', operation: 'walkingRoute', scope: 'tencent:walking'
   }))
-  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|30\.123456|120\.654321|https:|private-road|private-id/)
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|30\.123456|120\.654321|https:|private-road|private-id/)
 })
 
 test.each([input, walking])('transport failures cross $action without retry or rate cooldown', async event => {
@@ -158,7 +166,7 @@ test.each([input, walking])('transport failures cross $action without retry or r
     expect(await main(event)).toMatchObject({ success: false, error: { code } })
     expect(axios.get).toHaveBeenCalledTimes(1)
     expect(store.documents.get('tencent:key').cooldownUntilMs).toBe(0)
-    expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|30\.123456/)
+    expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|30\.123456/)
   }
 })
 
