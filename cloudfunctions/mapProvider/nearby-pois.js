@@ -52,27 +52,33 @@ function createNearbyHandler({ apiKey, request }) {
       return { success: false, error: { code: 'INVALID_COORDINATES', message: 'Invalid longitude or latitude' } }
     }
     try {
-      const poisByCategory = {}
       const searchRadius = getValidatedRadius(radius)
-      // Sequential discovery. The application may choose a duration-aware radius,
-      // while this provider boundary enforces Tencent's bounded radius policy.
-      for (const [category, codes] of Object.entries(CATEGORY_CODES)) {
-        const response = await request(EXPLORE_URL, { params: {
-          key: apiKey,
-          boundary: `nearby(${latitude.toFixed(6)},${longitude.toFixed(6)},${searchRadius},0)`,
-          filter: `category=${codes.join(',')}`,
-          orderby: '_distance', location_mode: 1, page_size: 6, page_index: 1
-        } })
-        const data = response && response.data
-        if (data && EMPTY_STATUSES.has(data.status)) {
-          poisByCategory[category] = []
-        } else if (data && data.status === 0 && Array.isArray(data.data)) {
-          poisByCategory[category] = data.data.map(poi => normalizePoi(poi, category)).filter(Boolean)
-        } else {
+      // Queue all application categories immediately. The distributed provider
+      // limiter still controls actual Tencent request starts and QPS across instances.
+      // Wait for every scheduled category so the function never returns with
+      // unobserved provider work; any failure keeps the public result all-or-nothing.
+      const categoryResults = await Promise.allSettled(
+        Object.entries(CATEGORY_CODES).map(async ([category, codes]) => {
+          const response = await request(EXPLORE_URL, { params: {
+            key: apiKey,
+            boundary: `nearby(${latitude.toFixed(6)},${longitude.toFixed(6)},${searchRadius},0)`,
+            filter: `category=${codes.join(',')}`,
+            orderby: '_distance', location_mode: 1, page_size: 6, page_index: 1
+          } })
+          const data = response && response.data
+          if (data && EMPTY_STATUSES.has(data.status)) return [category, []]
+          if (data && data.status === 0 && Array.isArray(data.data)) {
+            return [category, data.data.map(poi => normalizePoi(poi, category)).filter(Boolean)]
+          }
           throw new Error('Invalid POI provider result')
-        }
+        })
+      )
+      const failed = categoryResults.find(result => result.status === 'rejected')
+      if (failed) throw failed.reason
+      return {
+        success: true,
+        poisByCategory: Object.fromEntries(categoryResults.map(result => result.value))
       }
-      return { success: true, poisByCategory }
     } catch (error) {
       return { success: false, error: {
         code: isProviderCode(error && error.code) ? error.code : 'POI_SEARCH_FAILED',

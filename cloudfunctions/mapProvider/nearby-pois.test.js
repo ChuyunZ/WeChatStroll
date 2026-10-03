@@ -84,23 +84,23 @@ test.each([{ status: 0, data: [] }, { status: 347 }, { status: 387 }, { status: 
 })
 
 test.each([null, {}, { status: '0', data: [] }, { status: 0, data: {} },
-  { status: 110, message: 'secret-key private payload' }])('malformed or failed response %p stops subsequent categories safely', async data => {
+  { status: 110, message: 'secret-key private payload' }])('malformed or failed response %p fails the all-or-nothing result after all categories settle', async data => {
   request.mockResolvedValueOnce({ data })
   expect(await handler(input)).toEqual({ success: false, error: {
     code: 'POI_SEARCH_FAILED', message: 'Unable to retrieve nearby places'
   } })
-  expect(request).toHaveBeenCalledTimes(1)
+  expect(request).toHaveBeenCalledTimes(3)
 })
 
-test('categories are awaited sequentially and a later transport failure discards partial results', async () => {
+test('all categories queue immediately but a transport failure still discards partial results', async () => {
   let finish
   request.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     .mockRejectedValueOnce(new Error('secret-key private payload'))
   const pending = handler(input)
-  expect(request).toHaveBeenCalledTimes(1)
+  expect(request).toHaveBeenCalledTimes(3)
   finish({ data: { status: 0, data: [rawPoi] } })
   expect(await pending).toEqual({ success: false, error: {
     code: 'POI_SEARCH_FAILED', message: 'Unable to retrieve nearby places'
   } })
-  expect(request).toHaveBeenCalledTimes(2)
+  expect(request).toHaveBeenCalledTimes(3)
 })

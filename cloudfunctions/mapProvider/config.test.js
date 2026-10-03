@@ -2,11 +2,11 @@ const fs = require('fs')
 const path = require('path')
 const { loadLimits } = require('./config')
 
-test('conservative defaults retain existing bounds with isolated Tencent scopes', () => {
+test('defaults keep walking conservative while using verified Explore pacing', () => {
   expect(loadLimits({})).toEqual({
     walkingRoute: { scope: 'tencent:walking', minIntervalMs: 1500, maxQueueWaitMs: 12000,
       maxProviderAttempts: 2, cooldownBaseMs: 3000 },
-    nearbyPois: { scope: 'tencent:poi-explore', minIntervalMs: 1500, maxQueueWaitMs: 12000,
+    nearbyPois: { scope: 'tencent:poi-explore', minIntervalMs: 200, maxQueueWaitMs: 12000,
       maxProviderAttempts: 2, cooldownBaseMs: 3000 },
     keyMinIntervalMs: 0, clockGuardMs: 100, leaseStartWindowMs: 10000,
     leasePollMs: 100, bookkeepingWaitMs: 5000, requestTimeoutMs: 10000,

@@ -38,10 +38,12 @@ time using `duration * 75 m/min * 0.5`. Product duration is bounded to **15–12
 The provider boundary independently clamps every caller radius to **200–1000 meters**,
 so longer requests never exceed Tencent's 1 km nearby-search cap. The request uses
 `auto_extend = 0`, encoded as `boundary=nearby(latitude,longitude,radius,0)`.
-It calls Tencent explore (`https://apis.map.qq.com/ws/place/v1/explore`), querying
-the three application categories sequentially: `park`, `water`, `shoppingStreet`.
-The adapter requests the first page of six entries per category, ordered by distance;
-invalid entries are filtered. A category failure stops subsequent category work.
+It calls Tencent explore (`https://apis.map.qq.com/ws/place/v1/explore`) for the three
+application categories: `park`, `water`, `shoppingStreet`. All three category requests
+enter the distributed limiter immediately; the limiter, not HTTP completion order,
+controls actual Tencent request starts. The adapter requests the first page of six
+entries per category, ordered by distance; invalid entries are filtered. All scheduled
+categories are awaited and any category failure discards the partial result.
 
 ```javascript
 {
@@ -146,14 +148,16 @@ retry. There are no client-side provider retries or a client request-start sched
 the engine's logical concurrency and session cache remain separate from backend pacing.
 
 Each physical route/category request establishes a queue deadline shared by its
-attempts. POI categories execute sequentially but each gets its own request deadline.
-Admission waits must fit it; an admitted HTTP response and its bookkeeping can finish
-after it. HTTP has a separate timeout. There is no durable FIFO queue or fairness
+attempts. POI categories enter admission concurrently and each gets its own request
+deadline; the shared `tencent:poi-explore` scope still serializes starts at the
+configured safe pace. Admission waits must fit it; an admitted HTTP response and its
+bookkeeping can finish after it. HTTP has a separate timeout. There is no durable FIFO queue or fairness
 guarantee. Transaction conflict retries are bounded independently of provider attempts.
 
 Coordination assumes backend clocks within the configured guard. Pacing adds twice
-the guard; cooldown adds one guard. With defaults, paced starts are at least about
-1700 ms apart. The guard is not a database latency budget. No database transaction
+the guard; cooldown adds one guard. With the 100 ms default guard, Explore starts are
+at least about 400 ms apart (200 + 2 * 100), while walking starts remain at least
+about 1700 ms apart. The guard is not a database latency budget. No database transaction
 can atomically send external HTTP; already-admitted requests cannot be revoked by
 a subsequently published cooldown.
 
@@ -176,7 +180,7 @@ Never place either credential in Mini Program code, committed files or logs.
 | `TENCENT_MAPS_WALKING_MAX_QUEUE_WAIT_MS` | 12000 | 1–60000 ms |
 | `TENCENT_MAPS_WALKING_MAX_ATTEMPTS` | 2 | 1–4 |
 | `TENCENT_MAPS_WALKING_COOLDOWN_MS` | 3000 | 1–60000 ms; multiplied by attempt |
-| `TENCENT_MAPS_POI_MIN_INTERVAL_MS` | 1500 | 1–60000 ms |
+| `TENCENT_MAPS_POI_MIN_INTERVAL_MS` | 200 | 1–60000 ms |
 | `TENCENT_MAPS_POI_MAX_QUEUE_WAIT_MS` | 12000 | 1–60000 ms |
 | `TENCENT_MAPS_POI_MAX_ATTEMPTS` | 2 | 1–4 |
 | `TENCENT_MAPS_POI_COOLDOWN_MS` | 3000 | 1–60000 ms; multiplied by attempt |
@@ -185,8 +189,12 @@ Never place either credential in Mini Program code, committed files or logs.
 | `TENCENT_MAPS_LEASE_START_WINDOW_MS` | 10000 | 1000–60000 ms |
 | `TENCENT_MAPS_REQUEST_TIMEOUT_MS` | 10000 | 1–60000 ms |
 
-These are conservative implementation defaults, **not Tencent account quota facts**.
-Verify actual account limits separately and keep concurrent revisions consistent.
+The current development Key's Explore allocation was verified in Tencent's console on
+2026-10-04 as **5 QPS and 200 calls/day**. The 200 ms Explore service interval plus
+the 100 ms clock guard on both sides yields an effective start spacing of at least
+about 400 ms (~2.5 starts/s), intentionally leaving roughly 2x QPS headroom. Walking
+remains on the conservative 1500 ms default because its quota is configured separately.
+Re-check account/Key allocations before carrying these defaults to another environment.
 
 ## Development deployment status
 
@@ -199,6 +207,10 @@ Development environment work completed on 2026-10-04:
 5. Mini Program E2E succeeded through Questionnaire -> Tencent POIs -> HY3 waypoint
    selection -> Tencent walking segments -> Route Engine -> deterministic validation
    -> route card/detail. A 30-minute request produced a valid ~24-minute / ~1.6 km route.
+
+The later Explore pacing/concurrent-admission optimization is covered by automated
+tests, but must be redeployed before treating the live CloudBase start-spacing check
+as revalidated.
 
 Production release still requires the unresolved Tencent WebService data-use / AI-use /
 persistence decision below. Retaining the AMap implementation alone is not an automatic

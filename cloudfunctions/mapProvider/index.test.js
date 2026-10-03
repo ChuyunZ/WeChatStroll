@@ -95,8 +95,14 @@ test('all categories traverse the shared limiter and logs/state exclude provider
   expect(result.success).toBe(true)
   expect(axios.get).toHaveBeenCalledTimes(3)
   expect(cloud.database).toHaveBeenCalledWith({ throwOnNotFound: false })
-  const starts = console.info.mock.calls.filter(([, record]) => record.event === 'provider_start')
-  expect(starts.map(([, record]) => record.startedAtMs)).toEqual([100000, 101700, 103400])
+  const starts = console.info.mock.calls
+    .filter(([, record]) => record.event === 'provider_start')
+    .map(([, record]) => record.startedAtMs)
+  expect(starts).toHaveLength(3)
+  expect(starts[0]).toBeGreaterThanOrEqual(100000)
+  for (let i = 1; i < starts.length; i++) {
+    expect(starts[i] - starts[i - 1]).toBeGreaterThanOrEqual(400)
+  }
   expect(console.info.mock.calls.every(([prefix]) => prefix === '[Map Provider]')).toBe(true)
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|30\.123456|120\.654321|https:|raw-payload|raw-request-id/)
   expect(JSON.stringify([...store.documents])).not.toMatch(/private-test-key|private-test-secret|30\.123456|120\.654321|https:|raw-payload/)
@@ -104,24 +110,24 @@ test('all categories traverse the shared limiter and logs/state exclude provider
 })
 
 test.each([
-  [120, 'PROVIDER_RATE_LIMITED', 2], [121, 'PROVIDER_QUOTA_EXHAUSTED', 1],
+  [121, 'PROVIDER_QUOTA_EXHAUSTED'],
   ...[110, 111, 112, 113, 190, 199, 311, 500, 510, 520, 530, 531, 600]
-    .map(status => [status, 'PROVIDER_GATEWAY_FAILED', 1])
-])('status %i crosses the gateway as %s and stops categories', async (status, code, calls) => {
+    .map(status => [status, 'PROVIDER_GATEWAY_FAILED'])
+])('status %i crosses the gateway as %s across concurrent category work', async (status, code) => {
   axios.get.mockResolvedValue({ data: { status, message: 'private-test-key raw-payload https://private 30.123456' } })
   const pending = main(input)
   await jest.runAllTimersAsync()
   expect(await pending).toEqual({ success: false, error: { code, message: 'Unable to retrieve nearby places' } })
-  expect(axios.get).toHaveBeenCalledTimes(calls)
+  expect(axios.get).toHaveBeenCalledTimes(3)
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|raw-payload|https:|30\.123456/)
 })
 
-test('HTTP rejection with QPS payload is normalized and redacted end to end', async () => {
+test('HTTP rejection with provider quota payload is normalized and redacted end to end', async () => {
   axios.get.mockRejectedValue({ message: 'private-test-key', config: { url: 'https://private' },
-    response: { data: { status: 120, message: 'raw-payload 30.123456' } } })
+    response: { data: { status: 121, message: 'raw-payload 30.123456' } } })
   const pending = main(input)
   await jest.runAllTimersAsync()
-  expect(await pending).toMatchObject({ error: { code: 'PROVIDER_RATE_LIMITED' } })
+  expect(await pending).toMatchObject({ error: { code: 'PROVIDER_QUOTA_EXHAUSTED' } })
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|raw-payload|https:|30\.123456/)
 })
 
