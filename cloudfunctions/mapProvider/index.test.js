@@ -169,8 +169,10 @@ test.each([input, walking])('transport failures cross $action without retry or r
     const code = response && response.status === 400
       ? event.action === 'nearbyPois' ? 'POI_SEARCH_FAILED' : 'WALKING_ROUTE_FAILED'
       : 'PROVIDER_GATEWAY_FAILED'
-    expect(await main(event)).toMatchObject({ success: false, error: { code } })
-    expect(axios.get).toHaveBeenCalledTimes(1)
+    const pending = main(event)
+    await jest.runAllTimersAsync()
+    expect(await pending).toMatchObject({ success: false, error: { code } })
+    expect(axios.get).toHaveBeenCalledTimes(event.action === 'nearbyPois' ? 3 : 1)
     expect(store.documents.get('tencent:key').cooldownUntilMs).toBe(0)
     expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|private-test-secret|30\.123456/)
   }
