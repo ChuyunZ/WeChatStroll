@@ -932,6 +932,119 @@ describe("walking-tracker", () => {
     });
   });
 
+  test("searchTrace retries retryable empty results with backoff", async () => {
+    const startTimeMs =
+      TEST_START_TIME_MS;
+
+    const endTimeMs =
+      TEST_START_TIME_MS + 30 * 60 * 1000;
+
+    const emptyResult = {
+      success: true,
+      trace: {
+        points: [],
+        mileageMeters: 0,
+        durationSeconds: 0,
+        available: false,
+        retryable: true,
+        partial: false
+      }
+    };
+
+    const availableResult = {
+      success: true,
+      trace: {
+        points: [
+          {
+            latitude: 31.2304,
+            longitude: 121.4737,
+            timestampMs: TEST_START_TIME_MS
+          }
+        ],
+        mileageMeters: 0,
+        durationSeconds: 1,
+        available: true,
+        retryable: false,
+        partial: false
+      }
+    };
+
+    callCloudFunction
+      .mockResolvedValueOnce(emptyResult)
+      .mockResolvedValueOnce(emptyResult)
+      .mockResolvedValueOnce(availableResult);
+
+    const resultPromise =
+      walkingTracker.searchTrace({
+        startTimeMs,
+        endTimeMs
+      });
+
+    await Promise.resolve();
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(2);
+
+    await jest.advanceTimersByTimeAsync(1000);
+
+    await expect(resultPromise).resolves.toEqual(
+      availableResult
+    );
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(3);
+  });
+
+  test("searchTrace stops after the retry budget when results stay empty", async () => {
+    const startTimeMs =
+      TEST_START_TIME_MS;
+
+    const endTimeMs =
+      TEST_START_TIME_MS + 30 * 60 * 1000;
+
+    const emptyResult = {
+      success: true,
+      trace: {
+        points: [],
+        mileageMeters: 0,
+        durationSeconds: 0,
+        available: false,
+        retryable: true,
+        partial: false
+      }
+    };
+
+    callCloudFunction.mockResolvedValue(
+      emptyResult
+    );
+
+    const resultPromise =
+      walkingTracker.searchTrace({
+        startTimeMs,
+        endTimeMs
+      });
+
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(500);
+    await jest.advanceTimersByTimeAsync(1000);
+
+    await expect(resultPromise).resolves.toEqual(
+      emptyResult
+    );
+
+    expect(
+      callCloudFunction
+    ).toHaveBeenCalledTimes(3);
+  });
+
   test("searchTrace rejects an invalid time range", async () => {
     await expect(
       walkingTracker.searchTrace({

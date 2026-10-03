@@ -7,6 +7,7 @@ const TRACKING_VERSION = 1;
 const MIN_UPLOAD_INTERVAL_MS = 15000;
 const MAX_PENDING_RETRY_ATTEMPTS = 1;
 const MAX_TRACKING_SESSION_AGE_MS = 12 * 60 * 60 * 1000;
+const TRACE_SEARCH_RETRY_DELAYS_MS = [500, 1000];
 
 const ERROR_CODES = {
   INVALID_SESSION: "INVALID_TRACKING_SESSION",
@@ -570,6 +571,23 @@ async function stopTracking() {
   return session;
 }
 
+function wait(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function isRetryableEmptyTrace(result) {
+  return Boolean(
+    result &&
+    result.success === true &&
+    result.trace &&
+    result.trace.retryable === true &&
+    Array.isArray(result.trace.points) &&
+    result.trace.points.length === 0
+  );
+}
+
 async function searchTrace({ startTimeMs, endTimeMs }) {
   if (
     !Number.isFinite(startTimeMs) ||
@@ -583,18 +601,32 @@ async function searchTrace({ startTimeMs, endTimeMs }) {
     );
   }
 
-  return callCloudFunction(
-    "trackProvider",
-    {
-      action: "searchTrace",
-      startTimeMs,
-      endTimeMs
-    },
-    {
-      fallbackCode: "TRACK_SEARCH_FAILED",
-      fallbackMessage: "Unable to query walking trajectory."
+  const search = () =>
+    callCloudFunction(
+      "trackProvider",
+      {
+        action: "searchTrace",
+        startTimeMs,
+        endTimeMs
+      },
+      {
+        fallbackCode: "TRACK_SEARCH_FAILED",
+        fallbackMessage: "Unable to query walking trajectory."
+      }
+    );
+
+  let result = await search();
+
+  for (const delayMs of TRACE_SEARCH_RETRY_DELAYS_MS) {
+    if (!isRetryableEmptyTrace(result)) {
+      return result;
     }
-  );
+
+    await wait(delayMs);
+    result = await search();
+  }
+
+  return result;
 }
 
 function isTracking() {
