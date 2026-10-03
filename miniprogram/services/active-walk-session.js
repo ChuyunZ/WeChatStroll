@@ -1,6 +1,7 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
 const ACTIVE_WALK_SESSION_VERSION = 1;
+const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
 
 function isValidRouteSnapshot(route) {
   return (
@@ -24,7 +25,40 @@ function isValidActiveWalkSession(session) {
     isValidRouteSnapshot(session.route) &&
     session.route.routeId === session.routeId &&
     Number.isFinite(session.startTimeMs) &&
-    session.startTimeMs > 0
+    session.startTimeMs > 0 &&
+    (
+      session.trackingEnabled === undefined ||
+      typeof session.trackingEnabled === "boolean"
+    )
+  );
+}
+
+function isCompletedActiveWalkSession(session) {
+  const pendingResult = getPendingWalkResult();
+
+  if (!pendingResult) {
+    return false;
+  }
+
+  const pendingStartTimeMs =
+    Date.parse(pendingResult.startTime);
+
+  return (
+    pendingResult.routeId === session.routeId &&
+    Number.isFinite(pendingStartTimeMs) &&
+    pendingStartTimeMs === session.startTimeMs
+  );
+}
+
+function isStaleActiveWalkSession(
+  session,
+  nowMs = Date.now()
+) {
+  return (
+    Number.isFinite(nowMs) &&
+    nowMs >= session.startTimeMs &&
+    nowMs - session.startTimeMs >=
+      MAX_ACTIVE_WALK_AGE_MS
   );
 }
 
@@ -40,10 +74,23 @@ function getActiveWalkSession() {
     return null;
   }
 
+  if (
+    isCompletedActiveWalkSession(session) ||
+    isStaleActiveWalkSession(session)
+  ) {
+    require("./walking-tracker").stopTrackingForSession(session);
+    wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
+    return null;
+  }
+
   return session;
 }
 
-function createActiveWalkSession(route, startTimeMs = Date.now()) {
+function createActiveWalkSession(
+  route,
+  startTimeMs = Date.now(),
+  { trackingEnabled = false } = {}
+) {
   const existingSession = getActiveWalkSession();
 
   if (existingSession) {
@@ -66,7 +113,8 @@ function createActiveWalkSession(route, startTimeMs = Date.now()) {
     status: "active",
     routeId: route.routeId,
     route,
-    startTimeMs
+    startTimeMs,
+    trackingEnabled: trackingEnabled === true
   };
 
   wx.setStorageSync(ACTIVE_WALK_STORAGE_KEY, session);
@@ -78,7 +126,7 @@ function createActiveWalkSession(route, startTimeMs = Date.now()) {
 }
 
 function clearActiveWalkSession(routeId = null) {
-  const activeSession = getActiveWalkSession();
+  const activeSession = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
   if (!activeSession) {
     return true;
@@ -141,7 +189,9 @@ module.exports = {
   ACTIVE_WALK_STORAGE_KEY,
   PENDING_WALK_RESULT_STORAGE_KEY,
   ACTIVE_WALK_SESSION_VERSION,
+  MAX_ACTIVE_WALK_AGE_MS,
   isValidActiveWalkSession,
+  isStaleActiveWalkSession,
   isValidPendingWalkResult,
   getActiveWalkSession,
   createActiveWalkSession,

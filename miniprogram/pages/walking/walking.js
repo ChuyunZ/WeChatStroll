@@ -3,6 +3,7 @@ const { isValidGeoPoint } = require("../../utils/geo");
 const { buildRouteMap } = require("../../utils/route-map");
 const locationService = require("../../services/location");
 const activeWalkSessionService = require("../../services/active-walk-session");
+const walkingTracker = require("../../services/walking-tracker");
 
 const TIMER_INTERVAL_MS = 1000;
 
@@ -70,15 +71,22 @@ Page({
     this._timer = null;
     this._route = null;
     this._startTimeMs = null;
+    this._trackingEnabled = false;
+    this._trackingUnavailable = false;
+    this._trackingFinalizing = false;
+    this._trackingStartPromise = null;
+    this._trackingStopPromise = null;
 
     this.initializeNavigationBar();
 
     const routeId = options.routeId;
 
     let activeSession;
+    let pendingResult;
 
     try {
       activeSession = activeWalkSessionService.getActiveWalkSession();
+      if (!activeSession) pendingResult = activeWalkSessionService.getPendingWalkResult();
     } catch (error) {
       this.showRouteError();
       wx.showToast({
@@ -100,7 +108,26 @@ Page({
         return;
       }
 
-      this.loadWalkingRoute(activeSession.route, activeSession.startTimeMs);
+      this.loadWalkingRoute(
+        activeSession.route,
+        activeSession.startTimeMs,
+        activeSession.trackingEnabled === true
+      );
+      return;
+    }
+
+    if (pendingResult && (!routeId || pendingResult.routeId === routeId)) {
+      // Recovery during a final flush must follow the durable completion,
+      // including when the active lock was already removed before the crash.
+      walkingTracker.stopTrackingForSession({
+        routeId: pendingResult.routeId,
+        startTimeMs: Date.parse(pendingResult.startTime)
+      });
+      this._finishing = true;
+      this.setData({ ended: true, finishing: true });
+      wx.reLaunch({
+        url: `/pages/feedback/feedback?routeId=${encodeURIComponent(pendingResult.routeId)}`
+      });
       return;
     }
 
@@ -136,6 +163,8 @@ Page({
   onShow() {
     this._pageVisible = true;
 
+    if (this._finishing) return;
+
     if (this.data.ended) {
       wx.navigateBack();
       return;
@@ -144,6 +173,7 @@ Page({
     if (this._active) {
       this.updateElapsedTime();
       this.startTimer();
+      this.initializeTrajectoryTracking();
     }
   },
 
@@ -238,11 +268,16 @@ Page({
 
     this.loadWalkingRoute(
       sessionResult.session.route,
-      sessionResult.session.startTimeMs
+      sessionResult.session.startTimeMs,
+      sessionResult.session.trackingEnabled === true
     );
   },
 
-  loadWalkingRoute(route, startTimeMs = Date.now()) {
+  loadWalkingRoute(
+    route,
+    startTimeMs = Date.now(),
+    trackingEnabled = false
+  ) {
     if (!this.isValidRoute(route)) {
       this.showRouteError();
       return;
@@ -252,6 +287,9 @@ Page({
     this._startTimeMs = startTimeMs;
     this._active = true;
     this._finishing = false;
+    this._trackingEnabled = trackingEnabled === true;
+    this._trackingUnavailable = false;
+    this._trackingFinalizing = false;
 
     const routeMap = buildRouteMap(route);
     const middleIndex = Math.floor(route.polyline.length / 2);
@@ -292,6 +330,7 @@ Page({
 
     this.enableLeaveProtection();
     this.initializeUserLocation();
+    this.initializeTrajectoryTracking();
     this.updateElapsedTime();
 
     if (this._pageVisible) {
@@ -302,6 +341,9 @@ Page({
   showRouteError() {
     this._active = false;
     this._route = null;
+    this._trackingEnabled = false;
+    this._trackingUnavailable = false;
+    this._trackingFinalizing = false;
 
     this.stopTimer();
     this.disableLeaveProtection();
@@ -365,6 +407,205 @@ Page({
         locationMessage: "暂时无法显示当前位置"
       });
     }
+  },
+
+  initializeTrajectoryTracking() {
+    if (
+      !this._active ||
+      !this._trackingEnabled ||
+      this._trackingUnavailable ||
+      this._trackingFinalizing ||
+      this.data.ended ||
+      this._trackingStartPromise ||
+      walkingTracker.isTracking({ routeId: this._route.routeId, startTimeMs: this._startTimeMs })
+    ) {
+      return this._trackingStartPromise;
+    }
+
+    let startResult;
+
+    try {
+      startResult = walkingTracker.startTracking({
+        ...(this._trajectoryPartial ? { trajectoryPartial: true } : {}),
+        routeId: this._route.routeId,
+        startTimeMs: this._startTimeMs
+      });
+    } catch (error) {
+      startResult = Promise.reject(error);
+    }
+
+    const startPromise = Promise.resolve(startResult)
+      .catch(error => {
+        if (!this._trackingFinalizing) {
+          this._trackingUnavailable = true;
+
+          console.warn(
+            "[Walking] Trajectory tracking unavailable.",
+            {
+              code:
+                error && error.code
+                  ? error.code
+                  : "TRACKING_UNAVAILABLE",
+              errMsg:
+                error &&
+                error.originalError &&
+                typeof error.originalError.errMsg === "string"
+                  ? error.originalError.errMsg
+                  : null,
+              errCode:
+                error &&
+                error.originalError &&
+                Number.isFinite(error.originalError.errCode)
+                  ? error.originalError.errCode
+                  : null
+            }
+          );
+
+          if (
+            error &&
+            error.code ===
+              "BACKGROUND_LOCATION_PERMISSION_DENIED"
+          ) {
+            this.promptBackgroundLocationPermission();
+          } else {
+            wx.showToast({
+              title: "轨迹记录未开启，散步仍可继续",
+              icon: "none"
+            });
+          }
+        }
+
+        return null;
+      })
+      .finally(() => {
+        if (this._trackingStartPromise === startPromise) {
+          this._trackingStartPromise = null;
+        }
+      });
+
+    this._trackingStartPromise = startPromise;
+    return startPromise;
+  },
+
+  promptBackgroundLocationPermission() {
+    if (this._backgroundPermissionPromptOpen) {
+      return;
+    }
+
+    this._backgroundPermissionPromptOpen = true;
+
+    wx.showModal({
+      title: "需要后台定位权限",
+      content:
+        "记录实际步行轨迹需要允许小程序在使用期间和离开后获取位置。你可以前往设置开启；不授权也可以继续散步。",
+      confirmText: "去设置",
+      cancelText: "暂不记录",
+
+      success: res => {
+        if (
+          !res.confirm ||
+          typeof wx.openSetting !== "function"
+        ) {
+          return;
+        }
+
+        wx.openSetting({
+          success: settings => {
+            const granted =
+              settings &&
+              settings.authSetting &&
+              settings.authSetting[
+                "scope.userLocationBackground"
+              ] === true;
+
+            if (!granted) {
+              return;
+            }
+
+            const pendingStart =
+              this._trackingStartPromise;
+
+            const retry = () => {
+              if (
+                !this._active ||
+                this.data.ended ||
+                this._trackingFinalizing
+              ) {
+                return;
+              }
+
+              this._trackingUnavailable = false;
+              this.initializeTrajectoryTracking();
+            };
+
+            if (pendingStart) {
+              pendingStart.finally(retry);
+            } else {
+              retry();
+            }
+          }
+        });
+      },
+
+      complete: () => {
+        this._backgroundPermissionPromptOpen = false;
+      }
+    });
+  },
+
+  finalizeTrajectoryTracking() {
+    this._trackingFinalizing = true;
+
+    if (!this._trackingEnabled) {
+      return null;
+    }
+
+    if (this._trackingStopPromise) return this._trackingStopPromise;
+    const stopPromise = walkingTracker.finalizeTracking({
+      routeId: this._route.routeId, startTimeMs: this._startTimeMs
+    })
+      .catch(error => {
+        console.warn(
+          "[Walking] Unable to stop trajectory tracking.",
+          {
+            code:
+              error && error.code
+                ? error.code
+                : "TRACK_STOP_FAILED"
+          }
+        );
+
+        return null;
+      });
+
+    this._trackingStopPromise = stopPromise;
+
+    stopPromise.finally(() => {
+      if (this._trackingStopPromise === stopPromise) {
+        this._trackingStopPromise = null;
+      }
+    });
+
+    return stopPromise;
+  },
+
+  restartTrajectoryTrackingAfterRollback() {
+    const restart = () => {
+      if (!this._active || this.data.ended) {
+        return;
+      }
+
+      this._trackingFinalizing = false;
+      this._trackingUnavailable = false;
+      this.initializeTrajectoryTracking();
+    };
+
+    if (this._trackingStopPromise) {
+      this._trackingStopPromise.finally(restart);
+      return;
+    }
+
+    restart();
   },
 
   updateElapsedTime() {
@@ -445,7 +686,7 @@ Page({
   },
 
   finishWalk() {
-    this.completeWalk("completed");
+    return this.completeWalk("completed");
   },
 
   endWalkEarly() {
@@ -467,7 +708,7 @@ Page({
     });
   },
 
-  completeWalk(completionStatus) {
+  async completeWalk(completionStatus) {
     if (
       !this._active ||
       this.data.ended ||
@@ -480,7 +721,9 @@ Page({
 
     this._finishing = true;
 
+    // The user's confirmation, not trajectory cleanup, defines the walk range.
     const endTimeMs = Date.now();
+    const knownPartial = this._trajectoryPartial === true;
     const actualDurationSeconds = Math.max(
       0,
       Math.floor((endTimeMs - this._startTimeMs) / 1000)
@@ -492,7 +735,13 @@ Page({
       startTime: new Date(this._startTimeMs).toISOString(),
       endTime: new Date(endTimeMs).toISOString(),
       actualDurationSeconds,
-      completionStatus
+      completionStatus,
+      trajectoryEnabled: this._trackingEnabled,
+      // Provider queries may need to include the bounded final sample even
+      // though the user's walk duration ends at endTime.
+      trajectoryEndTimeMs: endTimeMs,
+      // Until cleanup finishes, a crash must not leave a falsely complete trace.
+      trajectoryPartial: knownPartial || this._trackingEnabled
     };
 
     try {
@@ -533,25 +782,60 @@ Page({
       ended: true
     });
 
+    if (this._trackingEnabled) {
+      const quality = await this.finalizeTrajectoryTracking();
+      const completedResult = {
+        ...walkResult,
+        trajectoryPartial: Boolean(knownPartial || !quality || quality.trajectoryPartial),
+        // Finalization has already captured its last sample by this point.
+        // Keep endTime fixed at the user's confirmation time while extending
+        // only the provider query boundary far enough to include that sample.
+        trajectoryEndTimeMs: Math.max(
+          walkResult.trajectoryEndTimeMs,
+          Date.now()
+        )
+      };
+      this._trajectoryPartial = completedResult.trajectoryPartial;
+      try {
+        const pending = activeWalkSessionService.getPendingWalkResult();
+        if (pending && pending.routeId === walkResult.routeId &&
+            pending.startTime === walkResult.startTime && pending.endTime === walkResult.endTime) {
+          activeWalkSessionService.savePendingWalkResult(completedResult);
+        }
+      } catch (error) {
+        // Completion is already durable. Keep the conservative quality marker.
+        console.warn("[Walking] Unable to update completed trajectory quality.");
+      }
+    }
+
     wx.reLaunch({
       url: `/pages/feedback/feedback?routeId=${encodeURIComponent(
         this._route.routeId
       )}`,
 
       fail: () => {
+        let restored = false;
         try {
-          activeWalkSessionService.createActiveWalkSession(
+          const result = activeWalkSessionService.createActiveWalkSession(
             this._route,
-            this._startTimeMs
+            this._startTimeMs,
+            {
+              trackingEnabled: this._trackingEnabled
+            }
           );
+          restored = result.session.routeId === this._route.routeId &&
+            result.session.startTimeMs === this._startTimeMs;
         } catch (error) {
           console.warn("[Walking] Unable to restore active session after navigation failure.");
         }
+
+        if (!restored) return;
 
         try {
           activeWalkSessionService.clearPendingWalkResult();
         } catch (error) {
           console.warn("[Walking] Unable to clear pending walk result after navigation failure.");
+          return;
         }
 
         this._active = true;
@@ -567,6 +851,8 @@ Page({
         if (this._pageVisible) {
           this.startTimer();
         }
+
+        this.restartTrajectoryTrackingAfterRollback();
 
         wx.showToast({
           title: "暂时无法打开评价页面",
