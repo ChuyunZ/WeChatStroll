@@ -6,8 +6,22 @@ const CATEGORY_CODES = {
   water: ['261312', '261313', '261314', '222200'],
   shoppingStreet: ['132600']
 }
+// 347 is Tencent's documented no-result status. 387/393 remain scoped to
+// this Explore adapter as empty-result statuses; they are not global provider errors.
 const EMPTY_STATUSES = new Set([347, 387, 393])
-const SEARCH_RADIUS_METERS = 1000
+const DEFAULT_SEARCH_RADIUS_METERS = 1000
+const MIN_SEARCH_RADIUS_METERS = 200
+const MAX_SEARCH_RADIUS_METERS = 1000
+
+function getValidatedRadius(radius) {
+  if (typeof radius !== 'number' || !Number.isFinite(radius)) {
+    return DEFAULT_SEARCH_RADIUS_METERS
+  }
+  return Math.min(
+    MAX_SEARCH_RADIUS_METERS,
+    Math.max(MIN_SEARCH_RADIUS_METERS, Math.round(radius))
+  )
+}
 
 function validCoordinates(latitude, longitude) {
   return typeof latitude === 'number' && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
@@ -33,17 +47,19 @@ function normalizePoi(poi, category) {
 function createNearbyHandler({ apiKey, request }) {
   return async event => {
     if (!apiKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API key is not configured' } }
-    const { longitude, latitude } = event || {}
+    const { longitude, latitude, radius } = event || {}
     if (!validCoordinates(latitude, longitude)) {
       return { success: false, error: { code: 'INVALID_COORDINATES', message: 'Invalid longitude or latitude' } }
     }
     try {
       const poisByCategory = {}
-      // Sequential, bounded discovery. Caller radius never changes provider policy.
+      const searchRadius = getValidatedRadius(radius)
+      // Sequential discovery. The application may choose a duration-aware radius,
+      // while this provider boundary enforces Tencent's bounded radius policy.
       for (const [category, codes] of Object.entries(CATEGORY_CODES)) {
         const response = await request(EXPLORE_URL, { params: {
           key: apiKey,
-          boundary: `nearby(${latitude.toFixed(6)},${longitude.toFixed(6)},${SEARCH_RADIUS_METERS},0)`,
+          boundary: `nearby(${latitude.toFixed(6)},${longitude.toFixed(6)},${searchRadius},0)`,
           filter: `category=${codes.join(',')}`,
           orderby: '_distance', location_mode: 1, page_size: 6, page_index: 1
         } })

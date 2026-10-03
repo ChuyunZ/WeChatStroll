@@ -105,8 +105,8 @@ test('all categories traverse the shared limiter and logs/state exclude provider
 
 test.each([
   [120, 'PROVIDER_RATE_LIMITED', 2], [121, 'PROVIDER_QUOTA_EXHAUSTED', 1],
-  ...[500, 510, 520, 530, 531, 600].map(status => [status, 'PROVIDER_GATEWAY_FAILED', 1]),
-  [110, 'POI_SEARCH_FAILED', 1]
+  ...[110, 111, 112, 113, 190, 199, 311, 500, 510, 520, 530, 531, 600]
+    .map(status => [status, 'PROVIDER_GATEWAY_FAILED', 1])
 ])('status %i crosses the gateway as %s and stops categories', async (status, code, calls) => {
   axios.get.mockResolvedValue({ data: { status, message: 'private-test-key raw-payload https://private 30.123456' } })
   const pending = main(input)
@@ -171,7 +171,8 @@ test.each([input, walking])('transport failures cross $action without retry or r
 })
 
 test.each([[120, 'PROVIDER_RATE_LIMITED', 2], [121, 'PROVIDER_QUOTA_EXHAUSTED', 1],
-  [500, 'PROVIDER_GATEWAY_FAILED', 1], [378, 'ROUTE_NOT_FOUND', 1]])(
+  [111, 'PROVIDER_GATEWAY_FAILED', 1], [500, 'PROVIDER_GATEWAY_FAILED', 1],
+  [378, 'ROUTE_NOT_FOUND', 1]])(
   'walking body status %i normalizes as %s through the gateway', async (status, code, calls) => {
     axios.get.mockResolvedValue({ data: { status, message: 'private-test-key' } })
     const pending = main(walking)

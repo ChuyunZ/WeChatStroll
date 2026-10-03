@@ -65,7 +65,7 @@ test('rate-limited request can succeed only after reacquiring scopes', async () 
   expect(request).toHaveBeenLastCalledWith('private-url', { params: { key: 'secret' }, timeout: 10000 })
 })
 
-test.each([121, 500, 510, 520, 530, 531, 600])('status %i is normalized without retries or cooldown', async status => {
+test.each([121, 110, 111, 112, 113, 190, 199, 311, 500, 510, 520, 530, 531, 600])('status %i is normalized without retries or cooldown', async status => {
   for (const rejected of [false, true]) {
     const request = jest.fn(async () => {
       const response = { data: { status, message: 'secret' } }

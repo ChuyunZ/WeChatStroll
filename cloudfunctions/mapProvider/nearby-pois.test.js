@@ -23,11 +23,14 @@ test.each([undefined, {}, { latitude: 30 }, { longitude: 120 },
   expect(request).not.toHaveBeenCalled()
 })
 
-test.each([undefined, 1, 1000, 5000, '15000', null, -100])('uses exact bounded explore parameters regardless of radius %p', async radius => {
+test.each([
+  [undefined, 1000], [null, 1000], ['15000', 1000], [NaN, 1000],
+  [-100, 200], [1, 200], [563, 563], [937.5, 938], [1000, 1000], [5000, 1000]
+])('clamps caller radius %p to provider-safe %i meters', async (radius, expectedRadius) => {
   await handler({ ...input, radius })
   expect(request.mock.calls).toEqual(['221100', '261312,261313,261314,222200', '132600'].map(codes => [
     'https://apis.map.qq.com/ws/place/v1/explore', { params: {
-      key: 'secret-key', boundary: 'nearby(30.123457,120.765432,1000,0)',
+      key: 'secret-key', boundary: `nearby(30.123457,120.765432,${expectedRadius},0)`,
       filter: `category=${codes}`, orderby: '_distance', location_mode: 1, page_size: 6, page_index: 1
     } }
   ]))

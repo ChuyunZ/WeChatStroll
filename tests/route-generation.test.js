@@ -400,7 +400,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateFirstRoute runs the real pipeline and passes the fixed POI radius',
+    'generateFirstRoute runs the real pipeline and passes the duration-aware capped POI radius',
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {

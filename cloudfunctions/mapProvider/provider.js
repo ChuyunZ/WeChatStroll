@@ -1,5 +1,8 @@
 const { rateLimited, quotaExhausted, gatewayFailed, infrastructureFailure } = require('./errors')
 const AVAILABILITY_STATUSES = new Set([500, 510, 520, 530, 531, 600])
+// Key/origin/signature/authorization failures are provider configuration failures,
+// not evidence that a particular walking edge is unreachable.
+const CONFIGURATION_STATUSES = new Set([110, 111, 112, 113, 190, 199, 311])
 
 function createProvider({ limiter, limits, request, now = Date.now, log = () => {} }) {
   return function forOperation(operation) {
@@ -30,6 +33,10 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
         if (status !== 120) {
           if (!execution.recorded) throw infrastructureFailure(execution.recordingError)
           if (status === 121) throw quotaExhausted() // No retry or short fake cooldown.
+          if (CONFIGURATION_STATUSES.has(status)) {
+            log({ event: 'provider_configuration_failed', operation, status })
+            throw gatewayFailed()
+          }
           if (AVAILABILITY_STATUSES.has(status)) throw gatewayFailed()
           if (error) {
             log({ event: 'provider_failed', operation, attempt })

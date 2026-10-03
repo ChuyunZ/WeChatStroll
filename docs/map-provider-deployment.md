@@ -1,9 +1,10 @@
 # Map provider deployment (#94)
 
-This describes the current repository implementation and a future manual deployment
-plan. It does not certify that cloud deployment, live API smoke tests or real-device
-verification have been completed. Technical API functionality does not establish
-permission for data use, AI processing or persistence; that remains a release checkpoint.
+This describes the current repository implementation and the development validation
+completed on 2026-10-04. Direct CloudBase smoke tests, legacy-wrapper forwarding and
+a Mini Program end-to-end route-generation check passed in the development environment.
+Technical API functionality does not establish permission for data use, AI processing
+or persistence; that remains a separate release checkpoint.
 
 ## Architecture
 
@@ -32,8 +33,11 @@ numeric latitude/longitude. Cloud invocation results contain the business respon
 { action: 'nearbyPois', latitude, longitude, radius }
 ```
 
-The runtime ignores caller radius changes. Discovery always uses **1000 meters**
-with `auto_extend = 0`, encoded as `boundary=nearby(latitude,longitude,1000,0)`.
+The application computes a duration-aware discovery radius from the requested walk
+time using `duration * 75 m/min * 0.5`. Product duration is bounded to **15–120 minutes**.
+The provider boundary independently clamps every caller radius to **200–1000 meters**,
+so longer requests never exceed Tencent's 1 km nearby-search cap. The request uses
+`auto_extend = 0`, encoded as `boundary=nearby(latitude,longitude,radius,0)`.
 It calls Tencent explore (`https://apis.map.qq.com/ws/place/v1/explore`), querying
 the three application categories sequentially: `park`, `water`, `shoppingStreet`.
 The adapter requests the first page of six entries per category, ordered by distance;
@@ -56,9 +60,10 @@ keys exist even when their arrays are empty. There is no `providerMeta` or raw
 provider response in the public contract. Provider category codes are internal
 adapter details, not application categories or client inputs.
 
-Requested duration does not change discovery radius. The local deterministic
-fallback ranking heuristic remains duration-aware; real walking segments, waypoint
-selection, Route Engine, optimization and final validation determine route duration.
+Requested duration therefore influences POI discovery until the 1000 m provider cap
+is reached (for example: 15 min -> 563 m, 20 min -> 750 m, 25 min -> 938 m,
+30+ min -> 1000 m). Real walking segments, waypoint selection, Route Engine,
+optimization and final validation remain authoritative for route duration.
 
 ### Walking route
 
@@ -97,9 +102,14 @@ Business failures use `{ success: false, error: { code, message } }`.
 | `PROVIDER_RATE_LIMITED` | Tencent status 120 exhausted the bounded provider attempt budget |
 | `PROVIDER_QUOTA_EXHAUSTED` | Tencent status 121; no retry or artificial short cooldown |
 | `PROVIDER_BUSY` | Queue deadline or bounded transaction contention budget exhausted |
-| `PROVIDER_GATEWAY_FAILED` | Provider/service, configuration initialization or shared-state infrastructure failure |
+| `PROVIDER_GATEWAY_FAILED` | Provider/service, key/signature/origin authorization, configuration initialization or shared-state infrastructure failure |
 
-All four represent provider/service availability failures, not deterministic
+Tencent key/origin/signature/authorization statuses `110`, `111`, `112`, `113`,
+`190`, `199` and malformed-key status `311` normalize to `PROVIDER_GATEWAY_FAILED`.
+They are configuration/service failures, not evidence that a particular walking edge
+is unreachable, and they do not trigger AI waypoint replanning.
+
+All four availability codes represent provider/service failures, not deterministic
 unreachable edges. Route Engine may retain a request-local Promise result for
 deduplication but does not record these as unreachable resolved segment facts.
 Agentic planning does not ask AI to repair an unavailable provider by choosing
@@ -178,30 +188,23 @@ Never place either credential in Mini Program code, committed files or logs.
 These are conservative implementation defaults, **not Tencent account quota facts**.
 Verify actual account limits separately and keep concurrent revisions consistent.
 
-## Future deployment sequence (not executed)
+## Development deployment status
 
-1. Confirm Tencent WebService data-use, AI and persistence boundaries. This remains
-   unresolved; successful API calls alone do not grant these permissions.
-2. Verify `provider_rate_limits` exists with client rules
-   `{ "read": false, "write": false }` and trusted server transaction access.
-3. Configure the `mapProvider` server key, signing Secret Key and environment settings. Review execution
-   and caller timeouts against sequential POI queries, queue waits, HTTP timeouts
-   and bookkeeping; one queue-wait value is not a whole invocation bound.
-4. Deploy `cloudfunctions/mapProvider` with cloud dependency installation.
-5. Smoke-test `nearbyPois` directly.
-6. Smoke-test `walkingRoute` directly.
-7. Deploy/update both `getNearbyPois` and `getWalkingRoute` wrappers with dependency
-   installation. They invoke `mapProvider` in the same environment, using runtime
-   credentials; SDK retries remain 0. Existing nested transport timeout is 60 s and
-   watchdog is 65 s; allow an 80 s wrapper execution timeout and review the entire
-   timeout chain before changing limits. The watchdog does not cancel its child.
-8. Verify both wrappers' forwarding and returned business results.
-9. Release Mini Program production caller changes together, so both operations use
-   `mapProvider`. Check old deployed revisions during cutover; retaining AMap files
-   alone is not an automatic rollback strategy.
-10. Run real-device end-to-end verification before accepting the release.
+Development environment work completed on 2026-10-04:
 
-## Manual smoke test plan (pending)
+1. `provider_rate_limits` and the `mapProvider` server configuration were used for live smoke tests.
+2. `mapProvider -> nearbyPois` succeeded with normalized Tencent POIs.
+3. `mapProvider -> walkingRoute` succeeded with normalized distance, duration and decoded polyline.
+4. `getNearbyPois -> mapProvider` and `getWalkingRoute -> mapProvider` forwarding succeeded.
+5. Mini Program E2E succeeded through Questionnaire -> Tencent POIs -> HY3 waypoint
+   selection -> Tencent walking segments -> Route Engine -> deterministic validation
+   -> route card/detail. A 30-minute request produced a valid ~24-minute / ~1.6 km route.
+
+Production release still requires the unresolved Tencent WebService data-use / AI-use /
+persistence decision below. Retaining the AMap implementation alone is not an automatic
+rollback mechanism; both production callers must switch providers together.
+
+## Manual validation checklist (completed in development on 2026-10-04)
 
 Use an authorized development environment and controlled valid locations. Do not
 force quota exhaustion or overload the key. Console synchronous cloud testing can
@@ -209,10 +212,10 @@ inspect returned business results; a child log alone does not prove wrapper succ
 
 ### A. Direct nearbyPois
 
-Invoke `mapProvider` with `action: 'nearbyPois'`, valid latitude/longitude and
-`radius: 1000`. Check `success: true`, all three category keys, normalized fields
-and valid empty arrays where appropriate. Ensure no raw Tencent fields or
-`providerMeta` escape. Caller radius must not change the fixed provider policy.
+Invoke `mapProvider` with `action: 'nearbyPois'`, valid latitude/longitude and a
+bounded radius. Development smoke testing returned `success: true` with normalized
+category results. Automated tests additionally verify that radius values are clamped
+to 200–1000 m and that no raw Tencent fields or `providerMeta` escape.
 
 ### B. Direct walkingRoute
 
@@ -236,10 +239,10 @@ duplicate wrapper/client provider retry.
 
 ### E. Real device
 
-Verify Questionnaire -> Tencent POIs -> AI waypoint selection -> Tencent walking
-segments -> Route Engine -> validation -> route display/edit -> Start Walk.
-Check service-unavailable feedback separately from a genuine route-not-found result.
-This document does not claim any of these manual checks have passed.
+Questionnaire -> Tencent POIs -> AI waypoint selection -> Tencent walking segments
+-> Route Engine -> validation -> route display/edit passed in development. Start Walk
+remains a separate lifecycle/trajectory flow. Service-unavailable feedback remains
+distinct from a genuine route-not-found result.
 
 ## Data-use and deployment checkpoint
 

@@ -55,9 +55,8 @@ Current planned-route cloud architecture:
 - `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
 
 See [map provider deployment](map-provider-deployment.md) for server configuration,
-shared limiter state, future deployment order, pending manual tests and unresolved
-data-use/AI/persistence checkpoints. This describes repository architecture, not a
-claim that deployment has been verified.
+shared limiter state, the 2026-10-04 development smoke/E2E validation record and the
+still-unresolved data-use/AI/persistence release checkpoint.
 
 The project also includes two health-check cloud functions:
 
