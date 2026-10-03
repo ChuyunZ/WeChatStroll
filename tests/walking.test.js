@@ -545,7 +545,10 @@ describe("Walking page", () => {
         startTime: "2026-10-01T12:00:00.000Z",
         endTime: "2026-10-01T12:12:30.000Z",
         actualDurationSeconds: 750,
-        completionStatus: "completed"
+        completionStatus: "completed",
+        trajectoryEndTimeMs: new Date(
+          "2026-10-01T12:12:30.000Z"
+        ).getTime()
       })
     );
 
@@ -1000,8 +1003,11 @@ describe("durable completion before trajectory cleanup", () => {
     else page.endWalkEarly();
     const stop = page._trackingStopPromise;
     expect(storage.pendingWalkResult).toMatchObject({
-      endTime: new Date(confirmedAt).toISOString(), actualDurationSeconds: 60,
-      completionStatus: status, trajectoryPartial: true
+      endTime: new Date(confirmedAt).toISOString(),
+      actualDurationSeconds: 60,
+      completionStatus: status,
+      trajectoryEndTimeMs: confirmedAt,
+      trajectoryPartial: true
     });
     expect(storage.activeWalkSession).toBeUndefined();
     expect(page._active).toBe(false);
@@ -1012,7 +1018,9 @@ describe("durable completion before trajectory cleanup", () => {
     flushed({ trajectoryPartial: false });
     await stop;
     expect(storage.pendingWalkResult).toMatchObject({
-      endTime: new Date(confirmedAt).toISOString(), actualDurationSeconds: 60,
+      endTime: new Date(confirmedAt).toISOString(),
+      actualDurationSeconds: 60,
+      trajectoryEndTimeMs: confirmedAt + 5000,
       trajectoryPartial: false
     });
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);

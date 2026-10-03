@@ -737,6 +737,9 @@ Page({
       actualDurationSeconds,
       completionStatus,
       trajectoryEnabled: this._trackingEnabled,
+      // Provider queries may need to include the bounded final sample even
+      // though the user's walk duration ends at endTime.
+      trajectoryEndTimeMs: endTimeMs,
       // Until cleanup finishes, a crash must not leave a falsely complete trace.
       trajectoryPartial: knownPartial || this._trackingEnabled
     };
@@ -783,7 +786,14 @@ Page({
       const quality = await this.finalizeTrajectoryTracking();
       const completedResult = {
         ...walkResult,
-        trajectoryPartial: Boolean(knownPartial || !quality || quality.trajectoryPartial)
+        trajectoryPartial: Boolean(knownPartial || !quality || quality.trajectoryPartial),
+        // Finalization has already captured its last sample by this point.
+        // Keep endTime fixed at the user's confirmation time while extending
+        // only the provider query boundary far enough to include that sample.
+        trajectoryEndTimeMs: Math.max(
+          walkResult.trajectoryEndTimeMs,
+          Date.now()
+        )
       };
       this._trajectoryPartial = completedResult.trajectoryPartial;
       try {
