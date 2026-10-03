@@ -113,7 +113,7 @@ test('malformed nested AI candidates use the deterministic fallback', async () =
   expect(result.routes).toHaveLength(1)
 })
 
-test('duration-aware fallback tries bounded POIs until one validates', async () => {
+test('fallback ranks POIs against the fixed radius and still validates route duration', async () => {
   const fallbackPois = [
     { ...pois[0], poiId: 'near', name: 'near', distanceInMeters: 100 },
     { ...pois[1], poiId: 'middle', name: 'middle', distanceInMeters: 900 },
@@ -137,7 +137,7 @@ test('duration-aware fallback tries bounded POIs until one validates', async () 
   expect(result.status).toBe('success')
   expect(result.source).toBe('fallback')
   expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId))
-    .toEqual(['far', 'second-far'])
+    .toEqual(['middle', 'second-far'])
 })
 
 test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {

@@ -9,6 +9,12 @@ const CROWD_PREFERENCE_MAP = {
 }
 
 const MIN_WALKING_DURATION_MINUTES = 15
+const MAX_WALKING_DURATION_MINUTES = 120
+const MAX_WALKING_HOURS = MAX_WALKING_DURATION_MINUTES / 60
+const MINUTE_OPTIONS = [
+  "00", "05", "10", "15", "20", "25",
+  "30", "35", "40", "45", "50", "55"
+]
 
 Page({
   data: {
@@ -19,12 +25,9 @@ Page({
     previewImage: "",
     previewTitle: "",
 
-    hourOptions: [0, 1, 2, 3, 4, 5],
+    hourOptions: Array.from({ length: MAX_WALKING_HOURS + 1 }, (_, hour) => hour),
 
-    minuteOptions: [
-      "00", "05", "10", "15", "20", "25",
-      "30", "35", "40", "45", "50", "55"
-    ],
+    minuteOptions: [...MINUTE_OPTIONS],
 
     timePickerValue: [0, 6],
 
@@ -125,9 +128,17 @@ Page({
     let hours =
       this.data.hourOptions[hourIndex]
 
+    const minuteOptions = hours === MAX_WALKING_HOURS
+      ? [MINUTE_OPTIONS[0]]
+      : [...MINUTE_OPTIONS]
+
+    if (hours === MAX_WALKING_HOURS) {
+      minuteIndex = 0
+    }
+
     let minutes =
       Number(
-        this.data.minuteOptions[minuteIndex]
+        minuteOptions[minuteIndex]
       )
 
     const durationMinutes =
@@ -145,7 +156,7 @@ Page({
         this.data.hourOptions.indexOf(0)
 
       minuteIndex =
-        this.data.minuteOptions.indexOf(
+        minuteOptions.indexOf(
           String(
             MIN_WALKING_DURATION_MINUTES
           ).padStart(2, "0")
@@ -153,6 +164,7 @@ Page({
     }
 
     this.setData({
+      minuteOptions,
       timePickerValue: [
         hourIndex,
         minuteIndex
@@ -419,7 +431,7 @@ Page({
       this.data.questions
 
     const durationAnswer =
-      questions[0].answer
+      questions[0].answer || {}
 
     const durationMinutes =
       durationAnswer.hours * 60 +
@@ -427,13 +439,17 @@ Page({
 
 
     if (
+      !Number.isFinite(durationAnswer.hours) ||
+      !Number.isFinite(durationAnswer.minutes) ||
+      !Number.isFinite(durationMinutes) ||
       durationMinutes <
-      MIN_WALKING_DURATION_MINUTES
+      MIN_WALKING_DURATION_MINUTES ||
+      durationMinutes > MAX_WALKING_DURATION_MINUTES
     ) {
       wx.showModal({
         title: "提示",
         content:
-          `散步时长至少需要 ${MIN_WALKING_DURATION_MINUTES} 分钟`,
+          `散步时长需在 ${MIN_WALKING_DURATION_MINUTES}–${MAX_WALKING_DURATION_MINUTES} 分钟之间`,
         showCancel: false
       })
 

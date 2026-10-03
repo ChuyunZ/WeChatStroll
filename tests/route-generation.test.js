@@ -402,7 +402,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateFirstRoute runs the real pipeline and passes duration-based radius',
+    'generateFirstRoute runs the real pipeline and passes the fixed POI radius',
     async () => {
       wx.cloud.callFunction.mockImplementation(
         async ({ name, data }) => {
@@ -471,7 +471,7 @@ describe('route-generation service', () => {
             action: 'nearbyPois',
             longitude: 113.264939,
             latitude: 23.129158,
-            radius: 1125
+            radius: 1000
           }
         }
       )
@@ -715,7 +715,7 @@ describe('route-generation service', () => {
   )
 
   test(
-    'generateFirstRoute uses default POI radius when duration is missing',
+    'generateFirstRoute uses the fixed POI radius when duration is missing',
     async () => {
       wx.cloud.callFunction.mockResolvedValue({
         result: {
@@ -752,7 +752,7 @@ describe('route-generation service', () => {
           action: 'nearbyPois',
           longitude: 113.264939,
           latitude: 23.129158,
-          radius: 3000
+          radius: 1000
         }
       })
     }
