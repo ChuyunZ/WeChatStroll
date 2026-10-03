@@ -517,6 +517,7 @@ Page({
   },
 
   requestTrajectoryConsent(route) {
+    if (this._unloaded) return;
     wx.showModal({
       title: "记录实际步行轨迹？",
       content:
@@ -537,6 +538,7 @@ Page({
   },
 
   beginWalk(route, trackingEnabled) {
+    if (this._unloaded) return;
     if (
       this._startingWalk ||
       !this.isValidRoute(route)

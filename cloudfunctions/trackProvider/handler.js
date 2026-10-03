@@ -335,7 +335,8 @@ function createTrackHandler({
           // Track Cloud may accept an upload before that point becomes
           // immediately visible to a subsequent search.
           retryable: points.length === 0,
-          partial: false
+          partial: event.trajectoryPartial === true ||
+            (Array.isArray(result.points) && points.length < result.points.length)
         }
       };
     } catch (error) {

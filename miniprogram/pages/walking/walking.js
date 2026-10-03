@@ -398,7 +398,7 @@ Page({
       this._trackingFinalizing ||
       this.data.ended ||
       this._trackingStartPromise ||
-      walkingTracker.isTracking()
+      walkingTracker.isTracking({ routeId: this._route.routeId, startTimeMs: this._startTimeMs })
     ) {
       return this._trackingStartPromise;
     }
@@ -407,6 +407,7 @@ Page({
 
     try {
       startResult = walkingTracker.startTracking({
+        ...(this._trajectoryPartial ? { trajectoryPartial: true } : {}),
         routeId: this._route.routeId,
         startTimeMs: this._startTimeMs
       });
@@ -540,17 +541,10 @@ Page({
       return null;
     }
 
-    const startPromise = this._trackingStartPromise;
-
-    const stopPromise = Promise.resolve(startPromise)
-      .catch(() => null)
-      .then(() => {
-        if (!walkingTracker.isTracking()) {
-          return null;
-        }
-
-        return walkingTracker.stopTracking();
-      })
+    if (this._trackingStopPromise) return this._trackingStopPromise;
+    const stopPromise = walkingTracker.finalizeTracking({
+      routeId: this._route.routeId, startTimeMs: this._startTimeMs
+    })
       .catch(error => {
         console.warn(
           "[Walking] Unable to stop trajectory tracking.",
@@ -673,7 +667,7 @@ Page({
   },
 
   finishWalk() {
-    this.completeWalk("completed");
+    return this.completeWalk("completed");
   },
 
   endWalkEarly() {
@@ -695,7 +689,7 @@ Page({
     });
   },
 
-  completeWalk(completionStatus) {
+  async completeWalk(completionStatus) {
     if (
       !this._active ||
       this.data.ended ||
@@ -708,6 +702,10 @@ Page({
 
     this._finishing = true;
 
+    let quality = null;
+    if (this._trackingEnabled) {
+      quality = await this.finalizeTrajectoryTracking();
+    }
     const endTimeMs = Date.now();
     const actualDurationSeconds = Math.max(
       0,
@@ -721,7 +719,8 @@ Page({
       endTime: new Date(endTimeMs).toISOString(),
       actualDurationSeconds,
       completionStatus,
-      trajectoryEnabled: this._trackingEnabled
+      trajectoryEnabled: this._trackingEnabled,
+      trajectoryPartial: Boolean(this._trajectoryPartial || (this._trackingEnabled && (!quality || quality.trajectoryPartial)))
     };
 
     try {
@@ -743,6 +742,8 @@ Page({
       }
 
       this._finishing = false;
+      this._trajectoryPartial = walkResult.trajectoryPartial;
+      this.restartTrajectoryTrackingAfterRollback();
       wx.showToast({
         title: "暂时无法结束散步，请重试",
         icon: "none"
@@ -751,7 +752,7 @@ Page({
     }
 
     this._active = false;
-    this.finalizeTrajectoryTracking();
+    this._trajectoryPartial = walkResult.trajectoryPartial;
 
     this.stopTimer();
     this.disableLeaveProtection();
@@ -769,17 +770,22 @@ Page({
       )}`,
 
       fail: () => {
+        let restored = false;
         try {
-          activeWalkSessionService.createActiveWalkSession(
+          const result = activeWalkSessionService.createActiveWalkSession(
             this._route,
             this._startTimeMs,
             {
               trackingEnabled: this._trackingEnabled
             }
           );
+          restored = result.session.routeId === this._route.routeId &&
+            result.session.startTimeMs === this._startTimeMs;
         } catch (error) {
           console.warn("[Walking] Unable to restore active session after navigation failure.");
         }
+
+        if (!restored) return;
 
         try {
           activeWalkSessionService.clearPendingWalkResult();

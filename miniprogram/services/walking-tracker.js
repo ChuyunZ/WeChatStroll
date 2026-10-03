@@ -22,6 +22,55 @@ let locationHandler = null;
 let lastUploadAttemptAtMs = 0;
 let uploadInFlight = false;
 let pendingUpload = null;
+let stopPromise = null;
+let startPromise = null;
+let finalPromise = null;
+let finalizedSession = null;
+let expiryTimer = null;
+let stopping = false;
+let finalizing = false;
+let currentUpload = null;
+const OPERATION_TIMEOUT_MS = 3000;
+const FINAL_FLUSH_TIMEOUT_MS = 5000;
+
+function bounded(promise, timeoutMs = OPERATION_TIMEOUT_MS) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => {
+    timer = setTimeout(() => reject(createCodedError(
+      "TRACK_OPERATION_TIMEOUT", "Tracking operation timed out."
+    )), timeoutMs);
+  })]).finally(() => clearTimeout(timer));
+}
+
+function markPartial(session) {
+  session.trajectoryPartial = true;
+  try {
+    if (activeSession === session && !stopping) saveTrackingSession(session);
+    const walk = wx.getStorageSync("activeWalkSession");
+    if (walk && walk.routeId === session.routeId && walk.startTimeMs === session.startTimeMs) {
+      wx.setStorageSync("activeWalkSession", { ...walk, trajectoryPartial: true });
+    }
+  } catch (error) {
+    console.warn("[Walking Tracker] Unable to persist trajectory quality.");
+  }
+}
+
+function cleanupInBackground() {
+  stopTracking().catch(() => {
+    clearTimeout(expiryTimer);
+    expiryTimer = setTimeout(cleanupInBackground, 30000);
+  });
+}
+
+function ensureActiveSessionFresh() {
+  if (stopping) return false;
+  if (activeSession && isStaleTrackingSession(activeSession)) {
+    markPartial(activeSession);
+    cleanupInBackground();
+    return false;
+  }
+  return Boolean(activeSession && !stopping);
+}
 
 function isValidTrackingSession(session) {
   return (
@@ -29,7 +78,7 @@ function isValidTrackingSession(session) {
     typeof session === "object" &&
     !Array.isArray(session) &&
     session.version === TRACKING_VERSION &&
-    session.status === "active" &&
+    ["active", "stopPending"].includes(session.status) &&
     typeof session.routeId === "string" &&
     session.routeId.trim() !== "" &&
     Number.isFinite(session.startTimeMs) &&
@@ -76,7 +125,7 @@ function isStaleTrackingSession(
   return (
     Number.isFinite(nowMs) &&
     nowMs >= session.startTimeMs &&
-    nowMs - session.startTimeMs >
+    nowMs - session.startTimeMs >=
       MAX_TRACKING_SESSION_AGE_MS
   );
 }
@@ -88,14 +137,16 @@ function getTrackingSession() {
     return null;
   }
 
-  if (
-    !isValidTrackingSession(session) ||
-    isStaleTrackingSession(session)
-  ) {
+  if (!isValidTrackingSession(session)) {
     wx.removeStorageSync(TRACKING_STORAGE_KEY);
     return null;
   }
 
+  if (session.status === "stopPending" || isStaleTrackingSession(session)) {
+    if (!activeSession) activeSession = session;
+    cleanupInBackground();
+    return null;
+  }
   return session;
 }
 
@@ -192,7 +243,7 @@ function isBackgroundLocationAuthError(error) {
   );
 }
 
-async function startBackgroundLocation() {
+async function startBackgroundLocation(session) {
   if (typeof wx.startLocationUpdateBackground !== "function") {
     throw createCodedError(
       ERROR_CODES.BACKGROUND_LOCATION_UNAVAILABLE,
@@ -201,6 +252,9 @@ async function startBackgroundLocation() {
   }
 
   await ensureBackgroundLocationPermission();
+  if (stopping || activeSession !== session) {
+    throw createCodedError(ERROR_CODES.INVALID_SESSION, "Tracking start was cancelled.");
+  }
 
   return new Promise((resolve, reject) => {
     wx.startLocationUpdateBackground({
@@ -227,7 +281,9 @@ async function startBackgroundLocation() {
 
 function stopBackgroundLocation() {
   if (typeof wx.stopLocationUpdate !== "function") {
-    return Promise.resolve();
+    return Promise.reject(createCodedError(
+      ERROR_CODES.BACKGROUND_LOCATION_UNAVAILABLE, "Unable to stop background location."
+    ));
   }
 
   return new Promise((resolve, reject) => {
@@ -323,10 +379,11 @@ function shouldUploadLocation(location, nowMs = Date.now()) {
   return true;
 }
 
-async function uploadLocation(location, nowMs = Date.now()) {
+async function uploadLocation(location, nowMs = Date.now(), force = false) {
   const session = activeSession;
 
-  if (!session || !shouldUploadLocation(location, nowMs)) {
+  if (!ensureActiveSessionFresh() || (!force && finalizing) ||
+      (!force && !shouldUploadLocation(location, nowMs))) {
     return false;
   }
 
@@ -349,7 +406,7 @@ async function uploadLocation(location, nowMs = Date.now()) {
   uploadInFlight = true;
 
   try {
-    await callCloudFunction(
+    await bounded(callCloudFunction(
       "trackProvider",
       {
         action: "uploadTrace",
@@ -361,19 +418,27 @@ async function uploadLocation(location, nowMs = Date.now()) {
         fallbackCode: "TRACK_UPLOAD_FAILED",
         fallbackMessage: "Unable to upload walking location."
       }
-    );
+    ));
 
+    if (activeSession !== session || stopping) return false;
+    delete session.pendingPoint;
+    saveTrackingSession(session);
     if (retrying) {
       pendingUpload = null;
     }
 
     return true;
   } catch (error) {
+    if (activeSession !== session || stopping) return false;
     if (retrying) {
+      delete session.pendingPoint;
+      markPartial(session);
       // One buffered retry is enough. Drop the stale point after that
       // so a temporary outage cannot create an unbounded retry loop.
       pendingUpload = null;
     } else {
+      session.pendingPoint = true;
+      saveTrackingSession(session);
       pendingUpload = {
         point,
         attempts: 1
@@ -386,7 +451,7 @@ async function uploadLocation(location, nowMs = Date.now()) {
 
     return false;
   } finally {
-    uploadInFlight = false;
+    if (activeSession === session) uploadInFlight = false;
   }
 }
 
@@ -398,11 +463,14 @@ function captureInitialLocation() {
     return;
   }
 
+  const session = activeSession;
   wx.getLocation({
     type: "gcj02",
 
     success: location => {
-      uploadLocation(location).catch(error => {
+      if (session !== activeSession || finalizing || stopping || uploadInFlight) return;
+      currentUpload = uploadLocation(location);
+      currentUpload.catch(error => {
         console.warn(
           "[Walking Tracker] Initial location upload failed.",
           {
@@ -419,10 +487,7 @@ function captureInitialLocation() {
       console.warn(
         "[Walking Tracker] Unable to capture initial location.",
         {
-          errMsg:
-            error && typeof error.errMsg === "string"
-              ? error.errMsg
-              : null
+          code: "TRACK_INITIAL_LOCATION_FAILED"
         }
       );
     }
@@ -441,8 +506,12 @@ function attachLocationListener() {
     );
   }
 
+  const session = activeSession;
   locationHandler = location => {
-    uploadLocation(location).catch(error => {
+    if (session !== activeSession || finalizing || stopping) return;
+    if (uploadInFlight) { ensureActiveSessionFresh(); return; }
+    currentUpload = uploadLocation(location);
+    currentUpload.catch(error => {
       console.warn("[Walking Tracker] Unexpected location upload error.", {
         code: error && error.code ? error.code : "TRACK_UPLOAD_FAILED"
       });
@@ -458,76 +527,81 @@ function detachLocationListener() {
   }
 
   if (typeof wx.offLocationChange === "function") {
-    wx.offLocationChange(locationHandler);
+    try {
+      wx.offLocationChange(locationHandler);
+    } catch (error) {
+      console.warn("[Walking Tracker] Unable to detach location listener.");
+    }
   }
 
   locationHandler = null;
 }
 
-async function startTracking({ routeId, startTimeMs }) {
-  const requestedSession = createTrackingSession(routeId, startTimeMs);
+function startTracking(options) {
+  if (startPromise) return startPromise.then(() => startTracking(options));
+  const operation = startTrackingSession(options);
+  startPromise = operation;
+  operation.finally(() => {
+    if (startPromise === operation) startPromise = null;
+  }).catch(() => {});
+  return operation;
+}
 
+async function startTrackingSession({ routeId, startTimeMs, trajectoryPartial = false }) {
+  const requestedSession = createTrackingSession(routeId, startTimeMs);
+  if (isStaleTrackingSession(requestedSession)) {
+    throw createCodedError(ERROR_CODES.INVALID_SESSION, "Tracking session expired.");
+  }
+  const stored = wx.getStorageSync(TRACKING_STORAGE_KEY);
+  if (stopPromise) await stopPromise;
+  if (stopping || (activeSession && isStaleTrackingSession(activeSession)) ||
+      (stored && (stored.status === "stopPending" || isStaleTrackingSession(stored)))) {
+    await stopTracking();
+  }
   if (activeSession) {
     if (isSameTrackingSession(activeSession, requestedSession)) {
-      return {
-        session: activeSession,
-        resumed: true
-      };
+      return { session: activeSession, resumed: true };
     }
-
-    throw createCodedError(
-      ERROR_CODES.SESSION_CONFLICT,
-      "Another walking tracking session is already active."
-    );
+    throw createCodedError(ERROR_CODES.SESSION_CONFLICT, "Another tracking session is active.");
   }
-
   const storedSession = getTrackingSession();
-
-  if (
-    storedSession &&
-    !isSameTrackingSession(storedSession, requestedSession)
-  ) {
-    throw createCodedError(
-      ERROR_CODES.SESSION_CONFLICT,
-      "A different walking tracking session is already stored."
-    );
+  if (storedSession && !isSameTrackingSession(storedSession, requestedSession)) {
+    throw createCodedError(ERROR_CODES.SESSION_CONFLICT, "A different tracking session is stored.");
   }
-
   const session = storedSession || requestedSession;
-
-  await startBackgroundLocation();
-
+  const walk = wx.getStorageSync("activeWalkSession");
+  if (trajectoryPartial || session.pendingPoint ||
+      (walk && walk.routeId === routeId && walk.startTimeMs === startTimeMs && walk.trajectoryPartial)) {
+    session.trajectoryPartial = true;
+  }
+  delete session.pendingPoint;
+  stopping = false;
+  finalizing = false;
+  finalPromise = null;
+  finalizedSession = null;
+  activeSession = session;
   try {
-    activeSession = session;
+    await startBackgroundLocation(session);
+    if (stopping || activeSession !== session || isStaleTrackingSession(session)) {
+      activeSession = session;
+      await stopTracking().catch(() => { cleanupInBackground(); });
+      return null;
+    }
     lastUploadAttemptAtMs = 0;
     uploadInFlight = false;
     pendingUpload = null;
-
-    attachLocationListener();
+    if (!finalizing) attachLocationListener();
     saveTrackingSession(session);
-    captureInitialLocation();
+    expiryTimer = setTimeout(() => {
+      markPartial(session);
+      cleanupInBackground();
+    }, Math.max(0, session.startTimeMs + MAX_TRACKING_SESSION_AGE_MS - Date.now()));
+    if (!finalizing) captureInitialLocation();
   } catch (error) {
-    activeSession = null;
-    detachLocationListener();
-
-    try {
-      await stopBackgroundLocation();
-    } catch (stopError) {
-      console.warn("[Walking Tracker] Unable to stop location after setup failure.", {
-        code:
-          stopError && stopError.code
-            ? stopError.code
-            : ERROR_CODES.BACKGROUND_LOCATION_FAILED
-      });
-    }
-
+    await stopTracking().catch(() => {});
     throw error;
   }
-
-  return {
-    session,
-    resumed: Boolean(storedSession)
-  };
+  return { session, resumed: Boolean(storedSession) };
 }
 
 async function resumeTracking() {
@@ -543,32 +617,82 @@ async function resumeTracking() {
   });
 }
 
-async function stopTracking() {
-  const session = activeSession || getTrackingSession();
-
+function stopTracking() {
+  if (stopPromise) return stopPromise;
+  const session = activeSession || wx.getStorageSync(TRACKING_STORAGE_KEY) || null;
+  stopping = true;
+  clearTimeout(expiryTimer);
   detachLocationListener();
-
-  activeSession = null;
-  lastUploadAttemptAtMs = 0;
-  uploadInFlight = false;
-  pendingUpload = null;
-
-  clearTrackingSession();
-
-  try {
-    await stopBackgroundLocation();
-  } catch (error) {
-    console.warn("[Walking Tracker] Unable to stop background location.", {
-      code:
-        error && error.code
-          ? error.code
-          : ERROR_CODES.BACKGROUND_LOCATION_FAILED
-    });
-
-    throw error;
+  if (session) {
+    if (pendingUpload || uploadInFlight) session.trajectoryPartial = true;
+    try {
+      wx.setStorageSync(TRACKING_STORAGE_KEY, { ...session, status: "stopPending" });
+    } catch (error) {
+      console.warn("[Walking Tracker] Unable to persist pending stop; retaining in-memory state.");
+    }
   }
+  const operation = bounded(stopBackgroundLocation()).then(() => {
+    clearTrackingSession();
+    activeSession = null;
+    stopping = false;
+    pendingUpload = null;
+    uploadInFlight = false;
+    currentUpload = null;
+    lastUploadAttemptAtMs = 0;
+    return session;
+  });
+  stopPromise = operation;
+  operation.finally(() => {
+    if (stopPromise === operation) stopPromise = null;
+  }).catch(() => {});
+  return operation;
+}
 
-  return session;
+function finalizeTracking(requestedSession = null) {
+  const matches = session => !requestedSession || (session &&
+    session.routeId === requestedSession.routeId && session.startTimeMs === requestedSession.startTimeMs);
+  if (finalPromise && matches(finalizedSession)) return finalPromise;
+  const session = activeSession;
+  if (requestedSession && !matches(session)) {
+    return Promise.resolve({ trajectoryPartial: true });
+  }
+  finalizedSession = session;
+  finalizing = true;
+  detachLocationListener();
+  const flush = async () => {
+    if (!session || !ensureActiveSessionFresh()) return;
+    if (startPromise) await bounded(startPromise);
+    if (currentUpload) await currentUpload;
+    if (activeSession !== session || !ensureActiveSessionFresh() || stopping) return;
+    // Buffered retry precedes the fresh final sample. Final uploads explicitly
+    // bypass the ordinary 15-second cadence, within one total 5-second budget.
+    if (pendingUpload) await uploadLocation(pendingUpload.point, Date.now(), true);
+    if (activeSession !== session || !ensureActiveSessionFresh() || stopping) return;
+    const location = await new Promise((resolve, reject) => {
+      if (typeof wx.getLocation !== "function") return reject(new Error("Location unavailable"));
+      wx.getLocation({ type: "gcj02", success: resolve, fail: reject });
+    });
+    if (stopping || activeSession !== session) return;
+    if (!normalizeLocation(location)) throw new Error("Invalid final location");
+    if (!await uploadLocation(location, Date.now(), true)) markPartial(session);
+  };
+  finalPromise = bounded(flush(), FINAL_FLUSH_TIMEOUT_MS)
+    .catch(() => { if (session) markPartial(session); })
+    .then(async () => {
+      if (activeSession === session) {
+        await stopTracking().catch(() => { cleanupInBackground(); });
+      }
+      return { trajectoryPartial: Boolean(!session || session.trajectoryPartial) };
+    });
+  return finalPromise;
+}
+
+function stopTrackingForSession(session) {
+  const tracked = activeSession || wx.getStorageSync(TRACKING_STORAGE_KEY);
+  if (tracked && tracked.routeId === session.routeId && tracked.startTimeMs === session.startTimeMs) {
+    if (isStaleTrackingSession(tracked)) markPartial(tracked);
+    cleanupInBackground();
+  }
 }
 
 function wait(ms) {
@@ -588,7 +712,7 @@ function isRetryableEmptyTrace(result) {
   );
 }
 
-async function searchTrace({ startTimeMs, endTimeMs }) {
+async function searchTrace({ startTimeMs, endTimeMs, trajectoryPartial = false }) {
   if (
     !Number.isFinite(startTimeMs) ||
     !Number.isFinite(endTimeMs) ||
@@ -607,7 +731,8 @@ async function searchTrace({ startTimeMs, endTimeMs }) {
       {
         action: "searchTrace",
         startTimeMs,
-        endTimeMs
+        endTimeMs,
+        ...(trajectoryPartial ? { trajectoryPartial: true } : {})
       },
       {
         fallbackCode: "TRACK_SEARCH_FAILED",
@@ -629,8 +754,9 @@ async function searchTrace({ startTimeMs, endTimeMs }) {
   return result;
 }
 
-function isTracking() {
-  return Boolean(activeSession);
+function isTracking(session = null) {
+  return ensureActiveSessionFresh() && !finalizing && (!session ||
+    (activeSession.routeId === session.routeId && activeSession.startTimeMs === session.startTimeMs));
 }
 
 module.exports = {
@@ -646,6 +772,8 @@ module.exports = {
   startTracking,
   resumeTracking,
   stopTracking,
+  finalizeTracking,
+  stopTrackingForSession,
   searchTrace,
   shouldUploadLocation,
   isTracking

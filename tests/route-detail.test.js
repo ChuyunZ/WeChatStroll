@@ -950,3 +950,15 @@ describe(
 
   }
 );
+test("late consent callbacks cannot create a walk after Route Detail unloads", () => {
+  page.loadRoute(GENERATED_ROUTE);
+  page.requestTrajectoryConsent(GENERATED_ROUTE);
+  const modal = wx.showModal.mock.calls[0][0];
+  page.onUnload();
+  modal.success({ confirm: true });
+  expect(wx.getStorageSync("activeWalkSession")).toBeFalsy();
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  wx.showModal.mockClear();
+  page.requestTrajectoryConsent(GENERATED_ROUTE);
+  expect(wx.showModal).not.toHaveBeenCalled();
+});

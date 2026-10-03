@@ -7,6 +7,7 @@ let page;
 let getCurrentLocation;
 let startTracking;
 let stopTracking;
+let finalizeTracking;
 let isTracking;
 let trackerActive;
 let storage;
@@ -53,6 +54,7 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     return null;
   });
 
+  finalizeTracking = jest.fn(() => stopTracking().then(() => ({ trajectoryPartial: false })));
   isTracking = jest.fn(() => trackerActive);
 
   jest.doMock("../miniprogram/services/location", () => ({
@@ -64,6 +66,8 @@ function loadWalkingPage({ eventChannel = null } = {}) {
     () => ({
       startTracking,
       stopTracking,
+      finalizeTracking,
+      stopTrackingForSession: jest.fn(),
       isTracking
     })
   );
@@ -899,4 +903,79 @@ describe("Walking page", () => {
 
     expect(wx.navigateBack).toHaveBeenCalledTimes(1);
   });
+});
+describe("completion trajectory quality", () => {
+  async function optedIn() {
+    storage.activeWalkSession = {
+      version: 1, status: "active", routeId: TEST_ROUTE.routeId,
+      route: TEST_ROUTE, startTimeMs: Date.now(), trackingEnabled: true
+    };
+    page.onLoad({ routeId: TEST_ROUTE.routeId });
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  test.each(["completed", "ended_early"])("%s waits for one final flush and persists partial metadata", async status => {
+    await optedIn();
+    let flushed;
+    finalizeTracking.mockImplementation(() => new Promise(resolve => { flushed = resolve; }));
+    const done = page.completeWalk(status);
+    page.finishWalk();
+    expect(finalizeTracking).toHaveBeenCalledTimes(1);
+    expect(wx.reLaunch).not.toHaveBeenCalled();
+    flushed({ trajectoryPartial: true });
+    await done;
+    expect(storage.pendingWalkResult).toMatchObject({ trajectoryPartial: true, completionStatus: status });
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(wx.reLaunch).toHaveBeenCalledTimes(1);
+  });
+
+  test("healthy finalization records a nonpartial completed walk", async () => {
+    await optedIn();
+    await page.finishWalk();
+    expect(storage.pendingWalkResult.trajectoryPartial).toBe(false);
+  });
+
+  test("trajectory failure still completes without restarting tracking", async () => {
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    await optedIn();
+    finalizeTracking.mockRejectedValue(new Error("failed"));
+    await page.finishWalk();
+    expect(storage.pendingWalkResult.trajectoryPartial).toBe(true);
+    expect(page._active).toBe(false);
+    expect(startTracking).toHaveBeenCalledTimes(1);
+    expect(wx.reLaunch).toHaveBeenCalledTimes(1);
+  });
+
+  test("navigation rollback retains partial quality on the resumed walk", async () => {
+    await optedIn();
+    finalizeTracking.mockImplementation(async () => {
+      await stopTracking();
+      return { trajectoryPartial: true };
+    });
+    wx.reLaunch.mockImplementation(({ fail }) => fail());
+    await page.finishWalk();
+    expect(page._active).toBe(true);
+    expect(startTracking).toHaveBeenLastCalledWith(expect.objectContaining({ trajectoryPartial: true }));
+    expect(storage.pendingWalkResult).toBeUndefined();
+  });
+});
+
+test("failed navigation cannot restart tracking when the active lock cannot be restored", async () => {
+  jest.spyOn(console, "warn").mockImplementation(() => {});
+  storage.activeWalkSession = {
+    version: 1, status: "active", routeId: TEST_ROUTE.routeId,
+    route: TEST_ROUTE, startTimeMs: Date.now(), trackingEnabled: true
+  };
+  page.onLoad({ routeId: TEST_ROUTE.routeId });
+  await Promise.resolve();
+  await Promise.resolve();
+  wx.reLaunch.mockImplementation(({ fail }) => {
+    wx.setStorageSync.mockImplementation(() => { throw new Error("storage unavailable"); });
+    fail();
+  });
+  await page.finishWalk();
+  expect(page._active).toBe(false);
+  expect(storage.pendingWalkResult).toBeTruthy();
+  expect(startTracking).toHaveBeenCalledTimes(1);
 });

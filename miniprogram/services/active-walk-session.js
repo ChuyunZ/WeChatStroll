@@ -57,7 +57,7 @@ function isStaleActiveWalkSession(
   return (
     Number.isFinite(nowMs) &&
     nowMs >= session.startTimeMs &&
-    nowMs - session.startTimeMs >
+    nowMs - session.startTimeMs >=
       MAX_ACTIVE_WALK_AGE_MS
   );
 }
@@ -78,6 +78,7 @@ function getActiveWalkSession() {
     isCompletedActiveWalkSession(session) ||
     isStaleActiveWalkSession(session)
   ) {
+    require("./walking-tracker").stopTrackingForSession(session);
     wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
     return null;
   }
@@ -125,7 +126,7 @@ function createActiveWalkSession(
 }
 
 function clearActiveWalkSession(routeId = null) {
-  const activeSession = getActiveWalkSession();
+  const activeSession = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
   if (!activeSession) {
     return true;

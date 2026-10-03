@@ -244,3 +244,12 @@ describe("Tencent Track Cloud client", () => {
     });
   });
 });
+
+test.each([null, {}, { status: null }, { status: "" }])("malformed provider response %j is never successful", async data => {
+  const http = createHttp();
+  http.post.mockResolvedValue({ data });
+  http.get.mockResolvedValue({ data });
+  const client = createTrackClient({ config, http });
+  await expect(client.ensureEntity("usr_abc")).rejects.toMatchObject({ code: "TRACK_ENTITY_FAILED" });
+  await expect(client.searchTrace("usr_abc", 100, 200)).rejects.toMatchObject({ code: "TRACK_SEARCH_FAILED" });
+});

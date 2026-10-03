@@ -333,3 +333,20 @@ describe("trackProvider handler", () => {
     );
   });
 });
+
+test.each([false, true])("search preserves known partial=%s independently of availability", async partial => {
+  const client = createClient();
+  client.searchTrace.mockResolvedValue({ points: [{ lat: 31, lng: 121, loctime: 100 }] });
+  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000 });
+  const result = await handler({ action: "searchTrace", startTimeMs: 90000, endTimeMs: 110000, trajectoryPartial: partial });
+  expect(result.trace).toMatchObject({ available: true, retryable: false, partial });
+});
+
+test("discarded invalid provider points mark a trajectory partial", async () => {
+  const client = createClient();
+  client.searchTrace.mockResolvedValue({ points: [{ lat: 31, lng: 121, loctime: 100 }, { lat: 999, lng: 121, loctime: 101 }] });
+  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000 });
+  const result = await handler({ action: "searchTrace", startTimeMs: 90000, endTimeMs: 110000 });
+  expect(result.trace).toMatchObject({ available: true, retryable: false, partial: true });
+  expect(result.trace.points).toHaveLength(1);
+});

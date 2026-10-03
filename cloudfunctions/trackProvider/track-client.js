@@ -34,7 +34,8 @@ class TrackProviderError extends Error {
 }
 
 function providerStatus(data) {
-  const value = Number(data && data.status);
+  if (!data || data.status === null || data.status === undefined || data.status === "") return null;
+  const value = Number(data.status);
   return Number.isFinite(value) ? value : null;
 }
 
