@@ -152,9 +152,13 @@ function getFallbackTargetPoiDistance(
     return null
   }
 
-  return getPoiSearchRadius(
-    preferences.durationMinutes
-  )
+  // Only a deterministic fallback ranking heuristic, not the provider search radius.
+  // Final route duration still comes from real walking segments and validation.
+  const approximateWalkingSpeedMetersPerMinute = 75
+  const targetPoiDistanceRatio = 0.5
+
+  return preferences.durationMinutes *
+    approximateWalkingSpeedMetersPerMinute * targetPoiDistanceRatio
 }
 
 function compareFallbackPoiFit(

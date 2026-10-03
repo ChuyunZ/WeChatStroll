@@ -113,7 +113,7 @@ test('malformed nested AI candidates use the deterministic fallback', async () =
   expect(result.routes).toHaveLength(1)
 })
 
-test('fallback ranks POIs against the fixed radius and still validates route duration', async () => {
+test('duration-aware fallback tries bounded POIs until one validates', async () => {
   const fallbackPois = [
     { ...pois[0], poiId: 'near', name: 'near', distanceInMeters: 100 },
     { ...pois[1], poiId: 'middle', name: 'middle', distanceInMeters: 900 },
@@ -137,8 +137,40 @@ test('fallback ranks POIs against the fixed radius and still validates route dur
   expect(result.status).toBe('success')
   expect(result.source).toBe('fallback')
   expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId))
-    .toEqual(['middle', 'second-far'])
+    .toEqual(['far', 'second-far'])
 })
+
+test.each([[15, 'near'], [30, 'far']])(
+  'fallback for %i minutes prefers %s while POI discovery stays at 1000 meters',
+  async (durationMinutes, expectedPoiId) => {
+    const fallbackPois = [
+      { ...pois[0], poiId: 'near', distanceInMeters: 550 },
+      { ...pois[1], poiId: 'far', distanceInMeters: 950 }
+    ]
+    callCloudFunction.mockImplementation(async name => name === 'amapProvider'
+      ? { poisByCategory: { park: fallbackPois } }
+      : { plan: { candidates: [] } })
+    getWalkingSegment.mockImplementation(async (from, to) => ({
+      success: true,
+      durationSeconds: to.nodeId === 'near' ? 900 : 1800,
+      distanceMeters: to.nodeId === 'near' ? 1100 : 2200,
+      polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+    }))
+
+    const result = await generateRoutes({ ...preferences, durationMinutes })
+
+    expect(callCloudFunction.mock.calls.filter(([name]) => name === 'amapProvider'))
+      .toEqual([['amapProvider', {
+        action: 'nearbyPois', ...location, radius: 1000
+      }, expect.any(Object)]])
+    // Inspect the first attempted segment, not only the eventual valid route:
+    // duration validation must not hide a duration-independent ranking.
+    expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId)).toEqual([expectedPoiId])
+    expect(result).toMatchObject({ status: 'success', source: 'fallback' })
+    expect(result.routes[0].pointsOfInterest.map(poi => poi.poiId)).toEqual([expectedPoiId])
+    expect(result.routes[0].durationSeconds).toBe(durationMinutes * 60)
+  }
+)
 
 test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {
   getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
