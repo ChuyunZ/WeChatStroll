@@ -432,7 +432,7 @@ describe('route-generation service', () => {
       const result =
         await routeGenerationService
           .generateFirstRoute({
-            durationMinutes: 30,
+            durationMinutes: 20,
             environmentPreferences: [
               '公园',
               '水边',
@@ -469,7 +469,7 @@ describe('route-generation service', () => {
             action: 'nearbyPois',
             longitude: 113.264939,
             latitude: 23.129158,
-            radius: 1000
+            radius: 750
           }
         }
       )
