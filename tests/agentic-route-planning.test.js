@@ -16,7 +16,7 @@ test('observations project only directed verified POI IDs and normalized failure
 })
 
 test.each(['AI_CONFIG_UNAVAILABLE', 'AI_REQUEST_FAILED', 'AI_ROUTE_PLANNING_FAILED',
-  'INVALID_LOCATION', 'AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INVALID_PLANNING_SESSION', 'INVALID_REQUESTED_DURATION'])('%s is not replannable', error => {
+  'INVALID_LOCATION', 'PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INVALID_PLANNING_SESSION', 'INVALID_REQUESTED_DURATION'])('%s is not replannable', error => {
   expect(isReplannableFailure(normalizePlanningFailure({ error }))).toBe(false)
 })
 
@@ -25,7 +25,7 @@ test.each(['INVALID_AI_ROUTE_PLAN', 'EMPTY_AI_RESPONSE', 'INVALID_WAYPOINT_SET',
   expect(isReplannableFailure(normalizePlanningFailure({ error }))).toBe(true)
 })
 
-test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])(
+test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])(
   '%s takes precedence over stale waypoint failure metadata', code => {
     const failure = normalizePlanningFailure({
       error: code, reason: 'ROUTE_DURATION_OUT_OF_RANGE', actualDurationSeconds: 1,

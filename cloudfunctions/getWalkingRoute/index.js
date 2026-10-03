@@ -24,10 +24,10 @@ function businessResult(value) {
 }
 
 exports.main = async (event, context = {}) => {
-  const log = record => console.info('[AMap Legacy Wrapper]', { ...record, action: ACTION })
+  const log = record => console.info('[Map Legacy Wrapper]', { ...record, action: ACTION })
   let timer
   context.callbackWaitsForEmptyEventLoop = false
-  log({ event: 'forward_start', target: 'amapProvider', transport: 'cloudbase-node-3.17.2',
+  log({ event: 'forward_start', target: 'mapProvider', transport: 'cloudbase-node-3.17.2',
     timeoutMs: 60000, executionLimitMs: Number.isFinite(context.time_limit_in_ms) ? context.time_limit_in_ms : null })
   try {
     // The watchdog bounds a never-settling SDK promise independently of the
@@ -40,7 +40,7 @@ exports.main = async (event, context = {}) => {
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV,
       timeout: 60000, retries: 0, keepalive: false })
     const invocation = app.callFunction({
-      name: 'amapProvider', data: { ...(event || {}), action: ACTION }
+      name: 'mapProvider', data: { ...(event || {}), action: ACTION }
     }, { timeout: 60000, retryOptions: { retries: 0 } })
     const response = await Promise.race([invocation, deadline])
     // The Node SDK can resolve infrastructure failures as error envelopes.

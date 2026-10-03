@@ -1,4 +1,8 @@
-jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({})) }))
+jest.mock('@cloudbase/node-sdk', () => ({
+  SYMBOL_CURRENT_ENV: Symbol('current-env'),
+  init: jest.fn(() => ({ callFunction: (...args) => require('wx-server-sdk').callFunction(...args) }))
+}))
+jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({})), callFunction: jest.fn() }))
 jest.mock('axios', () => ({ get: jest.fn() }))
 jest.mock('./cloudbase-store', () => ({
   ...jest.requireActual('./cloudbase-store'), createCloudBaseStore: jest.fn()
@@ -8,11 +12,35 @@ const axios = require('axios')
 const { createCloudBaseStore } = require('./cloudbase-store')
 const { createTestStore } = require('./test-store')
 const { main } = require('./index')
+const { main: legacyWalking } = require('../getWalkingRoute')
+const { main: legacyPois } = require('../getNearbyPois')
 const input = { action: 'nearbyPois', latitude: 30.123456, longitude: 120.654321 }
 const walking = { action: 'walkingRoute', start: { latitude: 30.123456, longitude: 120.654321 },
   destination: { latitude: 30.124456, longitude: 120.655321 } }
 let originalKey
 let store
+
+test('legacy and direct callers share mapProvider data and distributed pacing', async () => {
+  cloud.callFunction.mockImplementation(async ({ name, data }) => {
+    expect(name).toBe('mapProvider')
+    return { result: await main(data) }
+  })
+  axios.get.mockImplementation(async url => ({ data: url.includes('/direction/')
+    ? { status: 0, result: { routes: [{ distance: 100, duration: 2, polyline: [30, 120, 100, 100] }] } }
+    : { status: 0, data: [] } }))
+  const pending = Promise.all([main(walking), legacyWalking(walking), legacyPois(input)])
+  await jest.runAllTimersAsync()
+  const results = await pending
+  expect(results.every(result => result.success)).toBe(true)
+  expect(results[0]).toEqual(results[1])
+  expect(results[0].route.durationSeconds).toBe(120)
+  expect(axios.get).toHaveBeenCalledTimes(5)
+  expect(axios.get.mock.calls.every(([url]) => url.startsWith('https://apis.map.qq.com/'))).toBe(true)
+  const starts = console.info.mock.calls.map(([, record]) => record)
+    .filter(record => record.event === 'provider_start' && record.operation === 'walkingRoute')
+  expect(starts[1].startedAtMs - starts[0].startedAtMs).toBeGreaterThanOrEqual(1500)
+  expect(console.info.mock.calls.every(([prefix]) => ['[Map Provider]', '[Map Legacy Wrapper]'].includes(prefix))).toBe(true)
+})
 
 beforeEach(() => {
   jest.useFakeTimers()

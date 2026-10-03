@@ -245,7 +245,7 @@ function buildRoutePlanningPrompt(input) {
   
     "Never invent walking distances or walking durations.",
   
-    "AMap and the application's route engine are the source of truth for real-world route facts.",
+    "The map provider and the application's route engine are the source of truth for real-world route facts.",
   
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
   

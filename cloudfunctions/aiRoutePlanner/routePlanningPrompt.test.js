@@ -57,6 +57,9 @@ describe("route planning prompt", () => {
 
     const prompt = result.data.prompt
 
+    expect(prompt).not.toContain('AMap')
+    expect(prompt).toContain("The map provider and the application's route engine are the source of truth for real-world route facts.")
+
     expect(prompt).toContain(
       "SYSTEM / PLANNING RULES"
     )

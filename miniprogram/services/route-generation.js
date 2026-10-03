@@ -1,4 +1,4 @@
-const { isTemporaryProviderCode } = require('../utils/provider-errors')
+const { isProviderUnavailableCode } = require('../utils/provider-errors')
 const locationService = require('./location')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
 const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
@@ -113,8 +113,6 @@ function selectCandidatePoi(
       POI_ENVIRONMENT_CATEGORY_MAP[environment]
 
     // “街道”没有对应的 POI category。
-    // Week 3 的 route-planning 会通过路线本身的
-    // environmentStats 来处理街道偏好。
     if (!category) {
       continue
     }
@@ -338,7 +336,7 @@ async function searchNearbyPois(
 ) {
   const result =
     await callCloudFunction(
-      'amapProvider',
+      'mapProvider',
       {
         action: 'nearbyPois',
         longitude: location.longitude,
@@ -572,10 +570,7 @@ function buildGeneratedRoute({
     ],
 
     updatedAt:
-      new Date().toISOString(),
-
-    environmentStats:
-      walkingRoute.environmentStats
+      new Date().toISOString()
   }
 }
 
@@ -759,10 +754,7 @@ function buildGeneratedRouteFromAiCandidate({
       ),
 
     updatedAt:
-      new Date().toISOString(),
-
-    environmentStats:
-      walkingRoute.environmentStats
+      new Date().toISOString()
   }
 }
 
@@ -1054,7 +1046,7 @@ async function buildFallbackGenerationResult({
 
       if (
         walkingRoute &&
-        isTemporaryProviderCode(walkingRoute.error)
+        isProviderUnavailableCode(walkingRoute.error)
       ) {
         throw createRouteGenerationError(
           walkingRoute.error,
@@ -1198,7 +1190,7 @@ async function generateRoutes(
         attempt === 1 ? undefined : { attempt, previousFailures: [...observations] })
       if (!hasValidWaypointPlanShape(plan)) planFailure = { error: 'INVALID_AI_ROUTE_PLAN' }
     } catch (error) {
-      if (error && isTemporaryProviderCode(error.code)) throw error
+      if (error && isProviderUnavailableCode(error.code)) throw error
       trigger = error && error.code || 'AI_ROUTE_PLANNING_FAILED'
       planFailure = { error: trigger }
     }
@@ -1237,7 +1229,7 @@ async function generateRoutes(
           session, candidateCache, candidate, location, candidateIndex,
           requestedDurationMinutes: preferences.durationMinutes
         })
-        if (isTemporaryProviderCode(result.error)) {
+        if (isProviderUnavailableCode(result.error)) {
           throw createRouteGenerationError(result.error, 'Route service is temporarily unavailable.')
         }
         if (result.success) {
@@ -1392,8 +1384,9 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
   const formatted = buildGeneratedRouteFromAiCandidate({
     location: baseRoute.startPoint, walkingRoute, candidateIndex: 0
   })
+  const { environmentStats, ...baseRouteFacts } = baseRoute
   return {
-    ...baseRoute,
+    ...baseRouteFacts,
     title: formatted.title,
     description: formatted.description,
     durationSeconds: formatted.durationSeconds,
@@ -1404,7 +1397,6 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
     endPoint: formatted.endPoint,
     routeType: formatted.routeType,
     returnsToStart: formatted.returnsToStart,
-    environmentStats: formatted.environmentStats,
     routeOrder: { source: 'user', orderedWaypointIds: [...ids] },
     updatedAt: formatted.updatedAt
   }

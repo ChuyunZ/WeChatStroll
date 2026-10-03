@@ -20,14 +20,14 @@ test('forwards to the canonical gateway with fixed action and explicit Node SDK 
   const result = { success: true, value: 'unchanged' }
   cloud.callFunction.mockResolvedValue({ result })
   expect(await main({ action: 'override', input: 'trusted-by-gateway' })).toBe(result)
-  expect(cloud.callFunction).toHaveBeenCalledWith({ name: 'amapProvider',
+  expect(cloud.callFunction).toHaveBeenCalledWith({ name: 'mapProvider',
     data: { action: ACTION, input: 'trusted-by-gateway' } },
     { timeout: 60000, retryOptions: { retries: 0 } })
   expect(cloud.callFunction.mock.calls[0]).toHaveLength(2)
   expect(jest.getTimerCount()).toBe(0)
 })
 
-test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
+test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INVALID_COORDINATES', 'CONFIG_MISSING'])(
   'preserves child business failure %s without remapping', async code => {
     const result = { success: false, error: { code, message: 'Child failure' } }
     cloud.callFunction.mockResolvedValue({ result })
@@ -36,7 +36,7 @@ test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED', 'INV
   })
 
 test.each([{ success: true, route: { distanceMeters: 100 } },
-  { success: false, error: { code: 'AMAP_RATE_LIMITED', message: 'Busy' } }])(
+  { success: false, error: { code: 'PROVIDER_RATE_LIMITED', message: 'Busy' } }])(
   'accepts a JSON string business result without extra response wrapping', async result => {
     cloud.callFunction.mockResolvedValue({ result: JSON.stringify(result) })
     expect(await main({})).toEqual(result)
@@ -47,7 +47,7 @@ test.each([undefined, null, '', 'not JSON', 'null', '[]', 'true', 17, true, [], 
   JSON.stringify(JSON.stringify({ success: true }))])('invalid child result %p fails neutrally', async result => {
     cloud.callFunction.mockResolvedValue({ result })
     expect(await main({})).toEqual(failure)
-    expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+    expect(console.info).toHaveBeenCalledWith('[Map Legacy Wrapper]', {
       event: 'forward_failed', action: ACTION, code: 'INVALID_GATEWAY_RESULT'
     })
     expect(jest.getTimerCount()).toBe(0)
@@ -84,7 +84,7 @@ test('a 5164 ms child POI success is forwarded without an application-level five
   await jest.advanceTimersByTimeAsync(5164)
   expect(await pending).toBe(result)
   expect(cloud.callFunction.mock.calls[0]).toEqual([{
-    name: 'amapProvider', data: { action: ACTION }
+    name: 'mapProvider', data: { action: ACTION }
   }, { timeout: 60000, retryOptions: { retries: 0 } }])
   expect(jest.getTimerCount()).toBe(0)
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/park-1|latitude|longitude|30.12345|120.12345/)
@@ -97,7 +97,7 @@ test('a successful 1.37-second child result returns immediately with no leftover
   await jest.advanceTimersByTimeAsync(1370)
   expect(await pending).toBe(result)
   expect(jest.getTimerCount()).toBe(0)
-  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+  expect(console.info).toHaveBeenCalledWith('[Map Legacy Wrapper]', {
     event: 'forward_return', action: ACTION, success: true
   })
   expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/secret|polyline|location/)
@@ -109,7 +109,7 @@ test('a never-settling SDK call is bounded without retrying or invoking AMap aga
   const pending = main({})
   await jest.advanceTimersByTimeAsync(65000)
   expect(await pending).toEqual(failure)
-  expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', {
+  expect(console.info).toHaveBeenCalledWith('[Map Legacy Wrapper]', {
     event: 'forward_failed', action: ACTION, code: 'FORWARD_DEADLINE_EXCEEDED'
   })
   expect(cloud.callFunction).toHaveBeenCalledTimes(1)
