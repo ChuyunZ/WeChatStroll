@@ -8,12 +8,13 @@ function client(store, request = jest.fn(async () => ok), service = {}) {
   const limits = { ...loadLimits({}), clockGuardMs: 0, transactionJitterMs: 10 }
   limits.nearbyPois = { ...limits.nearbyPois, minIntervalMs: 100, maxQueueWaitMs: 5000,
     cooldownBaseMs: 300, ...service }
+  limits.walkingRoute = { ...limits.walkingRoute, cooldownBaseMs: 300, ...service }
   const log = jest.fn()
   const limiter = createLimiter({ store, ...limits, random: () => 0.5, log })
   const execute = jest.spyOn(limiter, 'execute')
   const cooldown = jest.spyOn(limiter, 'cooldown')
   const provider = createProvider({ limiter, limits, request, log })
-  return { limiter, execute, cooldown, request, log, call: () => provider('nearbyPois')('private-url', { params: { key: 'secret' } }) }
+  return { limiter, execute, cooldown, request, log, call: (operation = 'nearbyPois') => provider(operation)('private-url', { params: { key: 'secret' } }) }
 }
 
 beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(100000) })
@@ -121,9 +122,60 @@ test('failed cooldown publication forbids another HTTP attempt', async () => {
   expect(instance.request).toHaveBeenCalledTimes(1)
 })
 
-test('ordinary HTTP errors are not retried or given rate cooldowns', async () => {
-  const instance = client(createTestStore(), jest.fn().mockRejectedValue(new Error('transport failed')))
-  await expect(instance.call()).rejects.toThrow('transport failed')
-  expect(instance.request).toHaveBeenCalledTimes(1)
-  expect(instance.cooldown).not.toHaveBeenCalled()
+test.each(['nearbyPois', 'walkingRoute'])('%s transport errors normalize safely without retry or cooldown', async operation => {
+  for (const error of [new Error('private network failure'), { code: 'ETIMEDOUT' }, { code: 'ECONNRESET' },
+    { response: { status: 500, data: 'private payload' } }, { response: { status: 503, data: { status: 999 } } },
+    { response: { status: 400, data: { message: 'private parameter error' } } }]) {
+    const instance = client(createTestStore(), jest.fn().mockRejectedValue(error))
+    if (error.response && error.response.status === 400) await expect(instance.call(operation)).rejects.toBe(error)
+    else await expect(instance.call(operation)).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
+    expect(instance.request).toHaveBeenCalledTimes(1)
+    expect(instance.cooldown).not.toHaveBeenCalled()
+    expect(JSON.stringify(instance.log.mock.calls)).not.toContain('private')
+  }
+})
+
+test.each([120, 121])('recognized body status %i takes precedence over HTTP 500', async status => {
+  const instance = client(createTestStore(), jest.fn().mockRejectedValue({ response: { status: 500, data: { status } } }))
+  const assertion = expect(instance.call()).rejects.toMatchObject({
+    code: status === 120 ? 'PROVIDER_RATE_LIMITED' : 'PROVIDER_QUOTA_EXHAUSTED'
+  })
+  await jest.runAllTimersAsync()
+  await assertion
+  expect(instance.request).toHaveBeenCalledTimes(status === 120 ? 2 : 1)
+  expect(instance.cooldown).toHaveBeenCalledTimes(status === 120 ? 2 : 0)
+})
+
+test('walking and POI use independent service pacing with the same key scope', async () => {
+  const store = createTestStore()
+  const starts = { nearbyPois: [], walkingRoute: [] }
+  const pending = Promise.all(Object.keys(starts).flatMap(operation => Array.from({ length: 2 }, () =>
+    client(store, async () => { starts[operation].push(Date.now()); return ok }).call(operation))))
+  await jest.runAllTimersAsync()
+  await pending
+  expect(starts.nearbyPois).toEqual([100000, 100100])
+  // Shared key fencing can add transaction-conflict jitter, not POI pacing.
+  expect(starts.walkingRoute[0]).toBeLessThan(starts.nearbyPois[1])
+  expect(starts.walkingRoute[1] - starts.walkingRoute[0]).toBeGreaterThanOrEqual(1500)
+  expect([...store.documents.keys()].sort()).toEqual(['tencent:key', 'tencent:poi-explore', 'tencent:walking'])
+})
+
+test.each(['nearbyPois', 'walkingRoute'])('120 from %s delays the other operation through shared key cooldown', async limitedOperation => {
+  const store = createTestStore()
+  const limited = client(store, jest.fn(async () => ({ data: { status: 120 } })))
+  const assertion = expect(limited.call(limitedOperation)).rejects.toMatchObject({ code: 'PROVIDER_RATE_LIMITED' })
+  await jest.advanceTimersByTimeAsync(0)
+  const cooldownUntil = store.documents.get('tencent:key').cooldownUntilMs
+  expect(cooldownUntil).toBeGreaterThan(Date.now())
+  const otherOperation = limitedOperation === 'nearbyPois' ? 'walkingRoute' : 'nearbyPois'
+  const starts = []
+  const other = client(store, jest.fn(async () => { starts.push(Date.now()); return ok }))
+  const pending = other.call(otherOperation)
+  await jest.advanceTimersByTimeAsync(cooldownUntil - Date.now() - 1)
+  expect(other.request).not.toHaveBeenCalled()
+  await jest.runAllTimersAsync()
+  await assertion
+  expect(await pending).toBe(ok)
+  expect(starts[0]).toBeGreaterThanOrEqual(cooldownUntil)
+  expect(limited.execute).toHaveBeenCalledTimes(2)
 })

@@ -16,6 +16,7 @@ function loadLimits(env = process.env) {
     cooldownBaseMs: integer(env, `${prefix}_COOLDOWN_MS`, 3000, 1, 60000)
   })
   return {
+    walkingRoute: service('TENCENT_MAPS_WALKING', 'tencent:walking'),
     nearbyPois: service('TENCENT_MAPS_POI', 'tencent:poi-explore'),
     keyMinIntervalMs: integer(env, 'TENCENT_MAPS_KEY_MIN_INTERVAL_MS', 0, 0, 60000),
     clockGuardMs: integer(env, 'TENCENT_MAPS_CLOCK_GUARD_MS', 100, 0, 5000),

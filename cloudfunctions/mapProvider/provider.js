@@ -33,6 +33,7 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
           if (AVAILABILITY_STATUSES.has(status)) throw gatewayFailed()
           if (error) {
             log({ event: 'provider_failed', operation, attempt })
+            if (!error.response || error.response.status >= 500) throw gatewayFailed()
             throw error
           }
           return response

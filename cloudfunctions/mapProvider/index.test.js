@@ -9,6 +9,8 @@ const { createCloudBaseStore } = require('./cloudbase-store')
 const { createTestStore } = require('./test-store')
 const { main } = require('./index')
 const input = { action: 'nearbyPois', latitude: 30.123456, longitude: 120.654321 }
+const walking = { action: 'walkingRoute', start: { latitude: 30.123456, longitude: 120.654321 },
+  destination: { latitude: 30.124456, longitude: 120.655321 } }
 let originalKey
 let store
 
@@ -30,7 +32,7 @@ afterEach(() => {
   else process.env.TENCENT_MAPS_API_KEY = originalKey
 })
 
-test.each([undefined, {}, { action: 'walkingRoute' }, { action: 'private-url' }])('rejects unsupported action %p before DB/HTTP', async event => {
+test.each([undefined, {}, { action: 'walking' }, { action: 'private-url' }])('rejects unsupported action %p before DB/HTTP', async event => {
   expect(await main(event)).toEqual({ success: false, error: {
     code: 'INVALID_ACTION', message: 'Unsupported provider operation'
   } })
@@ -40,8 +42,10 @@ test.each([undefined, {}, { action: 'walkingRoute' }, { action: 'private-url' }]
 
 test('missing credentials or invalid coordinates never acquire slots', async () => {
   expect(await main({ action: 'nearbyPois' })).toMatchObject({ error: { code: 'INVALID_COORDINATES' } })
+  expect(await main({ action: 'walkingRoute' })).toMatchObject({ error: { code: 'INVALID_COORDINATES' } })
   delete process.env.TENCENT_MAPS_API_KEY
   expect(await main(input)).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
+  expect(await main(walking)).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
   expect(store.transactions).toBe(0)
   expect(axios.get).not.toHaveBeenCalled()
 })
@@ -94,3 +98,49 @@ test('store initialization failure returns only a safe gateway error', async () 
   expect(axios.get).not.toHaveBeenCalled()
   expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-test-key')
 })
+
+test('walking dispatch uses the walking scope, normalizes seconds, and redacts logs', async () => {
+  axios.get.mockResolvedValue({ data: { status: 0, request_id: 'private-id', result: { routes: [{
+    distance: 150, duration: 2.5, polyline: [30.123456, 120.654321, 1000, 1000],
+    steps: [{ type: 1, road_class: 2, road_name: 'private-road' }]
+  }] } } })
+  const result = await main(walking)
+  expect(result).toEqual({ success: true, route: {
+    distanceMeters: 150, durationSeconds: 150,
+    polyline: [walking.start, { latitude: expect.closeTo(30.124456, 8), longitude: expect.closeTo(120.655321, 8) }]
+  } })
+  expect(axios.get).toHaveBeenCalledWith('https://apis.map.qq.com/ws/direction/v1/walking/', {
+    params: { key: 'private-test-key', from: '30.123456,120.654321', to: '30.124456,120.655321' }, timeout: 10000
+  })
+  expect([...store.documents.keys()].sort()).toEqual(['tencent:key', 'tencent:walking'])
+  expect(console.info).toHaveBeenCalledWith('[Map Provider]', expect.objectContaining({
+    event: 'provider_start', operation: 'walkingRoute', scope: 'tencent:walking'
+  }))
+  expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|30\.123456|120\.654321|https:|private-road|private-id/)
+})
+
+test.each([input, walking])('transport failures cross $action without retry or rate cooldown', async event => {
+  for (const response of [undefined, { status: 500 }, { status: 400 }]) {
+    store = createTestStore()
+    createCloudBaseStore.mockReturnValue(store)
+    axios.get.mockClear().mockRejectedValue({ response, message: 'private-test-key 30.123456' })
+    const code = response && response.status === 400
+      ? event.action === 'nearbyPois' ? 'POI_SEARCH_FAILED' : 'WALKING_ROUTE_FAILED'
+      : 'PROVIDER_GATEWAY_FAILED'
+    expect(await main(event)).toMatchObject({ success: false, error: { code } })
+    expect(axios.get).toHaveBeenCalledTimes(1)
+    expect(store.documents.get('tencent:key').cooldownUntilMs).toBe(0)
+    expect(JSON.stringify(console.info.mock.calls)).not.toMatch(/private-test-key|30\.123456/)
+  }
+})
+
+test.each([[120, 'PROVIDER_RATE_LIMITED', 2], [121, 'PROVIDER_QUOTA_EXHAUSTED', 1],
+  [500, 'PROVIDER_GATEWAY_FAILED', 1], [378, 'ROUTE_NOT_FOUND', 1]])(
+  'walking body status %i normalizes as %s through the gateway', async (status, code, calls) => {
+    axios.get.mockResolvedValue({ data: { status, message: 'private-test-key' } })
+    const pending = main(walking)
+    await jest.runAllTimersAsync()
+    expect(await pending).toMatchObject({ success: false, error: { code } })
+    expect(axios.get).toHaveBeenCalledTimes(calls)
+  }
+)

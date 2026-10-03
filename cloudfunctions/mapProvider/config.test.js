@@ -4,6 +4,8 @@ const { loadLimits } = require('./config')
 
 test('conservative defaults retain existing bounds with isolated Tencent scopes', () => {
   expect(loadLimits({})).toEqual({
+    walkingRoute: { scope: 'tencent:walking', minIntervalMs: 1500, maxQueueWaitMs: 12000,
+      maxProviderAttempts: 2, cooldownBaseMs: 3000 },
     nearbyPois: { scope: 'tencent:poi-explore', minIntervalMs: 1500, maxQueueWaitMs: 12000,
       maxProviderAttempts: 2, cooldownBaseMs: 3000 },
     keyMinIntervalMs: 0, clockGuardMs: 100, leaseStartWindowMs: 10000,
@@ -13,6 +15,10 @@ test('conservative defaults retain existing bounds with isolated Tencent scopes'
 })
 
 test.each([
+  ['TENCENT_MAPS_WALKING_MIN_INTERVAL_MS', 1, 60000],
+  ['TENCENT_MAPS_WALKING_MAX_QUEUE_WAIT_MS', 1, 60000],
+  ['TENCENT_MAPS_WALKING_MAX_ATTEMPTS', 1, 4],
+  ['TENCENT_MAPS_WALKING_COOLDOWN_MS', 1, 60000],
   ['TENCENT_MAPS_POI_MIN_INTERVAL_MS', 1, 60000],
   ['TENCENT_MAPS_POI_MAX_QUEUE_WAIT_MS', 1, 60000],
   ['TENCENT_MAPS_POI_MAX_ATTEMPTS', 1, 4],
@@ -47,8 +53,7 @@ test('deployment is self-contained, dependencies match lockfile, limiter/store a
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8'))
       .toBe(fs.readFileSync(path.join(__dirname, '../amapProvider', file), 'utf8'))
   }
-  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js']) {
+  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js', 'walking.js']) {
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8')).not.toMatch(/require\(['"]\.\.\//)
   }
-  expect(fs.existsSync(path.join(__dirname, 'walking.js'))).toBe(false)
 })
