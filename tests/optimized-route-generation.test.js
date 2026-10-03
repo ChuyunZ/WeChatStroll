@@ -141,9 +141,9 @@ test('duration-aware fallback tries bounded POIs until one validates', async () 
     .toEqual(['far', 'second-far'])
 })
 
-test.each([[15, 'near'], [30, 'far']])(
-  'fallback for %i minutes prefers %s while POI discovery stays at 1000 meters',
-  async (durationMinutes, expectedPoiId) => {
+test.each([[15, 'near', 563], [30, 'far', 1000]])(
+  'fallback for %i minutes prefers %s with duration-aware POI discovery',
+  async (durationMinutes, expectedPoiId, expectedRadius) => {
     const fallbackPois = [
       { ...pois[0], poiId: 'near', distanceInMeters: 550 },
       { ...pois[1], poiId: 'far', distanceInMeters: 950 }
@@ -162,7 +162,7 @@ test.each([[15, 'near'], [30, 'far']])(
 
     expect(callCloudFunction.mock.calls.filter(([name]) => name === 'mapProvider'))
       .toEqual([['mapProvider', {
-        action: 'nearbyPois', ...location, radius: 563
+        action: 'nearbyPois', ...location, radius: expectedRadius
       }, expect.any(Object)]])
     // Inspect the first attempted segment, not only the eventual valid route:
     // duration validation must not hide a duration-independent ranking.
