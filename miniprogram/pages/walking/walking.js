@@ -82,9 +82,11 @@ Page({
     const routeId = options.routeId;
 
     let activeSession;
+    let pendingResult;
 
     try {
       activeSession = activeWalkSessionService.getActiveWalkSession();
+      if (!activeSession) pendingResult = activeWalkSessionService.getPendingWalkResult();
     } catch (error) {
       this.showRouteError();
       wx.showToast({
@@ -111,6 +113,21 @@ Page({
         activeSession.startTimeMs,
         activeSession.trackingEnabled === true
       );
+      return;
+    }
+
+    if (pendingResult && (!routeId || pendingResult.routeId === routeId)) {
+      // Recovery during a final flush must follow the durable completion,
+      // including when the active lock was already removed before the crash.
+      walkingTracker.stopTrackingForSession({
+        routeId: pendingResult.routeId,
+        startTimeMs: Date.parse(pendingResult.startTime)
+      });
+      this._finishing = true;
+      this.setData({ ended: true, finishing: true });
+      wx.reLaunch({
+        url: `/pages/feedback/feedback?routeId=${encodeURIComponent(pendingResult.routeId)}`
+      });
       return;
     }
 
@@ -145,6 +162,8 @@ Page({
 
   onShow() {
     this._pageVisible = true;
+
+    if (this._finishing) return;
 
     if (this.data.ended) {
       wx.navigateBack();
@@ -702,11 +721,9 @@ Page({
 
     this._finishing = true;
 
-    let quality = null;
-    if (this._trackingEnabled) {
-      quality = await this.finalizeTrajectoryTracking();
-    }
+    // The user's confirmation, not trajectory cleanup, defines the walk range.
     const endTimeMs = Date.now();
+    const knownPartial = this._trajectoryPartial === true;
     const actualDurationSeconds = Math.max(
       0,
       Math.floor((endTimeMs - this._startTimeMs) / 1000)
@@ -720,7 +737,8 @@ Page({
       actualDurationSeconds,
       completionStatus,
       trajectoryEnabled: this._trackingEnabled,
-      trajectoryPartial: Boolean(this._trajectoryPartial || (this._trackingEnabled && (!quality || quality.trajectoryPartial)))
+      // Until cleanup finishes, a crash must not leave a falsely complete trace.
+      trajectoryPartial: knownPartial || this._trackingEnabled
     };
 
     try {
@@ -742,8 +760,6 @@ Page({
       }
 
       this._finishing = false;
-      this._trajectoryPartial = walkResult.trajectoryPartial;
-      this.restartTrajectoryTrackingAfterRollback();
       wx.showToast({
         title: "暂时无法结束散步，请重试",
         icon: "none"
@@ -752,7 +768,6 @@ Page({
     }
 
     this._active = false;
-    this._trajectoryPartial = walkResult.trajectoryPartial;
 
     this.stopTimer();
     this.disableLeaveProtection();
@@ -763,6 +778,25 @@ Page({
       finishing: true,
       ended: true
     });
+
+    if (this._trackingEnabled) {
+      const quality = await this.finalizeTrajectoryTracking();
+      const completedResult = {
+        ...walkResult,
+        trajectoryPartial: Boolean(knownPartial || !quality || quality.trajectoryPartial)
+      };
+      this._trajectoryPartial = completedResult.trajectoryPartial;
+      try {
+        const pending = activeWalkSessionService.getPendingWalkResult();
+        if (pending && pending.routeId === walkResult.routeId &&
+            pending.startTime === walkResult.startTime && pending.endTime === walkResult.endTime) {
+          activeWalkSessionService.savePendingWalkResult(completedResult);
+        }
+      } catch (error) {
+        // Completion is already durable. Keep the conservative quality marker.
+        console.warn("[Walking] Unable to update completed trajectory quality.");
+      }
+    }
 
     wx.reLaunch({
       url: `/pages/feedback/feedback?routeId=${encodeURIComponent(
@@ -791,6 +825,7 @@ Page({
           activeWalkSessionService.clearPendingWalkResult();
         } catch (error) {
           console.warn("[Walking] Unable to clear pending walk result after navigation failure.");
+          return;
         }
 
         this._active = true;
