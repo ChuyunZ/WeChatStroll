@@ -162,7 +162,7 @@ test.each([[15, 'near'], [30, 'far']])(
 
     expect(callCloudFunction.mock.calls.filter(([name]) => name === 'mapProvider'))
       .toEqual([['mapProvider', {
-        action: 'nearbyPois', ...location, radius: 1000
+        action: 'nearbyPois', ...location, radius: 563
       }, expect.any(Object)]])
     // Inspect the first attempted segment, not only the eventual valid route:
     // duration validation must not hide a duration-independent ranking.
