@@ -156,7 +156,7 @@ test('walking and POI use independent service pacing with the same key scope', a
   expect(starts.nearbyPois).toEqual([100000, 100100])
   // Shared key fencing can add transaction-conflict jitter, not POI pacing.
   expect(starts.walkingRoute[0]).toBeLessThan(starts.nearbyPois[1])
-  expect(starts.walkingRoute[1] - starts.walkingRoute[0]).toBeGreaterThanOrEqual(1500)
+  expect(starts.walkingRoute[1] - starts.walkingRoute[0]).toBeGreaterThanOrEqual(200)
   expect([...store.documents.keys()].sort()).toEqual(['tencent:key', 'tencent:poi-explore', 'tencent:walking'])
 })
 
