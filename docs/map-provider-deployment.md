@@ -156,8 +156,8 @@ guarantee. Transaction conflict retries are bounded independently of provider at
 
 Coordination assumes backend clocks within the configured guard. Pacing adds twice
 the guard; cooldown adds one guard. With the 100 ms default guard, Explore starts are
-at least about 400 ms apart (200 + 2 * 100), while walking starts remain at least
-about 1700 ms apart. The guard is not a database latency budget. No database transaction
+at least about 400 ms apart (200 + 2 * 100). Walking uses the same verified
+200 ms service interval, so its physical starts are also at least about 400 ms apart. The guard is not a database latency budget. No database transaction
 can atomically send external HTTP; already-admitted requests cannot be revoked by
 a subsequently published cooldown.
 
@@ -176,7 +176,7 @@ Never place either credential in Mini Program code, committed files or logs.
 
 | Optional variable | Default | Allowed values |
 | --- | --- | --- |
-| `TENCENT_MAPS_WALKING_MIN_INTERVAL_MS` | 1500 | 1–60000 ms |
+| `TENCENT_MAPS_WALKING_MIN_INTERVAL_MS` | 200 | 1–60000 ms |
 | `TENCENT_MAPS_WALKING_MAX_QUEUE_WAIT_MS` | 12000 | 1–60000 ms |
 | `TENCENT_MAPS_WALKING_MAX_ATTEMPTS` | 2 | 1–4 |
 | `TENCENT_MAPS_WALKING_COOLDOWN_MS` | 3000 | 1–60000 ms; multiplied by attempt |
@@ -189,12 +189,12 @@ Never place either credential in Mini Program code, committed files or logs.
 | `TENCENT_MAPS_LEASE_START_WINDOW_MS` | 10000 | 1000–60000 ms |
 | `TENCENT_MAPS_REQUEST_TIMEOUT_MS` | 10000 | 1–60000 ms |
 
-The current development Key's Explore allocation was verified in Tencent's console on
-2026-10-04 as **5 QPS and 200 calls/day**. The 200 ms Explore service interval plus
-the 100 ms clock guard on both sides yields an effective start spacing of at least
-about 400 ms (~2.5 starts/s), intentionally leaving roughly 2x QPS headroom. Walking
-remains on the conservative 1500 ms default because its quota is configured separately.
-Re-check account/Key allocations before carrying these defaults to another environment.
+The current development Key's allocations were verified in Tencent's console on
+2026-10-04 as **Explore: 5 QPS / 200 calls/day** and **Walking: 5 QPS / 6000 calls/day**.
+Both services use a 200 ms service interval. With the 100 ms clock guard on both sides,
+effective physical start spacing is at least about 400 ms (~2.5 starts/s), intentionally
+leaving roughly 2x QPS headroom. Re-check account/Key allocations before carrying these
+defaults to another environment.
 
 ## Development deployment status
 
@@ -208,9 +208,9 @@ Development environment work completed on 2026-10-04:
    selection -> Tencent walking segments -> Route Engine -> deterministic validation
    -> route card/detail. A 30-minute request produced a valid ~24-minute / ~1.6 km route.
 
-The later Explore pacing/concurrent-admission optimization is covered by automated
-tests, but must be redeployed before treating the live CloudBase start-spacing check
-as revalidated.
+The later Explore concurrent-admission optimization and the Walking pacing reduction
+are covered by automated tests, but must be redeployed before treating their live
+CloudBase start-spacing checks as revalidated.
 
 Production release still requires the unresolved Tencent WebService data-use / AI-use /
 persistence decision below. Retaining the AMap implementation alone is not an automatic
