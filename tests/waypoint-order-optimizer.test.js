@@ -102,7 +102,7 @@ test('a failed prefetched edge only invalidates orders that need it; final build
   expect(resolver).toHaveBeenCalledTimes(4)
 })
 
-test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'].flatMap(code => ['A->B', 'B->A', 'all'].map(edge => [edge, code])))('exact search tolerates unused throttled edges but reports required throttles (%s)', async (throttled, code) => {
+test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'].flatMap(code => ['A->B', 'B->A', 'all'].map(edge => [edge, code])))('exact search tolerates unused throttled edges but reports required throttles (%s)', async (throttled, code) => {
   jest.useFakeTimers()
   try {
     const { session, resolver } = fixture()
@@ -129,7 +129,7 @@ test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'].flat
 test.each([true, false])('heuristic search preserves complete orders before or after a throttle (%s)', async throttleFirst => {
   const { session } = fixture()
   const complete = { success: true, durationSeconds: 500, distanceMeters: 1000 }
-  const limited = { success: false, error: 'AMAP_RATE_LIMITED' }
+  const limited = { success: false, error: 'PROVIDER_RATE_LIMITED' }
   jest.spyOn(session, 'evaluateRouteOrder')
     .mockResolvedValue(limited)
     .mockResolvedValueOnce(throttleFirst ? limited : complete)

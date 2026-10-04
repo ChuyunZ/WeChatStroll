@@ -1,7 +1,3 @@
-jest.mock('@cloudbase/node-sdk', () => ({
-  SYMBOL_CURRENT_ENV: Symbol('current-env'),
-  init: jest.fn(() => ({ callFunction: (...args) => require('wx-server-sdk').callFunction(...args) }))
-}))
 jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({})), callFunction: jest.fn() }))
 jest.mock('axios', () => ({ get: jest.fn() }))
 jest.mock('./cloudbase-store', () => ({
@@ -12,8 +8,6 @@ const axios = require('axios')
 const { createCloudBaseStore } = require('./cloudbase-store')
 const { createTestStore } = require('./test-store')
 const { main } = require('./index')
-const { main: legacyWalking } = require('../getWalkingRoute')
-const { main: legacyPois } = require('../getNearbyPois')
 
 const walking = { action: 'walkingRoute', start: { latitude: 30, longitude: 120 },
   destination: { latitude: 31, longitude: 121 } }
@@ -86,12 +80,8 @@ test('invalid input/action and absent credentials never acquire provider slots',
   expect(store.transactions).toBe(0)
 })
 
-test('legacy callers traverse the same gateway limiter as direct callers', async () => {
-  cloud.callFunction.mockImplementation(async ({ name, data }) => {
-    expect(name).toBe('amapProvider')
-    return { result: await main(data) }
-  })
-  const pending = Promise.all([main(walking), legacyWalking(walking), legacyPois(nearby)])
+test('rollback gateway still coordinates independent direct callers', async () => {
+  const pending = Promise.all([main(walking), main(walking), main(nearby)])
   await jest.runAllTimersAsync()
   expect((await pending).every(result => result.success)).toBe(true)
   expect(axios.get).toHaveBeenCalledTimes(5)

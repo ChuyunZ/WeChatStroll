@@ -81,14 +81,20 @@ A GeoPoint is used inside the route polyline.
 
 The `polyline` array must be ordered from the beginning of the route to the end.
 
-## 5. PointOfInterest
+## 5. PointOfInterest / verified waypoint
+
+Current generated route POIs and public Route Engine waypoints use normalized
+provider-neutral fields:
 
 ```json
 {
+  "poiId": "verified-poi-id",
   "name": "Riverside Viewing Platform",
-  "type": "scenic",
+  "category": "water",
   "latitude": 31.2312,
-  "longitude": 121.4751
+  "longitude": 121.4751,
+  "distanceInMeters": 500,
+  "address": "Example address"
 }
 ```
 
@@ -97,12 +103,22 @@ Fields:
 | Field | Type | Required | Description |
 |---|---|---:|---|
 | `name` | string | Yes | Point-of-interest name |
-| `poiId` | string | For optimized routes | Verified POI ID, preserved through route detail navigation |
-| `type` | string | Yes | Category such as `scenic`, `park`, `cafe`, or `rest_area` |
+| `poiId` | string | Yes | Verified POI ID, preserved through route detail navigation |
+| `category` | string | Yes | Application category: `park`, `water`, `shoppingStreet` |
 | `latitude` | number | Yes | Latitude |
 | `longitude` | number | Yes | Longitude |
+| `distanceInMeters` | number or null | Yes | Discovery distance when available; not final walking segment distance |
+| `address` | string | No | Address when present |
 
-The POI `type` list does not need to be fully standardized during Week 1. It can be refined when real map data is integrated.
+Public waypoint construction and editable copies whitelist these fields. They do
+not preserve `providerMeta` or raw provider responses, including from stale inputs.
+Legacy/mock `type` labels are not the current provider POI contract.
+
+Walking facts are `distanceMeters`, `durationSeconds` and decoded `polyline`.
+Route Engine segments additionally identify `from` and `to`; the public route
+aggregates those walking facts. Neither segments nor generated routes expose
+`environmentStats`. Tencent steps, `type` and `road_class` do not define a street
+score or an equivalent environment-statistics contract.
 
 ## 6. Route card
 
@@ -187,7 +203,9 @@ The following are UI actions, not route data fields:
   "pointsOfInterest": [
     {
       "name": "Riverside Viewing Platform",
-      "type": "scenic",
+      "poiId": "verified-poi-id",
+      "category": "water",
+      "distanceInMeters": 500,
       "latitude": 31.2312,
       "longitude": 121.4751
     }
@@ -200,9 +218,8 @@ The following are UI actions, not route data fields:
 
 This contract is the MVP version.
 
-When real map APIs and AI route generation are integrated, the team can extend the object with additional information such as:
+Future contract extensions require verified data support and review of permitted use, for example:
 
-- source/provider information
 - accessibility information
 - elevation
 - route warnings
@@ -210,3 +227,9 @@ When real map APIs and AI route generation are integrated, the team can extend t
 - generated route alternatives
 
 New fields should be added without unnecessarily renaming the existing MVP fields.
+
+This shape is not a grant of persistence or AI-use permission. Tencent WebService
+data-use boundaries remain unconfirmed; do not add raw response persistence or a
+persistent segment L2 cache. `activeWalkSession` currently stores a route snapshot
+locally and remains a deployment/data-policy checkpoint. Actual GPS trajectory via
+Track Cloud is a separate flow. See [deployment and data boundaries](map-provider-deployment.md).

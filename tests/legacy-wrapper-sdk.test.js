@@ -36,10 +36,10 @@ test.each([[walking, 'walkingRoute', { success: true, route: { distanceMeters: 1
     expect(request.timeout).toBe(60000)
     expect(request.keepalive).toBe(false)
     expect(options.retryOptions).toEqual({ retries: 0 })
-    expect(request.body.function_name).toBe('amapProvider')
+    expect(request.body.function_name).toBe('mapProvider')
     expect(JSON.parse(request.body.request_data)).toEqual({ input: 'test', action })
     expect(context.callbackWaitsForEmptyEventLoop).toBe(false)
-    expect(console.info).toHaveBeenCalledWith('[AMap Legacy Wrapper]', expect.objectContaining({
+    expect(console.info).toHaveBeenCalledWith('[Map Legacy Wrapper]', expect.objectContaining({
       event: 'forward_start', executionLimitMs: 80000, timeoutMs: 60000, transport: 'cloudbase-node-3.17.2'
     }))
     expect(JSON.stringify(console.info.mock.calls)).not.toContain('private-context')

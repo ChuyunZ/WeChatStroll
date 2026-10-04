@@ -13,6 +13,7 @@ const pois = ['A', 'B', 'C', 'X'].map((poiId, index) => ({
   longitude: 120, address: `${poiId} 路 1 号`, distanceInMeters: 800 + index * 100,
   providerMeta: { type: '公园广场;公园', typecode: '110101' }
 }))
+const publicPois = pois.map(({ providerMeta, ...poi }) => poi)
 const tap = (id, direction) => ({ currentTarget: { dataset: { id, direction } } })
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
@@ -68,8 +69,8 @@ afterEach(() => { delete global.Page; delete global.wx })
 
 test('generated metadata is copied from verified POIs and recommendation is editable by default', async () => {
   const { route, detail } = await setup()
-  expect(route.editableWaypoints).toEqual(pois.slice(0, 3))
-  expect(route.editableWaypoints[0].providerMeta).not.toBe(pois[0].providerMeta)
+  expect(route.editableWaypoints).toEqual(publicPois.slice(0, 3))
+  expect(route.editableWaypoints[0]).not.toHaveProperty('providerMeta')
   expect(route.routeOrder).toEqual({ source: 'recommended', orderedWaypointIds: ['A', 'B', 'C'] })
   expect(detail.data.canEdit).toBe(true)
   expect(detail.data.editing).toBe(false)
@@ -77,7 +78,7 @@ test('generated metadata is copied from verified POIs and recommendation is edit
   detail.enterRouteEdit()
   expect(detail.data.draftWaypointIds).toEqual(['A', 'B', 'C'])
   expect(detail.data.draftWaypointIds).not.toBe(route.routeOrder.orderedWaypointIds)
-  expect(detail.data.activeWaypoints[0]).toMatchObject({ ...pois[0], categoryLabel: '公园', hasDistance: true })
+  expect(detail.data.activeWaypoints[0]).toMatchObject({ ...publicPois[0], categoryLabel: '公园', hasDistance: true })
 })
 
 test('moving, removing and adding back affect only the draft and keep the final active stop', async () => {
@@ -94,7 +95,7 @@ test('moving, removing and adding back affect only the draft and keep the final 
   detail.removeWaypoint(tap('C'))
   expect(detail.data.draftWaypointIds).toEqual(['C'])
   expect(detail.data.removedWaypoints).toHaveLength(2)
-  expect(detail.data.removedWaypoints[0]).toMatchObject(pois[0])
+  expect(detail.data.removedWaypoints[0]).toMatchObject(publicPois[0])
   detail.addWaypoint(tap('X'))
   detail.addWaypoint(tap('invented'))
   detail.addWaypoint(tap('C'))
@@ -209,7 +210,7 @@ test.each([2, 3])('supports a variable pool of %i waypoints', async count => {
 
 test.each([
   { success: false, error: 'MULTI_SEGMENT_ROUTE_FAILED', message: 'secret provider payload' },
-  { success: false, error: 'AMAP_RATE_LIMITED' },
+  { success: false, error: 'PROVIDER_RATE_LIMITED' },
   { success: false, error: 'PROVIDER_BUSY' },
   { success: false, error: 'PROVIDER_GATEWAY_FAILED' }
 ])('failed preview remains recoverable and preserves confirmed route (%j)', async failure => {
@@ -257,11 +258,12 @@ test('rebuild preserves identity and recommendation metadata while replacing all
     'recommendedDurationMinutes', 'recommendationReason', 'candidateWaypointIds', 'optimization', 'planning']) {
     expect(rebuilt[field]).toEqual(baseRoute[field])
   }
-  for (const field of ['durationSeconds', 'durationMinutes', 'distanceMeters', 'polyline', 'environmentStats']) {
+  for (const field of ['durationSeconds', 'durationMinutes', 'distanceMeters', 'polyline']) {
     expect(rebuilt[field]).toEqual(walkingRoute[field])
   }
+  expect(rebuilt).not.toHaveProperty('environmentStats')
   expect(rebuilt.pointsOfInterest).toHaveLength(1)
-  expect(rebuilt.pointsOfInterest[0]).toMatchObject(pois[1])
+  expect(rebuilt.pointsOfInterest[0]).toMatchObject(publicPois[1])
   expect(JSON.stringify(baseRoute)).toBe(snapshot)
   expect(() => generation.rebuildGeneratedRouteForOrder({ baseRoute,
     walkingRoute: { ...walkingRoute, routeOrder: { orderedWaypointIds: ['X'] } } })).toThrow()
@@ -352,8 +354,9 @@ test('editing template exposes trusted metadata, removed stops, destination and 
   const fs = require('fs')
   const template = fs.readFileSync(require('path').join(__dirname,
     '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8')
+  expect(template).not.toContain('providerMeta')
   expect(template).toMatch(/<view class="content-card" wx:if="{{canEdit}}">\s*<text class="card-title">路线地点<\/text>\s*<button[^>]*bindtap="enterRouteEdit"/)
-  for (const field of ['poi.address', 'poi.providerMeta.type', 'poi.distanceInMeters',
+  for (const field of ['poi.address', 'poi.categoryLabel', 'poi.distanceInMeters',
     'poi.isDestination', 'removedWaypoints', 'activeWaypoints.length === 1', 'route.durationDifference']) {
     expect(template).toContain(field)
   }

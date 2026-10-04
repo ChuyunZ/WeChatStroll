@@ -15,11 +15,12 @@ const pois = ['A', 'B', 'C', 'D', 'E'].map((poiId, index) => ({
   address: `${poiId} street`, distanceInMeters: 800,
   providerMeta: { type: '公园', typecode: '110101' }
 }))
+const publicPois = pois.map(({ providerMeta, ...poi }) => poi)
 const candidates = ['B', 'C', 'D', 'E'].map(id => ({ waypoints: [{ poiId: id }, { poiId: 'A' }] }))
 const preferences = { durationMinutes: 45, routeType: 'point_to_point' }
 
 function cloudPlan(plan) {
-  callCloudFunction.mockImplementation(async name => name === 'amapProvider'
+  callCloudFunction.mockImplementation(async name => name === 'mapProvider'
     ? { poisByCategory: { park: pois } }
     : { plan })
 }
@@ -53,8 +54,8 @@ test('initial routes and replacements optimize sets and share all cached segment
   expect(first.recommendedWaypointIds).toEqual(['A', 'B'])
   expect(first.routeOrder).toEqual({ orderedWaypointIds: ['A', 'B'], source: 'recommended' })
   expect(first.pointsOfInterest.map(p => p.poiId)).toEqual(['A', 'B'])
-  expect(first.editableWaypoints).toEqual(pois.slice(0, 2))
-  expect(first.pointsOfInterest[0]).toMatchObject(pois[0])
+  expect(first.editableWaypoints).toEqual(publicPois.slice(0, 2))
+  expect(first.pointsOfInterest[0]).toMatchObject(publicPois[0])
   expect(first.endPoint.name).toBe('B')
   expect(first.durationSeconds).toBe(2700)
   expect(first.optimization).toMatchObject({ strategy: 'exact', evaluatedOrderCount: 2, targetErrorSeconds: 0 })
@@ -68,7 +69,7 @@ test('initial routes and replacements optimize sets and share all cached segment
   })
   expect(replacement.route.recommendedWaypointIds).toEqual(['A', 'E'])
   expect(getWalkingSegment).toHaveBeenCalledTimes(13)
-  expect(callCloudFunction.mock.calls.map(([name]) => name)).toEqual(['amapProvider', 'aiRoutePlanner'])
+  expect(callCloudFunction.mock.calls.map(([name]) => name)).toEqual(['mapProvider', 'aiRoutePlanner'])
   expect(cache.getAllCandidates().every(entry => entry.status === 'success')).toBe(true)
   expect(cache.getAllCandidates()[3]).toMatchObject({
     waypointIds: ['E', 'A'], route: { optimization: replacement.route.optimization }
@@ -92,10 +93,10 @@ test('explicit empty AI plan uses a validated deterministic fallback without rep
   expect(result.source).toBe('fallback')
   expect(result.routes).toHaveLength(1)
   expect(getCurrentLocation).toHaveBeenCalledTimes(1)
-  expect(result.routes[0].editableWaypoints).toEqual([pois[0]])
+  expect(result.routes[0].editableWaypoints).toEqual([publicPois[0]])
   expect(result.routes[0].routeOrder).toEqual({ source: 'recommended', orderedWaypointIds: ['A'] })
   expect(callCloudFunction.mock.calls.map(([name]) => name))
-    .toEqual(['amapProvider', 'aiRoutePlanner'])
+    .toEqual(['mapProvider', 'aiRoutePlanner'])
   expect(result.waypointCandidateCache.getUnusedCandidates()).toHaveLength(0)
 })
 
@@ -121,7 +122,7 @@ test('duration-aware fallback tries bounded POIs until one validates', async () 
     { ...pois[3], poiId: 'second-far', name: 'second-far', distanceInMeters: 1500 }
   ]
 
-  callCloudFunction.mockImplementation(async name => name === 'amapProvider'
+  callCloudFunction.mockImplementation(async name => name === 'mapProvider'
     ? { poisByCategory: { park: fallbackPois } }
     : { plan: { candidates: [] } })
 
@@ -139,6 +140,38 @@ test('duration-aware fallback tries bounded POIs until one validates', async () 
   expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId))
     .toEqual(['far', 'second-far'])
 })
+
+test.each([[15, 'near', 563], [30, 'far', 1000]])(
+  'fallback for %i minutes prefers %s with duration-aware POI discovery',
+  async (durationMinutes, expectedPoiId, expectedRadius) => {
+    const fallbackPois = [
+      { ...pois[0], poiId: 'near', distanceInMeters: 550 },
+      { ...pois[1], poiId: 'far', distanceInMeters: 950 }
+    ]
+    callCloudFunction.mockImplementation(async name => name === 'mapProvider'
+      ? { poisByCategory: { park: fallbackPois } }
+      : { plan: { candidates: [] } })
+    getWalkingSegment.mockImplementation(async (from, to) => ({
+      success: true,
+      durationSeconds: to.nodeId === 'near' ? 900 : 1800,
+      distanceMeters: to.nodeId === 'near' ? 1100 : 2200,
+      polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+    }))
+
+    const result = await generateRoutes({ ...preferences, durationMinutes })
+
+    expect(callCloudFunction.mock.calls.filter(([name]) => name === 'mapProvider'))
+      .toEqual([['mapProvider', {
+        action: 'nearbyPois', ...location, radius: expectedRadius
+      }, expect.any(Object)]])
+    // Inspect the first attempted segment, not only the eventual valid route:
+    // duration validation must not hide a duration-independent ranking.
+    expect(getWalkingSegment.mock.calls.map(([, to]) => to.nodeId)).toEqual([expectedPoiId])
+    expect(result).toMatchObject({ status: 'success', source: 'fallback' })
+    expect(result.routes[0].pointsOfInterest.map(poi => poi.poiId)).toEqual([expectedPoiId])
+    expect(result.routes[0].durationSeconds).toBe(durationMinutes * 60)
+  }
+)
 
 test('initial generation skips a failed candidate and returns the next success before later candidates', async () => {
   getWalkingSegment.mockImplementation(async (from, to) => from.nodeId === 'B' || to.nodeId === 'B'
@@ -209,7 +242,7 @@ test('route-build failures emit their stage and directed edge instead of bypassi
   } finally { warn.mockRestore() }
 })
 
-test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('exhausted rate limiting produces a temporary generation error, not an empty geographic result', async code => {
+test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('exhausted rate limiting produces a temporary generation error, not an empty geographic result', async code => {
   jest.useFakeTimers()
   try {
     getWalkingSegment.mockResolvedValue({ success: false, error: code })
@@ -240,7 +273,7 @@ test('malformed AI plan uses the deterministic fallback', async () => {
 
 test('AI provider failure uses the deterministic fallback', async () => {
   callCloudFunction.mockImplementation(async name => {
-    if (name === 'amapProvider') return { poisByCategory: { park: pois } }
+    if (name === 'mapProvider') return { poisByCategory: { park: pois } }
     throw Object.assign(new Error('Unavailable'), { code: 'AI_REQUEST_FAILED' })
   })
   getWalkingSegment.mockImplementation(async (from, to) => ({
@@ -254,7 +287,7 @@ test('AI provider failure uses the deterministic fallback', async () => {
   expect(result.source).toBe('fallback')
   expect(getCurrentLocation).toHaveBeenCalledTimes(1)
   expect(callCloudFunction.mock.calls.map(([name]) => name))
-    .toEqual(['amapProvider', 'aiRoutePlanner'])
+    .toEqual(['mapProvider', 'aiRoutePlanner'])
 })
 
 test('fallback also fails safely instead of exposing an invalid route', async () => {
@@ -298,7 +331,7 @@ test('unexpected evaluation exceptions settle the candidate instead of leaving i
 })
 function sequencePlans(plans) {
   let index = 0
-  callCloudFunction.mockImplementation(async name => name === 'amapProvider'
+  callCloudFunction.mockImplementation(async name => name === 'mapProvider'
     ? { poisByCategory: { park: pois } }
     : { plan: plans[Math.min(index++, plans.length - 1)] })
 }
@@ -440,7 +473,7 @@ test('directed unwalkable observations omit provider data and precise location',
   } finally { log.mockRestore(); warn.mockRestore() }
 })
 
-test.each(['AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('rate limiting stops before another candidate, another AI call, or fallback', async code => {
+test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'])('rate limiting stops before another candidate, another AI call, or fallback', async code => {
   jest.useFakeTimers()
   try {
     getWalkingSegment.mockResolvedValue({ success: false, error: code })

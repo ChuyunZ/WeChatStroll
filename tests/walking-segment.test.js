@@ -103,19 +103,7 @@ describe('walking-segment', () => {
           }
         ],
 
-        environmentStats: {
-          totalStepDistanceMeters: 820,
-          analyzedDistanceMeters: 820,
-          unknownWalkTypeDistanceMeters: 0,
-          normalRoadDistanceMeters: 600,
-          normalRoadRatio: 600 / 820,
-          walkTypeCoverageRatio: 1,
 
-          walkTypeDistanceMeters: {
-            '0': 600,
-            '6': 220
-          }
-        }
       })
 
       expect(
@@ -127,7 +115,7 @@ describe('walking-segment', () => {
   )
 
   test(
-    'sends only action and trusted coordinates to amapProvider',
+    'sends only action and trusted coordinates to mapProvider',
     async () => {
       let receivedRequest
 
@@ -161,7 +149,7 @@ describe('walking-segment', () => {
       )
 
       expect(receivedRequest).toEqual({
-        name: 'amapProvider',
+        name: 'mapProvider',
 
         data: {
           action: 'walkingRoute',

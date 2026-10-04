@@ -1,16 +1,14 @@
-const DEFAULT_POI_SEARCH_RADIUS_METERS = 3000
+const DEFAULT_POI_SEARCH_RADIUS_METERS = 1000
 const MIN_POI_SEARCH_RADIUS_METERS = 200
-const MAX_POI_SEARCH_RADIUS_METERS = 15000
+const MAX_POI_SEARCH_RADIUS_METERS = 1000
 
-// Approximate normal walking speed:
-// 75 meters per minute ≈ 4.5 km/h.
+const MIN_WALKING_DURATION_MINUTES = 15
+const MAX_WALKING_DURATION_MINUTES = 120
+
+// Approximate normal walking speed: 75 m/min ~= 4.5 km/h.
+// Only half of the requested walking-distance budget is used for discovery,
+// leaving room for multi-waypoint routing, detours and return travel.
 const WALKING_SPEED_METERS_PER_MINUTE = 75
-
-// The POI search radius uses only part of the user's
-// total walking-distance budget.
-//
-// This leaves room for waypoint combinations,
-// route shape, detours, and return travel.
 const POI_SEARCH_DISTANCE_RATIO = 0.5
 
 function getPoiSearchRadius(durationMinutes) {
@@ -22,19 +20,20 @@ function getPoiSearchRadius(durationMinutes) {
     return DEFAULT_POI_SEARCH_RADIUS_METERS
   }
 
-  const calculatedRadius =
-    Math.round(
-      durationMinutes *
-      WALKING_SPEED_METERS_PER_MINUTE *
-      POI_SEARCH_DISTANCE_RATIO
-    )
+  const boundedDurationMinutes = Math.min(
+    MAX_WALKING_DURATION_MINUTES,
+    Math.max(MIN_WALKING_DURATION_MINUTES, durationMinutes)
+  )
+
+  const calculatedRadius = Math.round(
+    boundedDurationMinutes *
+    WALKING_SPEED_METERS_PER_MINUTE *
+    POI_SEARCH_DISTANCE_RATIO
+  )
 
   return Math.min(
     MAX_POI_SEARCH_RADIUS_METERS,
-    Math.max(
-      MIN_POI_SEARCH_RADIUS_METERS,
-      calculatedRadius
-    )
+    Math.max(MIN_POI_SEARCH_RADIUS_METERS, calculatedRadius)
   )
 }
 

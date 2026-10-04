@@ -1,4 +1,4 @@
-const { isTemporaryProviderCode } = require('../utils/provider-errors')
+const { isProviderUnavailableCode } = require('../utils/provider-errors')
 // The route-local pool, not the session-wide registry, defines edit permissions.
 function isValidEditableOrder(route, ids) {
   const pool = route && route.editableWaypoints
@@ -13,13 +13,12 @@ function copyEditableWaypoint(poi) {
     poiId: poi.poiId, name: poi.name, category: poi.category,
     latitude: poi.latitude, longitude: poi.longitude,
     ...(typeof poi.address === 'string' ? { address: poi.address } : {}),
-    distanceInMeters: poi.distanceInMeters,
-    ...(poi.providerMeta ? { providerMeta: { ...poi.providerMeta } } : {})
+    distanceInMeters: poi.distanceInMeters
   }
 }
 
 function routeEditErrorMessage(error) {
-  if (error && [error.code, error.error, error.causeCode].some(isTemporaryProviderCode)) {
+  if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
     return '路线服务暂时繁忙，请稍后重试'
   }
   return '这个路线组合暂时无法构建完整步行路线，请调整地点或顺序后重试'

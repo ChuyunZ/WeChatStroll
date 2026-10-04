@@ -46,7 +46,19 @@ Cloud functions are stored under:
 cloudfunctions/
 ```
 
-The project includes two health-check cloud functions:
+Current planned-route cloud architecture:
+
+- `mapProvider`: provider-neutral `nearbyPois` and `walkingRoute` actions backed by Tencent Maps.
+- `getNearbyPois` and `getWalkingRoute`: legacy wrappers forwarding to `mapProvider`.
+- `aiRoutePlanner`: verified POI selection; real route facts come from the map provider and Route Engine.
+- `amapProvider`: historical/rollback implementation, not the current planned-route provider.
+- `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
+
+See [map provider deployment](map-provider-deployment.md) for server configuration,
+shared limiter state, the 2026-10-04 development smoke/E2E validation record and the
+still-unresolved data-use/AI/persistence release checkpoint.
+
+The project also includes two health-check cloud functions:
 
 ```text
 cloudfunctions/
@@ -135,4 +147,9 @@ The error handling was tested by temporarily calling a non-existent cloud functi
 
 No API secret, private key, or access token is stored in the mini program frontend.
 
-Sensitive credentials required by future third-party services should be stored and used on the backend rather than being embedded in frontend mini program code.
+`TENCENT_MAPS_API_KEY`, `TENCENT_MAPS_SECRET_KEY` and provider configuration belong
+only in the `mapProvider` server environment. The Secret Key is used to compute
+Tencent WebService GET request signatures (`sig`) and must never be exposed to the
+Mini Program. Provider credentials must never be committed or logged. The wrappers
+use runtime cloud credentials and do not need the provider credentials. See
+[server-side variables](map-provider-deployment.md#server-side-configuration).

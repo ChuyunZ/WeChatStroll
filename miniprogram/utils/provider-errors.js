@@ -1,5 +1,5 @@
-const TEMPORARY_PROVIDER_CODES = new Set([
-  'AMAP_RATE_LIMITED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'
+const PROVIDER_UNAVAILABLE_CODES = new Set([
+  'PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY', 'PROVIDER_GATEWAY_FAILED'
 ])
-const isTemporaryProviderCode = code => TEMPORARY_PROVIDER_CODES.has(code)
-module.exports = { isTemporaryProviderCode }
+const isProviderUnavailableCode = code => PROVIDER_UNAVAILABLE_CODES.has(code)
+module.exports = { isProviderUnavailableCode }

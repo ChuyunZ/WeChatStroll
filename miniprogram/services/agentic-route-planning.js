@@ -1,4 +1,4 @@
-const { isTemporaryProviderCode } = require('../utils/provider-errors')
+const { isProviderUnavailableCode } = require('../utils/provider-errors')
 // Request-local orchestration helpers. Only allowlisted facts reach the model.
 function waypointSetKey(ids) {
   return JSON.stringify([...new Set(ids)].sort())
@@ -7,7 +7,7 @@ function waypointSetKey(ids) {
 function normalizePlanningFailure(result = {}, waypointIds = []) {
   const code = result.code || result.error
   if ([code, result.causeCode, result.failedSegment && result.failedSegment.causeCode,
-    result.failedSegment && result.failedSegment.error].some(isTemporaryProviderCode)) {
+    result.failedSegment && result.failedSegment.error].some(isProviderUnavailableCode)) {
     return { type: 'ROUTE_BUILD_FAILED' }
   }
   if (['INVALID_AI_ROUTE_PLAN', 'EMPTY_AI_RESPONSE', 'INVALID_WAYPOINT_SET',

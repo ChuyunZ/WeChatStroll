@@ -288,7 +288,7 @@ describe('progressive initial route loading', () => {
     await page.showOtherRoutes();
     await page.showOtherRoutes();
     expect(pending).toHaveLength(1);
-    await settle(pending[0], { success: false, error: 'AMAP_RATE_LIMITED' });
+    await settle(pending[0], { success: false, error: 'PROVIDER_RATE_LIMITED' });
     expect(page.data.routes).toHaveLength(1);
     await settle(pending[1], { success: true, route: { ...GENERATED_ROUTE, routeId: 'second' } });
     expect(page.data.routes).toHaveLength(2);

@@ -331,7 +331,7 @@ describe(
     )
 
     test(
-      'aggregates environment stats from all available segments',
+      'drops provider-specific environment stats from every segment and the public route',
       async () => {
         const session =
           createSession()
@@ -349,32 +349,9 @@ describe(
               ]
             })
 
-        expect(
-          result.environmentStats
-        ).toEqual({
-          totalStepDistanceMeters:
-            300,
-
-          analyzedDistanceMeters:
-            240,
-
-          unknownWalkTypeDistanceMeters:
-            60,
-
-          normalRoadDistanceMeters:
-            180,
-
-          normalRoadRatio:
-            0.6,
-
-          walkTypeCoverageRatio:
-            0.8,
-
-          walkTypeDistanceMeters: {
-            '0': 180,
-            '6': 60
-          }
-        })
+        expect(result.success).toBe(true)
+        expect(result).not.toHaveProperty('environmentStats')
+        for (const segment of result.segments) expect(segment).not.toHaveProperty('environmentStats')
       }
     )
     test(

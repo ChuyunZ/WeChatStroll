@@ -93,8 +93,7 @@ describe('waypoint generation service', () => {
         latitude: 45.501,
         longitude: -73.571,
         distanceInMeters: 350,
-        address: PARK_POI.address,
-        providerMeta: PARK_POI.providerMeta
+        address: PARK_POI.address
       },
       {
         poiId: 'water-1',
@@ -106,13 +105,13 @@ describe('waypoint generation service', () => {
         address: WATER_POI.address
       }
     ])
-    expect(candidates[0].providerMeta).not.toBe(PARK_POI.providerMeta)
+    expect(candidates[0]).not.toHaveProperty('providerMeta')
   })
 
   test('generateWaypointPlan sends verified flattened POIs to aiRoutePlanner', async () => {
     wx.cloud.callFunction.mockImplementation(
       async ({ name, data }) => {
-        if (name === 'amapProvider' && data.action === 'nearbyPois') {
+        if (name === 'mapProvider' && data.action === 'nearbyPois') {
           return {
             result: {
               success: true,
@@ -215,7 +214,7 @@ describe('waypoint generation service', () => {
   test('generateWaypointPlan preserves string AI error codes', async () => {
     wx.cloud.callFunction.mockImplementation(
       async ({ name, data }) => {
-        if (name === 'amapProvider' && data.action === 'nearbyPois') {
+        if (name === 'mapProvider' && data.action === 'nearbyPois') {
           return {
             result: {
               success: true,

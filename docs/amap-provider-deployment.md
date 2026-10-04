@@ -1,5 +1,13 @@
 # AMap provider gateway (#74)
 
+> **Historical / rollback only.** This guide describes the retained
+> `cloudfunctions/amapProvider/` implementation and its former integration.
+> Current production planned-route callers and both legacy wrappers use
+> `mapProvider` with Tencent Maps. See [current deployment guide](map-provider-deployment.md).
+> Caller, error-code and deployment statements below describe the historical AMap
+> setup, not the current release. Rollback requires compatible callers and error
+> handling for both POI and walking, not just deployment of the retained directory.
+
 ## Architecture and contracts
 
 The Mini Program calls `amapProvider` with `action: walkingRoute` or
