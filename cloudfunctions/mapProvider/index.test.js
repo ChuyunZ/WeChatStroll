@@ -162,13 +162,11 @@ test('walking dispatch uses the walking scope, normalizes seconds, and redacts l
 })
 
 test.each([input, walking])('transport failures cross $action without retry or rate cooldown', async event => {
-  for (const response of [undefined, { status: 500 }, { status: 400 }]) {
+  for (const response of [undefined, { status: 500 }, { status: 400 }, { status: 403 }, { status: 429 }]) {
     store = createTestStore()
     createCloudBaseStore.mockReturnValue(store)
     axios.get.mockClear().mockRejectedValue({ response, message: 'private-test-key 30.123456' })
-    const code = response && response.status === 400
-      ? event.action === 'nearbyPois' ? 'POI_SEARCH_FAILED' : 'WALKING_ROUTE_FAILED'
-      : 'PROVIDER_GATEWAY_FAILED'
+    const code = 'PROVIDER_GATEWAY_FAILED'
     const pending = main(event)
     await jest.runAllTimersAsync()
     expect(await pending).toMatchObject({ success: false, error: { code } })

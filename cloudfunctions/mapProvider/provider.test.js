@@ -125,10 +125,9 @@ test('failed cooldown publication forbids another HTTP attempt', async () => {
 test.each(['nearbyPois', 'walkingRoute'])('%s transport errors normalize safely without retry or cooldown', async operation => {
   for (const error of [new Error('private network failure'), { code: 'ETIMEDOUT' }, { code: 'ECONNRESET' },
     { response: { status: 500, data: 'private payload' } }, { response: { status: 503, data: { status: 999 } } },
-    { response: { status: 400, data: { message: 'private parameter error' } } }]) {
+    ...[400, 401, 403, 404, 429].map(status => ({ response: { status, data: 'private gateway payload' } }))]) {
     const instance = client(createTestStore(), jest.fn().mockRejectedValue(error))
-    if (error.response && error.response.status === 400) await expect(instance.call(operation)).rejects.toBe(error)
-    else await expect(instance.call(operation)).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
+    await expect(instance.call(operation)).rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
     expect(instance.request).toHaveBeenCalledTimes(1)
     expect(instance.cooldown).not.toHaveBeenCalled()
     expect(JSON.stringify(instance.log.mock.calls)).not.toContain('private')

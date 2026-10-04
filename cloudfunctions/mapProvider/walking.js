@@ -51,10 +51,11 @@ function createWalkingHandler({ apiKey, request }) {
       } })
       data = response && response.data
     } catch (error) {
-      return failure(isProviderCode(error && error.code) ? error.code : 'WALKING_ROUTE_FAILED')
+      return failure(isProviderCode(error && error.code) ? error.code : 'PROVIDER_GATEWAY_FAILED')
     }
+    // Only explicit no-route results are deterministic edge failures.
     if (data && data.status === 378) return notFound()
-    if (!data || data.status !== 0) return failure('WALKING_ROUTE_FAILED')
+    if (!data || data.status !== 0) return failure('PROVIDER_GATEWAY_FAILED')
     try {
       const routes = data.result && data.result.routes
       if (!Array.isArray(routes)) throw new Error('Invalid walking routes')
@@ -72,7 +73,7 @@ function createWalkingHandler({ apiKey, request }) {
         polyline: decodePolyline(route.polyline)
       } }
     } catch (_) {
-      return failure('INVALID_WALKING_ROUTE_RESPONSE')
+      return failure('PROVIDER_GATEWAY_FAILED')
     }
   }
 }

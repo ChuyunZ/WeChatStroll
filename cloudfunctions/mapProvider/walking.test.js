@@ -56,7 +56,7 @@ test.each([undefined, null, {}, [], [30, 120], [30, 120, 1], [30, 120, 1, 2, 3],
   [90, 180, 1, 0], [-90, -180, 0, -1], [30, 120, 0, 0, 100000000, 0], new Array(4)
 ])('rejects malformed compressed polyline %p', async polyline => {
   request.mockResolvedValue({ data: { status: 0, result: { routes: [{ ...validRoute(), polyline }] } } })
-  expect(await handler(input)).toMatchObject({ error: { code: 'INVALID_WALKING_ROUTE_RESPONSE' } })
+  expect(await handler(input)).toMatchObject({ error: { code: 'PROVIDER_GATEWAY_FAILED' } })
 })
 
 test.each([{ status: 378 }, { status: 0, result: { routes: [] } }])('no route %p does not fabricate geometry', async data => {
@@ -71,19 +71,19 @@ test.each([{ status: 0 }, { status: 0, result: null }, { status: 0, result: {} }
   ...[null, [], 'route', {}].map(route => ({ status: 0, result: { routes: [route, validRoute()] } }))
 ])('rejects malformed claimed success %p', async data => {
   request.mockResolvedValue({ data })
-  expect(await handler(input)).toMatchObject({ error: { code: 'INVALID_WALKING_ROUTE_RESPONSE' } })
+  expect(await handler(input)).toMatchObject({ error: { code: 'PROVIDER_GATEWAY_FAILED' } })
 })
 
 test.each(['distance', 'duration'])('rejects invalid %s without coercion or defaults', async field => {
   for (const value of [undefined, null, -1, NaN, Infinity, -Infinity, '10', {}, true]) {
     request.mockResolvedValue({ data: { status: 0, result: { routes: [{ ...validRoute(), [field]: value }] } } })
-    expect(await handler(input)).toMatchObject({ error: { code: 'INVALID_WALKING_ROUTE_RESPONSE' } })
+    expect(await handler(input)).toMatchObject({ error: { code: 'PROVIDER_GATEWAY_FAILED' } })
   }
 })
 
 test('rejects duration conversion overflow but accepts explicit zero route facts', async () => {
   request.mockResolvedValueOnce({ data: { status: 0, result: { routes: [{ ...validRoute(), duration: Number.MAX_VALUE }] } } })
-  expect(await handler(input)).toMatchObject({ error: { code: 'INVALID_WALKING_ROUTE_RESPONSE' } })
+  expect(await handler(input)).toMatchObject({ error: { code: 'PROVIDER_GATEWAY_FAILED' } })
   request.mockResolvedValueOnce({ data: { status: 0, result: { routes: [{ ...validRoute(), distance: 0, duration: 0 }] } } })
   expect(await handler(input)).toMatchObject({ success: true, route: { distanceMeters: 0, durationSeconds: 0 } })
 })
@@ -93,10 +93,10 @@ test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY',
   expect(await handler(input)).toEqual({ success: false, error: { code, message: 'Unable to generate walking route' } })
 })
 
-test.each([null, {}, { status: '0' }, { status: 110, message: 'private-key' }, { status: 999 }])('other invalid/business responses %p are safe operation failures', async data => {
+test.each([null, {}, { status: '0' }, { status: 110, message: 'private-key' }, { status: 999 }])('other invalid/business responses %p are safe gateway failures', async data => {
   request.mockResolvedValue({ data })
   expect(await handler(input)).toEqual({ success: false, error: {
-    code: 'WALKING_ROUTE_FAILED', message: 'Unable to generate walking route'
+    code: 'PROVIDER_GATEWAY_FAILED', message: 'Unable to generate walking route'
   } })
 })
 
@@ -104,7 +104,7 @@ test('adapter emits no raw payload, key or coordinate logs on failures', async (
   const spies = ['log', 'info', 'warn', 'error'].map(method => jest.spyOn(console, method).mockImplementation(() => {}))
   try {
     request.mockRejectedValueOnce(new Error('private-key 31.123000 raw payload'))
-    expect(await handler(input)).toMatchObject({ error: { code: 'WALKING_ROUTE_FAILED' } })
+    expect(await handler(input)).toMatchObject({ error: { code: 'PROVIDER_GATEWAY_FAILED' } })
     request.mockResolvedValueOnce({ data: { status: 0, result: { routes: [{ ...validRoute(), polyline: [] }] } } })
     await handler(input)
     for (const spy of spies) expect(spy).not.toHaveBeenCalled()

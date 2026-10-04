@@ -111,6 +111,12 @@ Tencent key/origin/signature/authorization statuses `110`, `111`, `112`, `113`,
 They are configuration/service failures, not evidence that a particular walking edge
 is unreachable, and they do not trigger AI waypoint replanning.
 
+HTTP failures without a recognized Tencent business status (including HTTP 429),
+missing or malformed walking responses, and invalid route facts or geometry normalize
+to `PROVIDER_GATEWAY_FAILED`. They stop route generation without fallback and are
+not stored as unreachable segment costs. Only explicit no-route results (status 378
+or a successful response with an empty routes array) become `ROUTE_NOT_FOUND`.
+
 All four availability codes represent provider/service failures, not deterministic
 unreachable edges. Route Engine may retain a request-local Promise result for
 deduplication but does not record these as unreachable resolved segment facts.
