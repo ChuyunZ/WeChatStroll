@@ -2,9 +2,9 @@ const fs = require('fs')
 const path = require('path')
 const { loadLimits } = require('./config')
 
-test('defaults keep walking conservative while using verified Explore pacing', () => {
+test('defaults use verified Tencent pacing for Explore and walking', () => {
   expect(loadLimits({})).toEqual({
-    walkingRoute: { scope: 'tencent:walking', minIntervalMs: 1500, maxQueueWaitMs: 12000,
+    walkingRoute: { scope: 'tencent:walking', minIntervalMs: 200, maxQueueWaitMs: 12000,
       maxProviderAttempts: 2, cooldownBaseMs: 3000 },
     nearbyPois: { scope: 'tencent:poi-explore', minIntervalMs: 200, maxQueueWaitMs: 12000,
       maxProviderAttempts: 2, cooldownBaseMs: 3000 },
