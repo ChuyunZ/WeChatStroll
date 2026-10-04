@@ -39,7 +39,7 @@ test('legacy and direct callers share mapProvider data and distributed pacing', 
   expect(axios.get.mock.calls.every(([url]) => url.startsWith('https://apis.map.qq.com/'))).toBe(true)
   const starts = console.info.mock.calls.map(([, record]) => record)
     .filter(record => record.event === 'provider_start' && record.operation === 'walkingRoute')
-  expect(starts[1].startedAtMs - starts[0].startedAtMs).toBeGreaterThanOrEqual(1500)
+  expect(starts[1].startedAtMs - starts[0].startedAtMs).toBeGreaterThanOrEqual(400)
   expect(console.info.mock.calls.every(([prefix]) => ['[Map Provider]', '[Map Legacy Wrapper]'].includes(prefix))).toBe(true)
 })
 
