@@ -1022,10 +1022,15 @@ describe("completion trajectory quality", () => {
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
-  test("healthy finalization records a nonpartial completed walk", async () => {
+  test("healthy finalization records a nonpartial completed walk and writes durable metadata", async () => {
     await optedIn();
     await page.finishWalk();
     expect(storage.pendingWalkResult.trajectoryPartial).toBe(false);
+    expect(walkRecords.updateTrajectoryMetadata).toHaveBeenCalledWith({
+      walkId: "walk-test",
+      trajectoryPartial: false,
+      trajectoryEndTimeMs: expect.any(Number)
+    });
   });
 
   test("trajectory failure still completes without restarting tracking", async () => {
@@ -1034,6 +1039,11 @@ describe("completion trajectory quality", () => {
     finalizeTracking.mockRejectedValue(new Error("failed"));
     await page.finishWalk();
     expect(storage.pendingWalkResult.trajectoryPartial).toBe(true);
+    expect(walkRecords.updateTrajectoryMetadata).toHaveBeenCalledWith({
+      walkId: "walk-test",
+      trajectoryPartial: true,
+      trajectoryEndTimeMs: expect.any(Number)
+    });
     expect(page._active).toBe(false);
     expect(startTracking).toHaveBeenCalledTimes(1);
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
@@ -1210,4 +1220,30 @@ describe("durable completion before trajectory cleanup", () => {
     expect(startTracking).toHaveBeenCalledTimes(1);
     expect(require("../miniprogram/services/active-walk-session").getActiveWalkSession()).toBeNull();
   });
+});
+
+test("trajectory metadata write-back failure cannot undo durable completion", async () => {
+  jest.spyOn(console, "warn").mockImplementation(() => {});
+  storage.activeWalkSession = {
+    version: 2,
+    walkId: "walk-test",
+    preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
+    status: "active",
+    routeId: TEST_ROUTE.routeId,
+    route: TEST_ROUTE,
+    startTimeMs: Date.now() - 60000,
+    trackingEnabled: true
+  };
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+  await page._trackingStartPromise;
+  walkRecords.updateTrajectoryMetadata.mockRejectedValueOnce(new Error("metadata unavailable"));
+  await page.finishWalk();
+  expect(storage.pendingWalkResult).toMatchObject({
+    walkId: "walk-test",
+    completionStatus: "completed",
+    trajectoryPartial: false
+  });
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(page._active).toBe(false);
+  expect(wx.reLaunch).toHaveBeenCalledTimes(1);
 });

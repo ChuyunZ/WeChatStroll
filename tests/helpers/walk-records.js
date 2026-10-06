@@ -23,9 +23,21 @@ function mockWalkRecords(storage) {
       if (walk.status !== 'active') return walk;
       const terminal = { ...walk, status: args.completionStatus, completionStatus: args.completionStatus,
         endTime: new Date(args.endTimeMs).toISOString(), trajectoryEndTimeMs: args.endTimeMs,
+        trajectoryPartial: walk.trajectoryEnabled === true && args.trajectoryPartial,
         actualDurationSeconds: Math.floor((args.endTimeMs - Date.parse(walk.startTime)) / 1000) };
       records.set(walk.walkId, terminal);
       return terminal;
+    }),
+    updateTrajectoryMetadata: jest.fn(async args => {
+      const walk = records.get(args.walkId);
+      if (!walk || !['completed', 'ended_early'].includes(walk.status) || walk.trajectoryEnabled !== true) {
+        throw new Error('Trajectory metadata update is not allowed.');
+      }
+      const updated = { ...walk,
+        trajectoryPartial: walk.trajectoryPartial && args.trajectoryPartial,
+        trajectoryEndTimeMs: Math.max(walk.trajectoryEndTimeMs, args.trajectoryEndTimeMs) };
+      records.set(walk.walkId, updated);
+      return updated;
     })
   };
   return service;

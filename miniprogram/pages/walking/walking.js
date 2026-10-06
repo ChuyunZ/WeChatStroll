@@ -811,8 +811,18 @@ Page({
           activeWalkSessionService.savePendingWalkResult(completedResult);
         }
       } catch (error) {
-        // Completion is already durable. Keep the conservative quality marker.
+        // Completion is already durable. Cloud metadata is updated independently below.
         console.warn("[Walking] Unable to update completed trajectory quality.");
+      }
+      try {
+        await walkRecords.updateTrajectoryMetadata({
+          walkId: completedResult.walkId,
+          trajectoryPartial: completedResult.trajectoryPartial,
+          trajectoryEndTimeMs: completedResult.trajectoryEndTimeMs
+        });
+      } catch (error) {
+        // Never reactivate a terminal walk because a post-finalization metadata write failed.
+        console.warn("[Walking] Unable to persist finalized trajectory metadata.");
       }
     }
 

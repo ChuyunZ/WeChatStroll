@@ -52,6 +52,12 @@ async function request(action, fields = {}, nullable = false) {
     }
     throw new Error('Invalid completion response.');
   }
+  if (action === 'updateTrajectoryMetadata' &&
+      (!['completed', 'ended_early'].includes(walk.status) || walk.trajectoryEnabled !== true ||
+       walk.trajectoryEndTimeMs < fields.trajectoryEndTimeMs ||
+       (fields.trajectoryPartial === false && walk.trajectoryPartial !== false))) {
+    throw new Error('Invalid trajectory metadata response.');
+  }
   return walk;
 }
 module.exports = {
@@ -68,5 +74,7 @@ module.exports = {
   getWalk: walkId => request('getWalk', { walkId }),
   completeWalk: ({ walkId, completionStatus, endTimeMs, trajectoryPartial }) => request('completeWalk', {
     walkId, completionStatus, endTimeMs, trajectoryPartial
-  })
+  }),
+  updateTrajectoryMetadata: ({ walkId, trajectoryPartial, trajectoryEndTimeMs }) =>
+    request('updateTrajectoryMetadata', { walkId, trajectoryPartial, trajectoryEndTimeMs })
 };

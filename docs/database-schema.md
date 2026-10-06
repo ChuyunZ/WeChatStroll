@@ -214,7 +214,10 @@ original record without changing its time; a different terminal status is reject
 Database failures return normalized errors. Navigation and Track Cloud failures
 cannot reactivate any terminal walk.
 
-The four actions are startWalk, getActiveWalk, getWalk and completeWalk.
+The five actions are startWalk, getActiveWalk, getWalk, completeWalk and
+updateTrajectoryMetadata. The last action is limited to opted-in completed /
+ended_early walks and can update only trajectoryPartial, trajectoryEndTimeMs and
+updatedAt; it cannot change lifecycle state or user-confirmed timing.
 All read/write operations are scoped to authenticated ownership. The response is
 { success: true, walk } (null only for no active walk), or
 { success: false, error: { code, message } }.
@@ -241,9 +244,11 @@ The client saves its completion intent (state and confirmation time) with the lo
 active session before requesting completion. Database failure leaves it retryable.
 After cloud success the local pending result is saved, the active session is cleared,
 and the existing Track Cloud final flush runs. Local quality and trajectory query
-boundary are then updated without changing the logical end time. The cloud record
-remains conservative: this issue does not write back post-flush quality; consumers
-must not interpret its partial flag or an empty trace query as proof of no trajectory.
+boundary are then updated without changing the logical end time. The client also
+best-effort writes that final quality/query boundary back to the already-terminal
+CloudBase record. This metadata update is monotonic: the query boundary cannot move
+backward and a confirmed non-partial trajectory cannot regress to partial because of
+a stale retry. Failure of this post-finalization write never reactivates the walk.
 Feedback navigation failure retains the terminal result for later recovery. Issue #80
 Feedback authoring remains out of scope.
 

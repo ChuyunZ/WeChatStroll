@@ -167,3 +167,36 @@ test('database completion failure preserves active state; lost completion respon
   expect(await sessions.reconcileActiveWalk()).toBeNull();
   expect(storage.pendingWalkResult.completionStatus).toBe('completed');
 });
+
+test('final trajectory metadata is durably written back after completion', async () => {
+  const walk = await start();
+  const confirmedAt = Date.now();
+  const terminal = await records.completeWalk({
+    walkId: walk.walkId,
+    completionStatus: 'completed',
+    endTimeMs: confirmedAt,
+    trajectoryPartial: true
+  });
+  const finalBoundary = confirmedAt + 5000;
+  const updated = await records.updateTrajectoryMetadata({
+    walkId: walk.walkId,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: finalBoundary
+  });
+  expect(wx.cloud.callFunction.mock.calls.at(-1)[0]).toEqual({
+    name: 'walkStore',
+    data: {
+      action: 'updateTrajectoryMetadata',
+      walkId: walk.walkId,
+      trajectoryPartial: false,
+      trajectoryEndTimeMs: finalBoundary
+    }
+  });
+  expect(updated).toMatchObject({
+    status: 'completed',
+    endTime: terminal.endTime,
+    actualDurationSeconds: terminal.actualDurationSeconds,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: finalBoundary
+  });
+});

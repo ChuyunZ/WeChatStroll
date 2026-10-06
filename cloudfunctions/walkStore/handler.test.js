@@ -142,8 +142,9 @@ test('users have independent locks and cannot read or finalize another user reco
   expect(b.walkId).not.toBe(a.walkId);
   expect((await f.call({ action: 'getActiveWalk' })).walk.walkId).toBe(a.walkId);
   expect((await f.call({ action: 'getWalk', walkId: a.walkId })).walk).toEqual(a);
-  for (const action of ['getWalk', 'completeWalk']) {
-    expect(await f.handler('user-b')({ action, walkId: a.walkId, completionStatus: 'completed', endTimeMs: now }))
+  for (const action of ['getWalk', 'completeWalk', 'updateTrajectoryMetadata']) {
+    expect(await f.handler('user-b')({ action, walkId: a.walkId, completionStatus: 'completed', endTimeMs: now,
+      trajectoryPartial: false, trajectoryEndTimeMs: now }))
       .toMatchObject({ success: false, error: { code: 'WALK_NOT_FOUND' } });
   }
 });
@@ -179,4 +180,98 @@ test.each([NaN, 'yesterday', -1, now - 1, now + 60001])('rejects impossible comp
   const f = fixture(); const { walk } = await f.call(start);
   expect((await f.call({ action: 'completeWalk', walkId: walk.walkId, completionStatus: 'completed', endTimeMs, trajectoryPartial: false })).success).toBe(false);
   expect((await f.call({ action: 'getActiveWalk' })).walk.status).toBe('active');
+});
+
+test('terminal trajectory metadata advances monotonically without changing lifecycle facts', async () => {
+  const f = fixture();
+  const { walk } = await f.call(start);
+  const terminal = (await f.call({
+    action: 'completeWalk',
+    walkId: walk.walkId,
+    completionStatus: 'completed',
+    endTimeMs: now + 1000,
+    trajectoryPartial: true
+  })).walk;
+  f.setNow(now + 6000);
+  const updated = (await f.call({
+    action: 'updateTrajectoryMetadata',
+    walkId: walk.walkId,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: now + 5000
+  })).walk;
+  expect(updated).toMatchObject({
+    walkId: walk.walkId,
+    status: 'completed',
+    completionStatus: 'completed',
+    endTime: terminal.endTime,
+    actualDurationSeconds: terminal.actualDurationSeconds,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: now + 5000
+  });
+  const retry = (await f.call({
+    action: 'updateTrajectoryMetadata',
+    walkId: walk.walkId,
+    trajectoryPartial: true,
+    trajectoryEndTimeMs: now + 2000
+  })).walk;
+  expect(retry).toEqual(updated);
+});
+
+test('trajectory metadata update rejects active, abandoned, and non-consented walks', async () => {
+  const activeFixture = fixture();
+  const active = (await activeFixture.call(start)).walk;
+  expect(await activeFixture.call({
+    action: 'updateTrajectoryMetadata',
+    walkId: active.walkId,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: now
+  })).toMatchObject({ success: false, error: { code: 'TRAJECTORY_UPDATE_NOT_ALLOWED' } });
+
+  const abandonedFixture = fixture();
+  const abandoned = (await abandonedFixture.call(start)).walk;
+  abandonedFixture.setNow(now + 12 * 60 * 60 * 1000);
+  expect(await abandonedFixture.call({
+    action: 'updateTrajectoryMetadata',
+    walkId: abandoned.walkId,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: now + 12 * 60 * 60 * 1000
+  })).toMatchObject({ success: false, error: { code: 'TRAJECTORY_UPDATE_NOT_ALLOWED' } });
+
+  const disabledFixture = fixture();
+  const disabled = (await disabledFixture.call({ ...start, trajectoryEnabled: false })).walk;
+  const terminal = (await disabledFixture.call({
+    action: 'completeWalk',
+    walkId: disabled.walkId,
+    completionStatus: 'completed',
+    endTimeMs: now + 1000,
+    trajectoryPartial: false
+  })).walk;
+  disabledFixture.setNow(now + 2000);
+  expect(await disabledFixture.call({
+    action: 'updateTrajectoryMetadata',
+    walkId: terminal.walkId,
+    trajectoryPartial: false,
+    trajectoryEndTimeMs: now + 1500
+  })).toMatchObject({ success: false, error: { code: 'TRAJECTORY_UPDATE_NOT_ALLOWED' } });
+});
+
+test('trajectory metadata update rejects invalid query boundaries', async () => {
+  const f = fixture();
+  const { walk } = await f.call(start);
+  await f.call({
+    action: 'completeWalk',
+    walkId: walk.walkId,
+    completionStatus: 'completed',
+    endTimeMs: now + 1000,
+    trajectoryPartial: true
+  });
+  f.setNow(now + 5000);
+  for (const trajectoryEndTimeMs of [now, now + 65001]) {
+    expect(await f.call({
+      action: 'updateTrajectoryMetadata',
+      walkId: walk.walkId,
+      trajectoryPartial: false,
+      trajectoryEndTimeMs
+    })).toMatchObject({ success: false, error: { code: 'INVALID_INPUT' } });
+  }
 });

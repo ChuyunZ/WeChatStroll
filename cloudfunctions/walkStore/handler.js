@@ -11,6 +11,7 @@ const messages = {
   INVALID_INPUT: 'Invalid walk metadata.',
   WALK_NOT_FOUND: 'Walk not found.',
   WALK_STATE_CONFLICT: 'Walk is already finalized with another state.',
+  TRAJECTORY_UPDATE_NOT_ALLOWED: 'Trajectory metadata can only update an opted-in finalized walk.',
   WALK_STORE_FAILED: 'Walk storage is temporarily unavailable.'
 };
 function fail(code) { throw Object.assign(new Error(messages[code]), { code }); }
@@ -73,7 +74,7 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
       if (typeof openid !== 'string' || !openid.trim()) fail('UNAUTHENTICATED');
       const ownerKey = crypto.createHash('sha256').update(openid).digest('hex');
       const lockPath = `active_walks/${ownerKey}`;
-      if (!['startWalk', 'getActiveWalk', 'getWalk', 'completeWalk'].includes(event.action)) fail('INVALID_ACTION');
+      if (!['startWalk', 'getActiveWalk', 'getWalk', 'completeWalk', 'updateTrajectoryMetadata'].includes(event.action)) fail('INVALID_ACTION');
       const owned = walk => {
         if (!walk || walk.ownerKey !== ownerKey) fail('WALK_NOT_FOUND');
         return walk;
@@ -107,7 +108,26 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
         const path = `walks/${id(event.walkId)}`;
         let record = owned(await tx.get(path));
         record = await abandonIfExpired(tx, record, lockPath, nowMs);
-        if (event.action === 'getWalk' || record.status === 'abandoned') return record;
+        if (event.action === 'getWalk') return record;
+        if (event.action === 'updateTrajectoryMetadata') {
+          if (!['completed', 'ended_early'].includes(record.status) || record.trajectoryEnabled !== true) {
+            fail('TRAJECTORY_UPDATE_NOT_ALLOWED');
+          }
+          const trajectoryEndTimeMs = event.trajectoryEndTimeMs;
+          if (typeof event.trajectoryPartial !== 'boolean' ||
+              !Number.isSafeInteger(trajectoryEndTimeMs) ||
+              trajectoryEndTimeMs < Date.parse(record.endTime) ||
+              trajectoryEndTimeMs > nowMs + 60000) fail('INVALID_INPUT');
+          const nextEndTimeMs = Math.max(record.trajectoryEndTimeMs, trajectoryEndTimeMs);
+          const nextPartial = record.trajectoryPartial && event.trajectoryPartial;
+          if (nextEndTimeMs === record.trajectoryEndTimeMs &&
+              nextPartial === record.trajectoryPartial) return record;
+          const updated = { ...record, trajectoryPartial: nextPartial,
+            trajectoryEndTimeMs: nextEndTimeMs, updatedAt: new Date(nowMs).toISOString() };
+          await tx.set(path, updated);
+          return updated;
+        }
+        if (record.status === 'abandoned') return record;
         if (!['completed', 'ended_early'].includes(event.completionStatus)) fail('INVALID_INPUT');
         if (record.status !== 'active') {
           if (record.status !== event.completionStatus) fail('WALK_STATE_CONFLICT');
