@@ -1043,3 +1043,91 @@ describe('route-generation service', () => {
     }
   )
 })
+
+
+test('generated route IDs remain unique within the same millisecond and never embed provider IDs', () => {
+  const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(1791324000000)
+  const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.5)
+
+  try {
+    const fallbackOne = routeGenerationService.buildGeneratedRoute({
+      location: TEST_LOCATION,
+      selectedPoi: PARK_POI,
+      walkingRoute: {
+        ...WALKING_ROUTE,
+        durationMinutes: 4,
+        routeType: 'point_to_point',
+        returnsToStart: false
+      },
+      preferences: {}
+    })
+
+    const fallbackTwo = routeGenerationService.buildGeneratedRoute({
+      location: TEST_LOCATION,
+      selectedPoi: PARK_POI,
+      walkingRoute: {
+        ...WALKING_ROUTE,
+        durationMinutes: 4,
+        routeType: 'point_to_point',
+        returnsToStart: false
+      },
+      preferences: {}
+    })
+
+    const aiWalkingRoute = {
+      success: true,
+      waypoints: [PARK_POI],
+      routeOrder: {
+        source: 'recommended',
+        orderedWaypointIds: [PARK_POI.poiId]
+      },
+      durationSeconds: 240,
+      durationMinutes: 4,
+      distanceMeters: 279,
+      routeType: 'point_to_point',
+      returnsToStart: false,
+      polyline: WALKING_ROUTE.polyline
+    }
+
+    const aiOne = routeGenerationService.buildGeneratedRouteFromAiCandidate({
+      location: TEST_LOCATION,
+      walkingRoute: aiWalkingRoute,
+      candidateIndex: 0
+    })
+    const aiTwo = routeGenerationService.buildGeneratedRouteFromAiCandidate({
+      location: TEST_LOCATION,
+      walkingRoute: aiWalkingRoute,
+      candidateIndex: 0
+    })
+
+    expect(fallbackOne.routeId).not.toBe(fallbackTwo.routeId)
+    expect(aiOne.routeId).not.toBe(aiTwo.routeId)
+    expect(new Set([
+      fallbackOne.routeId,
+      fallbackTwo.routeId,
+      aiOne.routeId,
+      aiTwo.routeId
+    ])).toHaveProperty('size', 4)
+
+    expect(fallbackOne.routeId).toMatch(
+      /^generated_fallback_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/
+    )
+    expect(aiOne.routeId).toMatch(
+      /^generated_ai_[a-z0-9]+_[a-z0-9]+_[a-z0-9]+$/
+    )
+
+    for (const routeId of [
+      fallbackOne.routeId,
+      fallbackTwo.routeId,
+      aiOne.routeId,
+      aiTwo.routeId
+    ]) {
+      expect(routeId).not.toContain(PARK_POI.poiId)
+      expect(routeId).not.toContain(String(PARK_POI.latitude))
+      expect(routeId).not.toContain(String(PARK_POI.longitude))
+    }
+  } finally {
+    nowSpy.mockRestore()
+    randomSpy.mockRestore()
+  }
+})

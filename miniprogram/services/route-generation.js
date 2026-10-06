@@ -53,6 +53,37 @@ const CATEGORY_LABELS = {
   shoppingStreet: '商街'
 }
 
+// routeId is an application identity, not an authorization token. Combine a
+// timestamp, a process-local monotonic sequence and random entropy so IDs stay
+// provider-neutral while remaining distinct even when multiple routes are built
+// in the same millisecond.
+let generatedRouteSequence = 0
+
+function createGeneratedRouteId(kind) {
+  generatedRouteSequence =
+    (generatedRouteSequence + 1) %
+    Number.MAX_SAFE_INTEGER
+
+  const timestamp =
+    Date.now().toString(36)
+
+  const sequence =
+    generatedRouteSequence.toString(36)
+
+  const randomSuffix =
+    Math.floor(
+      Math.random() *
+      Number.MAX_SAFE_INTEGER
+    )
+      .toString(36)
+      .padStart(11, '0')
+
+  return (
+    `generated_${kind}_` +
+    `${timestamp}_${sequence}_${randomSuffix}`
+  )
+}
+
 function isValidPoi(poi) {
   return (
     poi &&
@@ -506,7 +537,7 @@ function buildGeneratedRoute({
     // Keep the persisted application route identity provider-neutral.
     // Provider POI identifiers stay inside the local route snapshot only.
     routeId:
-      `generated_fallback_${Date.now()}`,
+      createGeneratedRouteId('fallback'),
     editableWaypoints: [copyEditableWaypoint(selectedPoi)],
     recommendedWaypointIds: [selectedPoi.poiId],
     recommendedDurationMinutes: walkingRoute.durationMinutes,
@@ -691,7 +722,7 @@ function buildGeneratedRouteFromAiCandidate({
 
   return {
     routeId:
-      `generated_ai_${candidateIndex + 1}_${Date.now()}`,
+      createGeneratedRouteId('ai'),
 
     routeOrder: walkingRoute.routeOrder,
     durationSeconds: walkingRoute.durationSeconds,
