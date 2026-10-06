@@ -53,10 +53,21 @@ Current planned-route cloud architecture:
 - `aiRoutePlanner`: verified POI selection; real route facts come from the map provider and Route Engine.
 - `amapProvider`: historical/rollback implementation, not the current planned-route provider.
 - `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
+- `walkStore`: durable walk lifecycle persistence for Issue #79. It owns the
+  `walks` and `active_walks` collections, derives ownership from
+  `cloud.getWXContext().OPENID`, and stores only allowlisted lifecycle/questionnaire
+  metadata. It does not store planned-route geometry, POIs, raw provider responses,
+  or GPS samples.
 
 See [map provider deployment](map-provider-deployment.md) for server configuration,
 shared limiter state, the 2026-10-04 development smoke/E2E validation record and the
 still-unresolved data-use/AI/persistence release checkpoint.
+
+Before releasing the Issue #79 client changes, create `walks` and
+`active_walks` in the intended CloudBase environment, configure both for
+server-only access, and deploy `cloudfunctions/walkStore` with its locked
+dependencies. `walkStore` uses `DYNAMIC_CURRENT_ENV`, requires no new
+environment variables, and uses document IDs rather than custom query indexes.
 
 The project also includes two health-check cloud functions:
 

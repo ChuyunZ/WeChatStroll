@@ -24,9 +24,16 @@
 
 ---
 
-# 2. Preferences Collection
+# 2. Preferences Collection (future proposal; not implemented by #79)
 
-The `preferences` collection stores location-based walking preferences for each user.
+The `preferences` collection below is a future personalization proposal, not an
+implemented #79 collection. Issue #79 stores only the questionnaire snapshot inside
+each `walks` record. In that snapshot, `environmentPreferences` uses the four
+user-facing questionnaire labels `公园`, `水边`, `街道`, and `商街`.
+Internal route/provider category tokens such as `park`, `water`, and
+`shoppingStreet` are not valid persisted questionnaire values.
+
+The proposed `preferences` collection stores location-based walking preferences for each user.
 
 A user may have multiple preference records associated with different locations. When recommending routes, the backend first searches for a preference within 2 km of the user's current location. If no matching preference is found, the user's most frequently used preference is used as the fallback.
 
@@ -45,8 +52,8 @@ Preferences are initially generated from questionnaire answers and may later be 
   "durationMinutes": 30,
   "crowdPreference": "medium",
   "environmentPreferences": [
-    "park",
-    "river"
+    "公园",
+    "水边"
   ],
   "routeType": "loop",
   "usageCount": 5
@@ -62,7 +69,7 @@ Preferences are initially generated from questionnaire answers and may later be 
 | `location` | object | Yes | Location associated with this walking preference | See GeoPoint |
 | `durationMinutes` | number | Yes | Preferred walking duration in minutes | `30` |
 | `crowdPreference` | string | Yes | Preferred crowd level | `"medium"` |
-| `environmentPreferences` | string[] | Yes | Preferred environment or route features | `["park", "river"]` |
+| `environmentPreferences` | string[] | Yes | Preferred environment or route features; current questionnaire snapshots use the four user-facing labels | `["公园", "水边"]` |
 | `routeType` | string | Yes | Preferred route shape/type | `"loop"` |
 | `usageCount` | number | Yes | Number of times this preference has been used for route recommendations | `5` |
 
