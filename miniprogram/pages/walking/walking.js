@@ -91,6 +91,21 @@ Page({
       activeSession = await activeWalkSessionService.reconcileActiveWalk();
       if (!activeSession) pendingResult = activeWalkSessionService.getPendingWalkResult();
     } catch (error) {
+      if (error && error.code === "WALK_ABANDONED") {
+        this._active = false;
+        this.setData({
+          loading: false,
+          error: false,
+          finishing: false,
+          ended: true
+        });
+        wx.showToast({
+          title: "本次散步因长时间未结束，已自动关闭",
+          icon: "none"
+        });
+        wx.navigateBack();
+        return;
+      }
       this.showRouteError();
       wx.showToast({
         title: error.code === "WALK_ROUTE_UNAVAILABLE" ? error.message : "暂时无法恢复散步状态，请重试",

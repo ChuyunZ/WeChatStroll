@@ -162,6 +162,31 @@ test("cloud completion failure keeps the same walk retryable with its original c
   expect(storage.pendingWalkResult.endTime).toBe(new Date(confirmedAt).toISOString());
 });
 
+test("reloading Walking after server abandonment exits cleanly instead of showing a recovery error", async () => {
+  const local = storage.activeWalkSession;
+  walkRecords.getWalk.mockResolvedValueOnce({
+    walkId: local.walkId,
+    routeId: local.routeId,
+    status: "abandoned",
+    completionStatus: "abandoned"
+  });
+
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(page._active).toBe(false);
+  expect(page.data.error).toBe(false);
+  expect(page.data.ended).toBe(true);
+  expect(startTracking).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.showToast).toHaveBeenCalledWith({
+    title: "本次散步因长时间未结束，已自动关闭",
+    icon: "none"
+  });
+  expect(wx.navigateBack).toHaveBeenCalledTimes(1);
+});
+
 test("a completion rejected as abandoned closes the stale walk without opening Feedback", async () => {
   await page.onLoad({ routeId: TEST_ROUTE.routeId });
   walkRecords.completeWalk.mockRejectedValueOnce(
