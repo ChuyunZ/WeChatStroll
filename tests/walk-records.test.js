@@ -200,3 +200,23 @@ test('final trajectory metadata is durably written back after completion', async
     trajectoryEndTimeMs: finalBoundary
   });
 });
+
+test('pending completion results require the durable walkId identity', async () => {
+  const valid = {
+    walkId: 'walk-1',
+    routeId: route.routeId,
+    route,
+    startTime: new Date(Date.now() - 1000).toISOString(),
+    endTime: new Date().toISOString(),
+    actualDurationSeconds: 1,
+    completionStatus: 'completed'
+  };
+  expect(sessions.isValidPendingWalkResult(valid)).toBe(true);
+  expect(sessions.isValidPendingWalkResult({ ...valid, walkId: '' })).toBe(false);
+  const { walkId, ...missingWalkId } = valid;
+  expect(sessions.isValidPendingWalkResult(missingWalkId)).toBe(false);
+  expect(() => sessions.savePendingWalkResult(missingWalkId)).toThrow('Invalid pending walk result.');
+  storage.pendingWalkResult = missingWalkId;
+  expect(sessions.getPendingWalkResult()).toBeNull();
+  expect(storage.pendingWalkResult).toBeUndefined();
+});

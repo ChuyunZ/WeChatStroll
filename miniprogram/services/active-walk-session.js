@@ -152,6 +152,8 @@ function isValidPendingWalkResult(result) {
     result &&
     typeof result === "object" &&
     !Array.isArray(result) &&
+    typeof result.walkId === "string" &&
+    result.walkId.trim() !== "" &&
     typeof result.routeId === "string" &&
     result.routeId.trim() !== "" &&
     isValidRouteSnapshot(result.route) &&

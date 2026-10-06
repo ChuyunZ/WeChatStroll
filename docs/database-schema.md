@@ -225,8 +225,10 @@ All read/write operations are scoped to authenticated ownership. The response is
 ## Local recovery and trajectory boundary
 
 Local activeWalkSession version 2 stores walkId, the LOCAL route snapshot,
-questionnaire, original cloud start time and tracking choice. v1/malformed sessions
-are discarded and their stale tracking is stopped; they are never treated as durable.
+questionnaire, original cloud start time and tracking choice. Pending Feedback results
+also require the same durable walkId; routeId alone is never treated as walk identity.
+v1/malformed sessions or pending results are discarded, and stale active tracking is
+stopped; they are never treated as durable.
 The 12-hour active-walk limit is enforced by `walkStore` using server time, not
 by deleting only the local session. `getActiveWalk`, `getWalk`, `startWalk`,
 and late `completeWalk` access all converge stale active records to `abandoned`.
