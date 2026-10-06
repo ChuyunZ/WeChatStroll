@@ -1,5 +1,8 @@
 const { callCloudFunction } = require('./cloud-function-client');
 
+const MIN_WALKING_DURATION_MINUTES = 15;
+const MAX_WALKING_DURATION_MINUTES = 120;
+
 // Deliberate allowlist: never send a Route Data Contract or location object.
 function preferencesSnapshot(value = {}) {
   return { durationMinutes: value.durationMinutes, routeType: value.routeType,
@@ -7,7 +10,9 @@ function preferencesSnapshot(value = {}) {
     environmentPreferences: Array.isArray(value.environmentPreferences) ? [...value.environmentPreferences] : [] };
 }
 function isValidPreferences(value) {
-  return Boolean(value && Number.isInteger(value.durationMinutes) && value.durationMinutes >= 1 && value.durationMinutes <= 720 &&
+  return Boolean(value && Number.isInteger(value.durationMinutes) &&
+    value.durationMinutes >= MIN_WALKING_DURATION_MINUTES &&
+    value.durationMinutes <= MAX_WALKING_DURATION_MINUTES &&
     ['loop', 'out_and_back', 'point_to_point'].includes(value.routeType) &&
     ['low', 'medium', 'high'].includes(value.crowdPreference) &&
     Array.isArray(value.environmentPreferences) && value.environmentPreferences.length <= 10 &&

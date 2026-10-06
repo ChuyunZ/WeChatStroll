@@ -224,6 +224,23 @@ afterEach(() => {
   delete global.wx;
 });
 
+test("direct development Route Detail initializes valid fallback questionnaire context", async () => {
+  delete page._routePreferences;
+  page.onLoad({ id: mockRoutes[0].routeId });
+  expect(page._routePreferences).toEqual({
+    durationMinutes: 30,
+    routeType: "loop",
+    crowdPreference: "medium",
+    environmentPreferences: ["公园", "水边", "街道", "商街"]
+  });
+  await page.beginWalk(mockRoutes[0], false);
+  expect(walkRecords.startWalk).toHaveBeenCalledWith({
+    routeId: mockRoutes[0].routeId,
+    preferences: page._routePreferences,
+    trajectoryEnabled: false
+  });
+});
+
 test("questionnaire context reaches Start separately from the selected route", async () => {
   const eventChannel = createEventChannel();
   page = loadRouteDetailPage({ eventChannel });

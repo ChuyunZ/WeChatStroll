@@ -21,6 +21,27 @@ test('authenticated create allowlists safe metadata; no client ownership or geom
     'trajectoryEnabled','trajectoryPartial','trajectoryEndTimeMs','schemaVersion','createdAt','updatedAt'].sort());
   expect(saved.preferences).toEqual(preferences);
 });
+test.each([1, 14, 121, 720])('rejects out-of-product duration %s', async durationMinutes => {
+  const f = fixture();
+  const response = await f.call({
+    ...start,
+    preferences: { ...preferences, durationMinutes }
+  });
+  expect(response).toMatchObject({ success: false, error: { code: 'INVALID_INPUT' } });
+  expect(f.store.documents.size).toBe(0);
+});
+test.each([15, 120])('accepts product duration boundary %s', async durationMinutes => {
+  const f = fixture();
+  const response = await f.call({
+    ...start,
+    preferences: { ...preferences, durationMinutes }
+  });
+  expect(response).toMatchObject({
+    success: true,
+    walk: { preferences: { durationMinutes } }
+  });
+});
+
 test('unauthenticated and unsupported calls fail without writing', async () => {
   const f = fixture();
   expect(await f.handler('')({ ...start, openid: 'forged' })).toMatchObject({ success: false, error: { code: 'UNAUTHENTICATED' } });

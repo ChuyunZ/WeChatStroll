@@ -11,6 +11,18 @@ const walkRecords = require("../../services/walk-records");
 
 const ACTIVE_WALK_REDIRECT_LOCK_MS = 3000;
 
+const DEV_DEFAULT_PREFERENCES = {
+  durationMinutes: 30,
+  routeType: ROUTE_TYPES.LOOP,
+  crowdPreference: "medium",
+  environmentPreferences: [
+    "公园",
+    "水边",
+    "街道",
+    "商街"
+  ]
+};
+
 Page({
   data: {
     route: null,
@@ -43,6 +55,12 @@ Page({
     this._activeWalkRedirectStartedAtMs = 0;
 
     const routeId = options.id;
+    this._routePreferences =
+      options.from === "routes"
+        ? null
+        : walkRecords.preferencesSnapshot(
+            DEV_DEFAULT_PREFERENCES
+          );
 
     // 正常从 Routes 页面进入时，
     // 真实 Route 会通过 EventChannel 传过来。

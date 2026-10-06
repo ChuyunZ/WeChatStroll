@@ -315,26 +315,24 @@ Example feedback tags:
 
 # 6. Collection Relationships
 
-The collections are connected using IDs rather than embedding complete related documents.
+The currently implemented Issue #79 ownership/lifecycle relationship is:
 
 ```text
-users._id
+authenticated OPENID
+    ↓ SHA-256 (server only)
+ownerKey
     ↓
-preferences.userId
-
-users._id
+active_walks/{ownerKey}.walkId
     ↓
-walks.userId
-
-routes._id
-    ↓
-walks.routeId
-
-walks._id
-    ↓
-feedback.walkId
-
-routes._id
-    ↓
-feedback.routeId
+walks/{walkId}
 ```
+
+`walks.routeId` is an application route identity only. It is **not** a foreign key
+to a persisted `routes` collection while planned-route persistence remains blocked
+under the Tencent data-use checkpoint.
+
+The Users, Preferences, Routes, and Feedback sections above include historical/future
+schema proposals that are not all implemented today. In particular, Issue #79 does
+not write `walks.userId`, and the blocked Routes proposal must not be treated as an
+implemented relationship. Future Feedback should reference the durable `walkId`
+without weakening the server-side ownership checks introduced by `walkStore`.

@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 const { transact } = require('./store');
 
+const MIN_WALKING_DURATION_MINUTES = 15;
+const MAX_WALKING_DURATION_MINUTES = 120;
+
 const messages = {
   UNAUTHENTICATED: 'Unable to identify the current user.',
   INVALID_ACTION: 'Unsupported walk operation.',
@@ -19,8 +22,10 @@ function id(value) {
   return value;
 }
 function preferencesOf(input) {
-  if (!input || !Number.isInteger(input.durationMinutes) || input.durationMinutes < 1 ||
-      input.durationMinutes > 720 || !['loop', 'out_and_back', 'point_to_point'].includes(input.routeType) ||
+  if (!input || !Number.isInteger(input.durationMinutes) ||
+      input.durationMinutes < MIN_WALKING_DURATION_MINUTES ||
+      input.durationMinutes > MAX_WALKING_DURATION_MINUTES ||
+      !['loop', 'out_and_back', 'point_to_point'].includes(input.routeType) ||
       !['low', 'medium', 'high'].includes(input.crowdPreference) ||
       !Array.isArray(input.environmentPreferences) || input.environmentPreferences.length > 10 ||
       !input.environmentPreferences.every(value => ['公园', '水边', '街道', '商街', 'park', 'water', 'shoppingStreet'].includes(value))) fail('INVALID_INPUT');

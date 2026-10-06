@@ -503,10 +503,10 @@ function buildGeneratedRoute({
         )
 
   return {
+    // Keep the persisted application route identity provider-neutral.
+    // Provider POI identifiers stay inside the local route snapshot only.
     routeId:
-      `generated_` +
-      `${selectedPoi.poiId || 'route'}_` +
-      `${Date.now()}`,
+      `generated_fallback_${Date.now()}`,
     editableWaypoints: [copyEditableWaypoint(selectedPoi)],
     recommendedWaypointIds: [selectedPoi.poiId],
     recommendedDurationMinutes: walkingRoute.durationMinutes,

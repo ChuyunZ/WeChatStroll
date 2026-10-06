@@ -295,8 +295,9 @@ describe('route-generation service', () => {
         })
 
       expect(route.routeId).toContain(
-        'generated_park-1_'
+        'generated_fallback_'
       )
+      expect(route.routeId).not.toContain('park-1')
 
       expect(route.title).toBe(
         '前往人民公园的散步路线'
