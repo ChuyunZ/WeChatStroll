@@ -29,7 +29,7 @@ function preferencesOf(input) {
       !['loop', 'out_and_back', 'point_to_point'].includes(input.routeType) ||
       !['low', 'medium', 'high'].includes(input.crowdPreference) ||
       !Array.isArray(input.environmentPreferences) || input.environmentPreferences.length > 10 ||
-      !input.environmentPreferences.every(value => ['公园', '水边', '街道', '商街', 'park', 'water', 'shoppingStreet'].includes(value))) fail('INVALID_INPUT');
+      !input.environmentPreferences.every(value => ['公园', '水边', '街道', '商街'].includes(value))) fail('INVALID_INPUT');
   return { durationMinutes: input.durationMinutes, routeType: input.routeType,
     crowdPreference: input.crowdPreference, environmentPreferences: [...input.environmentPreferences] };
 }

@@ -27,6 +27,19 @@ test('authenticated create allowlists safe metadata; no client ownership or geom
     'trajectoryEnabled','trajectoryPartial','trajectoryEndTimeMs','schemaVersion','createdAt','updatedAt'].sort());
   expect(saved.preferences).toEqual(preferences);
 });
+test.each(['park', 'water', 'shoppingStreet'])('rejects internal provider token %s in persisted questionnaire', async environmentPreference => {
+  const f = fixture();
+  const response = await f.call({
+    ...start,
+    preferences: {
+      ...preferences,
+      environmentPreferences: [environmentPreference]
+    }
+  });
+  expect(response).toMatchObject({ success: false, error: { code: 'INVALID_INPUT' } });
+  expect(f.store.documents.size).toBe(0);
+});
+
 test.each([1, 14, 121, 720])('rejects out-of-product duration %s', async durationMinutes => {
   const f = fixture();
   const response = await f.call({

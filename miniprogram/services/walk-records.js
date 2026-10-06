@@ -17,7 +17,7 @@ function isValidPreferences(value) {
     ['loop', 'out_and_back', 'point_to_point'].includes(value.routeType) &&
     ['low', 'medium', 'high'].includes(value.crowdPreference) &&
     Array.isArray(value.environmentPreferences) && value.environmentPreferences.length <= 10 &&
-    value.environmentPreferences.every(item => ['公园', '水边', '街道', '商街', 'park', 'water', 'shoppingStreet'].includes(item)));
+    value.environmentPreferences.every(item => ['公园', '水边', '街道', '商街'].includes(item)));
 }
 function normalizeWalk(walk) {
   if (!walk || typeof walk.walkId !== 'string' || !walk.walkId ||

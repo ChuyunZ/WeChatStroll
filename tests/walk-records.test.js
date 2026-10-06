@@ -26,6 +26,18 @@ test('malformed questionnaire geometry is rejected before any cloud request', as
     preferences: { ...preferences, environmentPreferences: [route.startPoint] }, trajectoryEnabled: false })).rejects.toThrow();
   expect(wx.cloud.callFunction).not.toHaveBeenCalled();
 });
+test.each(['park', 'water', 'shoppingStreet'])('client rejects internal provider token %s before cloud request', async environmentPreference => {
+  await expect(records.startWalk({
+    routeId: route.routeId,
+    preferences: {
+      ...preferences,
+      environmentPreferences: [environmentPreference]
+    },
+    trajectoryEnabled: false
+  })).rejects.toThrow();
+  expect(wx.cloud.callFunction).not.toHaveBeenCalled();
+});
+
 test.each([1, 14, 121, 720])('client rejects out-of-product duration %s before cloud request', async durationMinutes => {
   await expect(records.startWalk({
     routeId: route.routeId,
