@@ -96,3 +96,39 @@ test('non-conflict database failures are not retried', async () => {
   expect(transaction).toHaveBeenCalledTimes(1);
   expect(sleep).not.toHaveBeenCalled();
 });
+
+
+test('database-managed _id never leaks into lifecycle replacement writes', async () => {
+  const f = fixture();
+  f.document.get.mockResolvedValue({
+    data: {
+      _id: 'walk-1',
+      walkId: 'walk-1',
+      ownerKey: 'owner',
+      status: 'active'
+    }
+  });
+
+  await f.store.transaction(async tx => {
+    const record = await tx.get('walks/walk-1');
+    expect(record).toEqual({
+      walkId: 'walk-1',
+      ownerKey: 'owner',
+      status: 'active'
+    });
+
+    await tx.set('walks/walk-1', {
+      ...record,
+      _id: 'walk-1',
+      status: 'completed'
+    });
+  });
+
+  expect(f.document.set).toHaveBeenCalledWith({
+    data: {
+      walkId: 'walk-1',
+      ownerKey: 'owner',
+      status: 'completed'
+    }
+  });
+});

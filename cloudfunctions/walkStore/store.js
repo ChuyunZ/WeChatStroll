@@ -17,11 +17,14 @@ function createStore(db) {
           async get(path) {
             const [collection, id] = path.split('/');
             const result = await transaction.collection(collection).doc(id).get();
-            return result.data || null;
+            if (!result.data) return null;
+            const { _id, ...record } = result.data;
+            return record;
           },
           async set(path, data) {
             const [collection, id] = path.split('/');
-            await transaction.collection(collection).doc(id).set({ data });
+            const { _id, ...record } = data;
+            await transaction.collection(collection).doc(id).set({ data: record });
           }
         });
         await transaction.commit();
