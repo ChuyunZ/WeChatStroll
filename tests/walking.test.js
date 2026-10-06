@@ -1117,11 +1117,17 @@ describe("durable completion before trajectory cleanup", () => {
     await jest.advanceTimersByTimeAsync(5000);
     flushed({ trajectoryPartial: false });
     await stop;
+    await flushCloud();
     expect(storage.pendingWalkResult).toMatchObject({
       endTime: new Date(confirmedAt).toISOString(),
       actualDurationSeconds: 60,
       trajectoryEndTimeMs: confirmedAt + 5000,
       trajectoryPartial: false
+    });
+    expect(walkRecords.updateTrajectoryMetadata).toHaveBeenCalledWith({
+      walkId: "walk-test",
+      trajectoryPartial: false,
+      trajectoryEndTimeMs: confirmedAt + 5000
     });
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
