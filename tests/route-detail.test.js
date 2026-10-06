@@ -985,26 +985,37 @@ describe(
 
 
     test(
-      "Route Detail reconciles an old durable walk without discarding its route geometry",
+      "Route Detail clears a server-abandoned walk instead of resuming it",
       async () => {
+        const startTimeMs =
+          Date.now() - 13 * 60 * 60 * 1000;
+
         wx.setStorageSync("activeWalkSession", {
           version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
           status: "active",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
-          startTimeMs:
-            Date.now() - 13 * 60 * 60 * 1000,
+          startTimeMs,
           trackingEnabled: true
+        });
+        walkRecords.getWalk.mockResolvedValueOnce({
+          walkId: "walk-test",
+          routeId: GENERATED_ROUTE.routeId,
+          status: "abandoned",
+          completionStatus: "abandoned"
         });
 
         wx.navigateTo.mockClear();
 
         await page.onShow();
 
-        expect(wx.navigateTo).toHaveBeenCalled();
-        expect(
-          wx.getStorageSync("activeWalkSession")
-        ).toBeTruthy();
+        expect(wx.navigateTo).not.toHaveBeenCalled();
+        expect(wx.getStorageSync("activeWalkSession")).toBeUndefined();
+        expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+        expect(wx.showToast).toHaveBeenCalledWith({
+          title: "上一次散步因长时间未结束，已自动关闭",
+          icon: "none"
+        });
       }
     );
 

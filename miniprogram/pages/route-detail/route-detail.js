@@ -139,7 +139,13 @@ Page({
     try {
       activeSession = await activeWalkSessionService.reconcileActiveWalk(this._confirmedRoute);
     } catch (error) {
-      wx.showToast({ title: error.code === "WALK_ROUTE_UNAVAILABLE" ? error.message : "暂时无法恢复散步状态，请重试", icon: "none" });
+      wx.showToast({
+        title:
+          error.code === "WALK_ROUTE_UNAVAILABLE" || error.code === "WALK_ABANDONED"
+            ? error.message
+            : "暂时无法恢复散步状态，请重试",
+        icon: "none"
+      });
       return;
     }
 
@@ -583,7 +589,13 @@ Page({
     let sessionResult;
 
     try {
-      const existing = await activeWalkSessionService.reconcileActiveWalk(route);
+      let existing = null;
+      try {
+        existing = await activeWalkSessionService.reconcileActiveWalk(route);
+      } catch (error) {
+        if (error.code !== "WALK_ABANDONED") throw error;
+        wx.showToast({ title: error.message, icon: "none" });
+      }
       if (existing) sessionResult = { session: existing, created: false };
       else {
         const walk = await walkRecords.startWalk({ routeId: route.routeId,

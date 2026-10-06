@@ -1,7 +1,6 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
 const ACTIVE_WALK_SESSION_VERSION = 2;
-const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
 const { isValidPreferences } = require("./walk-records");
 const { isValidGeoPoint } = require("../utils/geo");
 
@@ -62,18 +61,6 @@ function isCompletedActiveWalkSession(session) {
     pendingResult.routeId === session.routeId &&
     Number.isFinite(pendingStartTimeMs) &&
     pendingStartTimeMs === session.startTimeMs
-  );
-}
-
-function isStaleActiveWalkSession(
-  session,
-  nowMs = Date.now()
-) {
-  return (
-    Number.isFinite(nowMs) &&
-    nowMs >= session.startTimeMs &&
-    nowMs - session.startTimeMs >=
-      MAX_ACTIVE_WALK_AGE_MS
   );
 }
 
@@ -230,6 +217,13 @@ async function reconcileActiveWalk(route = null) {
       return local;
     }
     require("./walking-tracker").stopTrackingForSession(local);
+    if (cloud.status === "abandoned") {
+      clearActiveWalkSession(local.routeId, local.walkId);
+      throw Object.assign(
+        new Error("上一次散步因长时间未结束，已自动关闭"),
+        { code: "WALK_ABANDONED" }
+      );
+    }
     try { savePendingWalkResult({ ...cloud, route: local.route }); }
     finally { clearActiveWalkSession(local.routeId, local.walkId); }
     return null;
@@ -244,9 +238,7 @@ module.exports = {
   ACTIVE_WALK_STORAGE_KEY,
   PENDING_WALK_RESULT_STORAGE_KEY,
   ACTIVE_WALK_SESSION_VERSION,
-  MAX_ACTIVE_WALK_AGE_MS,
   isValidActiveWalkSession,
-  isStaleActiveWalkSession,
   isValidPendingWalkResult,
   getActiveWalkSession,
   createActiveWalkSession,

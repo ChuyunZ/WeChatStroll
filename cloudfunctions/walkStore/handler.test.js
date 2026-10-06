@@ -5,8 +5,14 @@ const start = { action: 'startWalk', routeId: 'route-1', preferences, trajectory
 const now = Date.parse('2026-10-06T10:00:00Z');
 function fixture() {
   const store = createTestStore();
-  const handler = user => createWalkHandler({ store, getOpenId: () => user, now: () => now, sleep: async () => {} });
-  return { store, handler, call: handler('user-a') };
+  let currentNow = now;
+  const handler = user => createWalkHandler({ store, getOpenId: () => user, now: () => currentNow, sleep: async () => {} });
+  return {
+    store,
+    handler,
+    call: handler('user-a'),
+    setNow(value) { currentNow = value; }
+  };
 }
 test('authenticated create allowlists safe metadata; no client ownership or geometry is stored', async () => {
   const f = fixture();
@@ -63,6 +69,58 @@ test('commit acknowledgement loss is retryable without another walk', async () =
   expect((await f.call(start)).success).toBe(true);
   expect([...f.store.documents.keys()].filter(key => key.startsWith('walks/'))).toHaveLength(1);
 });
+test('getActiveWalk abandons a 12-hour walk, releases its lock, and does not fabricate duration', async () => {
+  const f = fixture();
+  const first = (await f.call(start)).walk;
+  f.setNow(now + 12 * 60 * 60 * 1000);
+  expect((await f.call({ action: 'getActiveWalk' })).walk).toBeNull();
+  const abandoned = (await f.call({ action: 'getWalk', walkId: first.walkId })).walk;
+  expect(abandoned).toMatchObject({
+    walkId: first.walkId,
+    status: 'abandoned',
+    completionStatus: 'abandoned',
+    endTime: null,
+    actualDurationSeconds: null,
+    trajectoryPartial: true,
+    trajectoryEndTimeMs: null
+  });
+  const lockKey = [...f.store.documents.keys()].find(key => key.startsWith('active_walks/'));
+  expect(f.store.documents.get(lockKey)).toEqual({ walkId: null });
+});
+test('startWalk atomically abandons a stale lock and creates a replacement walk', async () => {
+  const f = fixture();
+  const first = (await f.call(start)).walk;
+  f.setNow(now + 12 * 60 * 60 * 1000 + 1);
+  const replacement = (await f.call({ ...start, routeId: 'route-2' })).walk;
+  expect(replacement).toMatchObject({ status: 'active', routeId: 'route-2' });
+  expect(replacement.walkId).not.toBe(first.walkId);
+  expect((await f.call({ action: 'getWalk', walkId: first.walkId })).walk)
+    .toMatchObject({ status: 'abandoned', completionStatus: 'abandoned' });
+  expect((await f.call({ action: 'getActiveWalk' })).walk.walkId).toBe(replacement.walkId);
+});
+test('completion after the 12-hour limit returns abandoned instead of inventing an end time', async () => {
+  const f = fixture();
+  const first = (await f.call(start)).walk;
+  f.setNow(now + 12 * 60 * 60 * 1000);
+  const response = await f.call({
+    action: 'completeWalk',
+    walkId: first.walkId,
+    completionStatus: 'completed',
+    endTimeMs: now + 12 * 60 * 60 * 1000,
+    trajectoryPartial: false
+  });
+  expect(response).toMatchObject({
+    success: true,
+    walk: {
+      status: 'abandoned',
+      completionStatus: 'abandoned',
+      endTime: null,
+      actualDurationSeconds: null,
+      trajectoryEndTimeMs: null
+    }
+  });
+});
+
 test('users have independent locks and cannot read or finalize another user record', async () => {
   const f = fixture();
   expect((await f.call({ action: 'getActiveWalk' })).walk).toBeNull();

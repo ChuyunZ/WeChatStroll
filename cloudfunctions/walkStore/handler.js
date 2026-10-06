@@ -3,6 +3,7 @@ const { transact } = require('./store');
 
 const MIN_WALKING_DURATION_MINUTES = 15;
 const MAX_WALKING_DURATION_MINUTES = 120;
+const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
 
 const messages = {
   UNAUTHENTICATED: 'Unable to identify the current user.',
@@ -37,6 +38,34 @@ function publicWalk(walk) {
   const { ownerKey, _id, ...record } = walk;
   return record;
 }
+function isExpiredActiveWalk(walk, nowMs) {
+  const startMs = walk && Date.parse(walk.startTime);
+  return Boolean(
+    walk &&
+    walk.status === 'active' &&
+    Number.isFinite(startMs) &&
+    Number.isFinite(nowMs) &&
+    nowMs >= startMs &&
+    nowMs - startMs >= MAX_ACTIVE_WALK_AGE_MS
+  );
+}
+async function abandonIfExpired(tx, walk, lockPath, nowMs, knownLock) {
+  if (!isExpiredActiveWalk(walk, nowMs)) return walk;
+  const abandoned = {
+    ...walk,
+    status: 'abandoned',
+    endTime: null,
+    actualDurationSeconds: null,
+    completionStatus: 'abandoned',
+    trajectoryPartial: Boolean(walk.trajectoryEnabled || walk.trajectoryPartial),
+    trajectoryEndTimeMs: null,
+    updatedAt: new Date(nowMs).toISOString()
+  };
+  await tx.set(`walks/${id(walk.walkId)}`, abandoned);
+  const lock = knownLock === undefined ? await tx.get(lockPath) : knownLock;
+  if (lock && lock.walkId === walk.walkId) await tx.set(lockPath, { walkId: null });
+  return abandoned;
+}
 function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => crypto.randomBytes(16).toString('hex'), sleep }) {
   return async (event = {}) => {
     try {
@@ -50,16 +79,22 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
         return walk;
       };
       const walk = await transact(store, async tx => {
+        const nowMs = now();
         if (event.action === 'startWalk' || event.action === 'getActiveWalk') {
           const lock = await tx.get(lockPath);
           if (lock && lock.walkId) {
-            const active = owned(await tx.get(`walks/${id(lock.walkId)}`));
-            if (active.status === 'active') return active;
+            const existing = owned(await tx.get(`walks/${id(lock.walkId)}`));
+            const current = await abandonIfExpired(tx, existing, lockPath, nowMs, lock);
+            if (current.status === 'active') return current;
+            if (event.action === 'getActiveWalk') {
+              await tx.set(lockPath, { walkId: null });
+              return null;
+            }
           }
           if (event.action === 'getActiveWalk') return null;
           const preferences = preferencesOf(event.preferences);
           if (typeof event.trajectoryEnabled !== 'boolean') fail('INVALID_INPUT');
-          const time = new Date(now()).toISOString();
+          const time = new Date(nowMs).toISOString();
           const record = { walkId: newId(), ownerKey, status: 'active', routeId: id(event.routeId), preferences,
             requestedDurationMinutes: preferences.durationMinutes, routeType: preferences.routeType,
             startTime: time, endTime: null, actualDurationSeconds: 0, completionStatus: null,
@@ -70,8 +105,9 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
           return record;
         }
         const path = `walks/${id(event.walkId)}`;
-        const record = owned(await tx.get(path));
-        if (event.action === 'getWalk') return record;
+        let record = owned(await tx.get(path));
+        record = await abandonIfExpired(tx, record, lockPath, nowMs);
+        if (event.action === 'getWalk' || record.status === 'abandoned') return record;
         if (!['completed', 'ended_early'].includes(event.completionStatus)) fail('INVALID_INPUT');
         if (record.status !== 'active') {
           if (record.status !== event.completionStatus) fail('WALK_STATE_CONFLICT');
@@ -79,12 +115,12 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
         }
         const startMs = Date.parse(record.startTime);
         const endMs = event.endTimeMs;
-        if (!Number.isSafeInteger(endMs) || endMs < startMs || endMs > now() + 60000 ||
+        if (!Number.isSafeInteger(endMs) || endMs < startMs || endMs > nowMs + 60000 ||
             typeof event.trajectoryPartial !== 'boolean') fail('INVALID_INPUT');
         const terminal = { ...record, status: event.completionStatus, completionStatus: event.completionStatus,
           endTime: new Date(endMs).toISOString(), actualDurationSeconds: Math.floor((endMs - startMs) / 1000),
           trajectoryPartial: record.trajectoryEnabled && event.trajectoryPartial,
-          trajectoryEndTimeMs: endMs, updatedAt: new Date(now()).toISOString() };
+          trajectoryEndTimeMs: endMs, updatedAt: new Date(nowMs).toISOString() };
         const lock = await tx.get(lockPath);
         await tx.set(path, terminal);
         if (lock && lock.walkId === record.walkId) await tx.set(lockPath, { walkId: null });

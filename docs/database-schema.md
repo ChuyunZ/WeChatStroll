@@ -176,17 +176,17 @@ returned to clients and raw OpenID is never used as a document ID.
 | --- | --- |
 | _id / walkId | Random opaque 128-bit identifier of the same lifecycle document |
 | ownerKey | Server-derived user hash used for ownership checks |
-| status | active, completed, or ended_early |
+| status | active, completed, ended_early, or abandoned |
 | routeId | Application route identity; not a reference to a persisted Routes snapshot |
 | preferences | Allowlisted questionnaire: durationMinutes, routeType, crowdPreference, environmentPreferences |
 | requestedDurationMinutes / routeType | Copied from the questionnaire, not provider estimates |
 | startTime | Server-generated ISO timestamp |
-| endTime | Null while active; client's logical confirmation, validated against start/server time |
-| actualDurationSeconds | Zero while active; server-computed floor of (end - start) in seconds |
-| completionStatus | Null while active; terminal status after completion |
+| endTime | Null while active or abandoned; user-confirmed timestamp for completed / ended_early |
+| actualDurationSeconds | Zero while active; server-computed for completed / ended_early; null when abandoned because the real end is unknown |
+| completionStatus | Null while active; completed / ended_early after user completion; abandoned after stale-session cleanup |
 | trajectoryEnabled | Explicit consent choice captured at start |
 | trajectoryPartial | Conservative quality flag; true for opted-in walks pending trajectory cleanup |
-| trajectoryEndTimeMs | Null while active; confirmation boundary at durable completion |
+| trajectoryEndTimeMs | Null while active or abandoned; confirmation/query boundary for completed / ended_early |
 | schemaVersion | 1 |
 | createdAt / updatedAt | Server-generated ISO timestamps |
 
@@ -198,10 +198,14 @@ continues to provide a deterministic transaction fence. There is no query-then-a
 race and no dependency on a process-local mutex. Explicit transactions retry only
 recognized conflicts, at most four attempts with bounded backoff.
 
-Only **active -> completed** and **active -> ended_early** are allowed. Repeating
-the same terminal status returns the original record without changing its time;
-a different terminal status is rejected. Database failures return normalized errors.
-Neither navigation nor Track Cloud failure can reactivate a terminal walk.
+Allowed terminal transitions are **active -> completed**, **active -> ended_early**,
+and server-driven **active -> abandoned** after 12 hours. `abandoned` means the
+user never supplied a trustworthy Finish / End Early boundary: `endTime`,
+`actualDurationSeconds`, and `trajectoryEndTimeMs` therefore remain null instead
+of fabricating a 12-hour walk. Repeating the same user terminal status returns the
+original record without changing its time; a different terminal status is rejected.
+Database failures return normalized errors. Navigation and Track Cloud failures
+cannot reactivate any terminal walk.
 
 The four actions are startWalk, getActiveWalk, getWalk and completeWalk.
 All read/write operations are scoped to authenticated ownership. The response is
@@ -213,12 +217,16 @@ All read/write operations are scoped to authenticated ownership. The response is
 Local activeWalkSession version 2 stores walkId, the LOCAL route snapshot,
 questionnaire, original cloud start time and tracking choice. v1/malformed sessions
 are discarded and their stale tracking is stopped; they are never treated as durable.
-Valid v2 route geometry is retained even when old so cloud reconciliation can still
-restore or finish that lifecycle. Track Cloud retains its independent 12-hour expiry.
+The 12-hour active-walk limit is enforced by `walkStore` using server time, not
+by deleting only the local session. `getActiveWalk`, `getWalk`, `startWalk`,
+and late `completeWalk` access all converge stale active records to `abandoned`.
+`startWalk` may abandon an expired lock and create its replacement atomically in the
+same transaction. Track Cloud keeps its independent 12-hour tracking expiry.
 
-Before resuming, the client checks the specific cloud walk. Cloud terminal state
+Before resuming, the client checks the specific cloud walk. completed / ended_early
 stops stale tracking, clears the local active lock and reconstructs the local pending
-Feedback result when the route is available. Missing local geometry plus a cloud
+Feedback result when the route is available. abandoned stops stale tracking and
+clears the local lock but deliberately does **not** create a Feedback payload. Missing local geometry plus a cloud
 active walk blocks a second walk. The current route can restore it only if its ID
 matches and map geometry is available; cloud reconstruction is not implemented.
 
@@ -249,7 +257,8 @@ geometry remains exclusively in Tencent Track Cloud; no segment cache is introdu
 3. Deploy cloudfunctions/walkStore with its locked dependencies, then release the
    client changes together. It uses DYNAMIC_CURRENT_ENV and needs no new variables.
 4. On a test account, verify Start/retry, concurrent Start, app recreation, Finish/End
-   Early, offline retry, missing local route and Feedback navigation failure.
+   Early, 12-hour abandonment/replacement, offline retry, missing local route and
+   Feedback navigation failure.
 
 These are future operator steps only. This implementation does not deploy functions,
 change console permissions/environment variables or mutate live documents. It does

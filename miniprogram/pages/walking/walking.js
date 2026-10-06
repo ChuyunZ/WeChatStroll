@@ -735,6 +735,20 @@ Page({
       terminal = await walkRecords.completeWalk(request);
     } catch (error) {
       this._finishing = false;
+      if (error && error.code === "WALK_ABANDONED") {
+        const session = activeWalkSessionService.getActiveWalkSession();
+        if (session && session.walkId === this._walkId) {
+          walkingTracker.stopTrackingForSession(session);
+          activeWalkSessionService.clearActiveWalkSession(session.routeId, session.walkId);
+        }
+        this._active = false;
+        this.stopTimer();
+        this.disableLeaveProtection();
+        this.setData({ finishing: false, ended: true });
+        wx.showToast({ title: "本次散步因长时间未结束，已自动关闭", icon: "none" });
+        wx.navigateBack();
+        return;
+      }
       wx.showToast({ title: "暂时无法结束散步，请重试", icon: "none" });
       return;
     }

@@ -63,6 +63,30 @@ test('valid-looking response with wrong identity or completion state is rejected
   await expect(records.getWalk('different')).rejects.toThrow();
   await expect(records.completeWalk({ walkId: walk.walkId, completionStatus: 'completed' })).rejects.toThrow();
 });
+test('client accepts abandoned lifecycle reads and maps stale completion to WALK_ABANDONED', async () => {
+  const walk = await start();
+  const abandoned = {
+    ...walk,
+    status: 'abandoned',
+    completionStatus: 'abandoned',
+    endTime: null,
+    actualDurationSeconds: null,
+    trajectoryPartial: true,
+    trajectoryEndTimeMs: null
+  };
+  wx.cloud.callFunction.mockResolvedValue({ result: { success: true, walk: abandoned } });
+  await expect(records.getWalk(walk.walkId)).resolves.toMatchObject({
+    walkId: walk.walkId,
+    status: 'abandoned'
+  });
+  await expect(records.completeWalk({
+    walkId: walk.walkId,
+    completionStatus: 'completed',
+    endTimeMs: Date.now(),
+    trajectoryPartial: true
+  })).rejects.toMatchObject({ code: 'WALK_ABANDONED' });
+});
+
 test('v2 session requires durable identity; v1 never becomes durable implicitly', async () => {
   expect(() => sessions.createActiveWalkSession(route)).toThrow();
   storage.activeWalkSession = { version: 1, status: 'active', routeId: route.routeId, route, startTimeMs: Date.now() };
@@ -94,6 +118,17 @@ test.each(['completed', 'ended_early'])('cloud %s clears stale active session an
   expect(storage.pendingWalkResult).toMatchObject({ walkId: walk.walkId, completionStatus, route });
   expect(tracker.stopTrackingForSession).toHaveBeenCalledWith(local);
 });
+test('cloud abandonment clears local tracking without creating a Feedback payload', async () => {
+  const walk = await start();
+  const local = sessions.restoreCloudWalk(walk, route);
+  const saved = store.documents.get(`walks/${walk.walkId}`);
+  saved.startTime = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString();
+  await expect(sessions.reconcileActiveWalk()).rejects.toMatchObject({ code: 'WALK_ABANDONED' });
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(tracker.stopTrackingForSession).toHaveBeenCalledWith(local);
+});
+
 test('missing local geometry blocks another route, matching local route can restore cloud active', async () => {
   const walk = await start();
   await expect(sessions.reconcileActiveWalk()).rejects.toMatchObject({ code: 'WALK_ROUTE_UNAVAILABLE' });

@@ -1,4 +1,5 @@
 const { callCloudFunction } = require('./cloud-function-client');
+const { createCodedError } = require('../utils/errors');
 
 const MIN_WALKING_DURATION_MINUTES = 15;
 const MAX_WALKING_DURATION_MINUTES = 120;
@@ -21,11 +22,14 @@ function isValidPreferences(value) {
 function normalizeWalk(walk) {
   if (!walk || typeof walk.walkId !== 'string' || !walk.walkId ||
       typeof walk.routeId !== 'string' || !walk.routeId || walk.schemaVersion !== 1 ||
-      !['active', 'completed', 'ended_early'].includes(walk.status) ||
+      !['active', 'completed', 'ended_early', 'abandoned'].includes(walk.status) ||
       !(Date.parse(walk.startTime) > 0) || typeof walk.trajectoryEnabled !== 'boolean' ||
       !isValidPreferences(walk.preferences) || typeof walk.trajectoryPartial !== 'boolean' ||
-      (walk.status === 'active' && (walk.endTime !== null || walk.completionStatus !== null)) ||
-      (walk.status !== 'active' && (walk.completionStatus !== walk.status ||
+      (walk.status === 'active' && (walk.endTime !== null || walk.completionStatus !== null ||
+        walk.actualDurationSeconds !== 0 || walk.trajectoryEndTimeMs !== null)) ||
+      (walk.status === 'abandoned' && (walk.completionStatus !== 'abandoned' ||
+        walk.endTime !== null || walk.actualDurationSeconds !== null || walk.trajectoryEndTimeMs !== null)) ||
+      (['completed', 'ended_early'].includes(walk.status) && (walk.completionStatus !== walk.status ||
         !Number.isFinite(Date.parse(walk.endTime)) || Date.parse(walk.endTime) < Date.parse(walk.startTime) ||
         !Number.isInteger(walk.actualDurationSeconds) || walk.actualDurationSeconds < 0 ||
         walk.actualDurationSeconds !== Math.floor((Date.parse(walk.endTime) - Date.parse(walk.startTime)) / 1000) ||
@@ -42,7 +46,12 @@ async function request(action, fields = {}, nullable = false) {
   const walk = normalizeWalk(result.walk);
   if (fields.walkId && fields.walkId !== walk.walkId) throw new Error('Mismatched walk response.');
   if (['startWalk', 'getActiveWalk'].includes(action) && walk.status !== 'active') throw new Error('Invalid active walk.');
-  if (action === 'completeWalk' && walk.status !== fields.completionStatus) throw new Error('Invalid completion response.');
+  if (action === 'completeWalk' && walk.status !== fields.completionStatus) {
+    if (walk.status === 'abandoned') {
+      throw createCodedError('WALK_ABANDONED', 'Walk was automatically closed after remaining active too long.');
+    }
+    throw new Error('Invalid completion response.');
+  }
   return walk;
 }
 module.exports = {

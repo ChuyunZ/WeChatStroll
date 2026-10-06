@@ -162,6 +162,27 @@ test("cloud completion failure keeps the same walk retryable with its original c
   expect(storage.pendingWalkResult.endTime).toBe(new Date(confirmedAt).toISOString());
 });
 
+test("a completion rejected as abandoned closes the stale walk without opening Feedback", async () => {
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+  walkRecords.completeWalk.mockRejectedValueOnce(
+    Object.assign(new Error("stale walk"), { code: "WALK_ABANDONED" })
+  );
+
+  await page.finishWalk();
+
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(page._active).toBe(false);
+  expect(page.data.ended).toBe(true);
+  expect(finalizeTracking).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.showToast).toHaveBeenCalledWith({
+    title: "本次散步因长时间未结束，已自动关闭",
+    icon: "none"
+  });
+  expect(wx.navigateBack).toHaveBeenCalledTimes(1);
+});
+
 test("a page reload retries a saved completion request with the same state and time", async () => {
   const confirmedAt = Date.now();
   storage.activeWalkSession.completionRequest = { walkId: "walk-test", completionStatus: "ended_early", endTimeMs: confirmedAt, trajectoryPartial: false };
