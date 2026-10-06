@@ -82,7 +82,14 @@ Preferences are initially generated from questionnaire answers and may later be 
 
 ---
 
-# 3. Routes Collection
+# 3. Routes Collection (historical proposal; persistence blocked)
+
+**This section is not authoritative permission to persist planned routes.** The examples
+below describe an earlier proposal, not an implemented/approved CloudBase collection.
+Tencent WebService persistence and AI-use remain blocked pending written confirmation
+under #94. See [data policy](route-data-contract.md) and
+[deployment checkpoint](map-provider-deployment.md#data-use-and-deployment-checkpoint).
+Issue #79 does not write this collection or planned-route/POI data.
 
 The route structure mainly follows `docs/route-data-contract.md`.
 
@@ -158,63 +165,95 @@ The route structure mainly follows `docs/route-data-contract.md`.
 
 ---
 
-# 4. Walks Collection
+# 4. Walk lifecycle collections (Issue #79, schema version 1)
 
-## Example Active Walk Document
+The walkStore Cloud Function owns **walks** and **active_walks**. Authentication
+comes only from cloud.getWXContext().OPENID; no user provisioning is required.
+The owner key is the SHA-256 hex digest of that authenticated OpenID. It is not
+returned to clients and raw OpenID is never used as a document ID.
 
-```json
-{
-  "_id": "walk_001",
-  "userId": "user_1837",
-  "routeId": "route_001",
-  "durationMinutes": 0,
-  "distanceMeters": 0,
-  "completed": false,
-  "startTime": "2026-08-13T14:30:00+08:00",
-  "endTime": null
-}
-```
+| Walk field | Stored value |
+| --- | --- |
+| _id / walkId | Random opaque 128-bit identifier of the same lifecycle document |
+| ownerKey | Server-derived user hash used for ownership checks |
+| status | active, completed, or ended_early |
+| routeId | Application route identity; not a reference to a persisted Routes snapshot |
+| preferences | Allowlisted questionnaire: durationMinutes, routeType, crowdPreference, environmentPreferences |
+| requestedDurationMinutes / routeType | Copied from the questionnaire, not provider estimates |
+| startTime | Server-generated ISO timestamp |
+| endTime | Null while active; client's logical confirmation, validated against start/server time |
+| actualDurationSeconds | Zero while active; server-computed floor of (end - start) in seconds |
+| completionStatus | Null while active; terminal status after completion |
+| trajectoryEnabled | Explicit consent choice captured at start |
+| trajectoryPartial | Conservative quality flag; true for opted-in walks pending trajectory cleanup |
+| trajectoryEndTimeMs | Null while active; confirmation boundary at durable completion |
+| schemaVersion | 1 |
+| createdAt / updatedAt | Server-generated ISO timestamps |
 
-## Example Completed Walk Document
+A deterministic active_walks/{ownerKey} document holds { walkId }.
+Start transactionally reads that lock, returns its existing active walk, or creates
+a walk and sets the lock atomically. Completion checks ownership, updates the same
+walk, and clears only its matching lock to { walkId: null }. This tombstone
+continues to provide a deterministic transaction fence. There is no query-then-add
+race and no dependency on a process-local mutex. Explicit transactions retry only
+recognized conflicts, at most four attempts with bounded backoff.
 
-```json
-{
-  "_id": "walk_001",
-  "userId": "user_1837",
-  "routeId": "route_001",
-  "durationMinutes": 32,
-  "distanceMeters": 2540,
-  "completed": true,
-  "startTime": "2026-08-13T14:30:00+08:00",
-  "endTime": "2026-08-13T15:02:00+08:00"
-}
-```
+Only **active -> completed** and **active -> ended_early** are allowed. Repeating
+the same terminal status returns the original record without changing its time;
+a different terminal status is rejected. Database failures return normalized errors.
+Neither navigation nor Track Cloud failure can reactivate a terminal walk.
 
-## Fields
+The four actions are startWalk, getActiveWalk, getWalk and completeWalk.
+All read/write operations are scoped to authenticated ownership. The response is
+{ success: true, walk } (null only for no active walk), or
+{ success: false, error: { code, message } }.
 
-| Field | Type | Required | Description | Example |
-| --- | --- | ---: | --- | --- |
-| `_id` | string | Yes | Unique identifier for the walk | `"walk_001"` |
-| `userId` | string | Yes | `_id` of the user who owns the walk | `"user_1837"` |
-| `routeId` | string | Yes | `_id` of the route used for the walk | `"route_001"` |
-| `durationMinutes` | number | Yes | Actual duration of the walk in minutes | `32` |
-| `distanceMeters` | number | Yes | Actual distance walked in meters | `2540` |
-| `completed` | boolean | Yes | Whether the walk has been completed | `true` |
-| `startTime` | string | Yes | Time the walk started in ISO 8601 format | `"2026-08-13T14:30:00+08:00"` |
-| `endTime` | string \| null | Yes | Time the walk ended. `null` while the walk is still active | `"2026-08-13T15:02:00+08:00"` |
+## Local recovery and trajectory boundary
 
-A newly created walk should use:
+Local activeWalkSession version 2 stores walkId, the LOCAL route snapshot,
+questionnaire, original cloud start time and tracking choice. v1/malformed sessions
+are discarded and their stale tracking is stopped; they are never treated as durable.
+Valid v2 route geometry is retained even when old so cloud reconciliation can still
+restore or finish that lifecycle. Track Cloud retains its independent 12-hour expiry.
 
-```json
-{
-  "durationMinutes": 0,
-  "distanceMeters": 0,
-  "completed": false,
-  "endTime": null
-}
-```
+Before resuming, the client checks the specific cloud walk. Cloud terminal state
+stops stale tracking, clears the local active lock and reconstructs the local pending
+Feedback result when the route is available. Missing local geometry plus a cloud
+active walk blocks a second walk. The current route can restore it only if its ID
+matches and map geometry is available; cloud reconstruction is not implemented.
 
-When the walk is finished, the backend updates the duration, distance, completion status, and end time.
+The client saves its completion intent (state and confirmation time) with the local
+active session before requesting completion. Database failure leaves it retryable.
+After cloud success the local pending result is saved, the active session is cleared,
+and the existing Track Cloud final flush runs. Local quality and trajectory query
+boundary are then updated without changing the logical end time. The cloud record
+remains conservative: this issue does not write back post-flush quality; consumers
+must not interpret its partial flag or an empty trace query as proof of no trajectory.
+Feedback navigation failure retains the terminal result for later recovery. Issue #80
+Feedback authoring remains out of scope.
+
+## Data excluded from CloudBase
+
+No full route, polyline, POI records/IDs, selectedWaypointIds, providerMeta, raw provider
+response, walking segments, planned coordinates or GPS samples are uploaded by this
+flow. Questionnaire data is user input. The existing complete route snapshot stays
+local for map rendering, subject to the existing data-policy checkpoint. Actual GPS
+geometry remains exclusively in Tencent Track Cloud; no segment cache is introduced.
+
+## Manual rollout later (not performed by this change)
+
+1. Create walks and active_walks in the intended CloudBase environment.
+2. Configure these collections for server-only access (deny direct Mini Program reads
+   and writes); ownership enforcement is in walkStore. No custom query index is
+   required: operations use document IDs.
+3. Deploy cloudfunctions/walkStore with its locked dependencies, then release the
+   client changes together. It uses DYNAMIC_CURRENT_ENV and needs no new variables.
+4. On a test account, verify Start/retry, concurrent Start, app recreation, Finish/End
+   Early, offline retry, missing local route and Feedback navigation failure.
+
+These are future operator steps only. This implementation does not deploy functions,
+change console permissions/environment variables or mutate live documents. It does
+not establish Tencent planned-route persistence approval.
 
 ---
 

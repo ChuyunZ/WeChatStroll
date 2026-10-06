@@ -1,3 +1,6 @@
+const { mockWalkRecords } = require("./helpers/walk-records");
+let walkRecords;
+async function flushCloud() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 const { mockRoutes } = require("../miniprogram/data/mock-routes");
 
 const TEST_ROUTE = mockRoutes[0];
@@ -27,7 +30,9 @@ function loadWalkingPage({ eventChannel = null } = {}) {
   jest.resetModules();
 
   pageDefinition = null;
-  storage = {};
+  storage = { activeWalkSession: { version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] }, status: "active", routeId: TEST_ROUTE.routeId, route: TEST_ROUTE, startTimeMs: Date.now(), trackingEnabled: false } };
+  walkRecords = mockWalkRecords(() => storage);
+  jest.doMock("../miniprogram/services/walk-records", () => walkRecords);
   getCurrentLocation = jest.fn().mockResolvedValue({
     latitude: 31.2304,
     longitude: 121.4737
@@ -40,7 +45,7 @@ function loadWalkingPage({ eventChannel = null } = {}) {
 
     return {
       session: {
-        version: 1,
+        version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
         status: "active",
         routeId: args.routeId,
         startTimeMs: args.startTimeMs
@@ -141,15 +146,51 @@ afterEach(() => {
   delete global.wx;
 });
 
+test("cloud completion failure keeps the same walk retryable with its original confirmation", async () => {
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+  const confirmedAt = Date.now();
+  walkRecords.completeWalk.mockRejectedValueOnce(new Error("database unavailable"));
+  await page.finishWalk();
+  expect(page._active).toBe(true);
+  expect(storage.activeWalkSession.walkId).toBe("walk-test");
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(finalizeTracking).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  jest.setSystemTime(confirmedAt + 3000);
+  await page.finishWalk();
+  expect(walkRecords.completeWalk).toHaveBeenLastCalledWith(expect.objectContaining({ walkId: "walk-test", endTimeMs: confirmedAt }));
+  expect(storage.pendingWalkResult.endTime).toBe(new Date(confirmedAt).toISOString());
+});
+
+test("a page reload retries a saved completion request with the same state and time", async () => {
+  const confirmedAt = Date.now();
+  storage.activeWalkSession.completionRequest = { walkId: "walk-test", completionStatus: "ended_early", endTimeMs: confirmedAt, trajectoryPartial: false };
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+  jest.setSystemTime(confirmedAt + 1000);
+  await page.finishWalk();
+  expect(storage.pendingWalkResult).toMatchObject({ walkId: "walk-test", completionStatus: "ended_early", endTime: new Date(confirmedAt).toISOString() });
+});
+
+test("opening Walking without a durable session cannot create a local-only walk", async () => {
+  delete storage.activeWalkSession;
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
+  expect(page._active).toBe(false);
+  expect(page.data.error).toBe(true);
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(walkRecords.startWalk).not.toHaveBeenCalled();
+});
+
 describe("Walking page", () => {
-  test("receives the confirmed route through EventChannel", () => {
+  test("receives the confirmed route through EventChannel", async () => {
     const eventChannel = createEventChannel();
 
     page = loadWalkingPage({
       eventChannel
     });
 
-    page.onLoad({
+    const local = storage.activeWalkSession;
+    delete storage.activeWalkSession;
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -160,7 +201,9 @@ describe("Walking page", () => {
 
     expect(page.data.loading).toBe(true);
 
-    eventChannel.handlers.walkingRoute(TEST_ROUTE);
+    storage.activeWalkSession = local;
+    await eventChannel.handlers.walkingRoute(TEST_ROUTE);
+    await flushCloud();
 
     expect(page.data.loading).toBe(false);
     expect(page.data.error).toBe(false);
@@ -175,26 +218,27 @@ describe("Walking page", () => {
     ]);
   });
 
-  test("rejects a route whose ID does not match the URL", () => {
+  test("rejects a route whose ID does not match the URL", async () => {
     const eventChannel = createEventChannel();
 
     page = loadWalkingPage({
       eventChannel
     });
 
-    page.onLoad({
+    delete storage.activeWalkSession;
+    await page.onLoad({
       routeId: "different-route"
     });
 
-    eventChannel.handlers.walkingRoute(TEST_ROUTE);
+    await eventChannel.handlers.walkingRoute(TEST_ROUTE);
 
     expect(page.data.loading).toBe(false);
     expect(page.data.error).toBe(true);
     expect(page.data.route).toBeNull();
   });
 
-  test("falls back to a mock route when opened directly during development", () => {
-    page.onLoad({
+  test("restores the durable local route when opened directly", async () => {
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -203,16 +247,16 @@ describe("Walking page", () => {
     expect(page.data.route.routeId).toBe(TEST_ROUTE.routeId);
   });
 
-  test("restores an existing active walk with its original start time", () => {
+  test("restores an existing active walk with its original start time", async () => {
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
       startTimeMs: new Date("2026-10-01T11:30:00.000Z").getTime()
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: "different-route"
     });
 
@@ -228,7 +272,7 @@ describe("Walking page", () => {
       new Date("2026-10-01T11:30:00.000Z").getTime();
 
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -236,7 +280,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -256,7 +300,7 @@ describe("Walking page", () => {
 
   test("does not start trajectory tracking when the user opted out", async () => {
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -264,7 +308,7 @@ describe("Walking page", () => {
       trackingEnabled: false
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -290,7 +334,7 @@ describe("Walking page", () => {
     );
 
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -298,7 +342,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -341,7 +385,7 @@ describe("Walking page", () => {
 
         return {
           session: {
-            version: 1,
+            version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
             status: "active",
             routeId: args.routeId,
             startTimeMs: args.startTimeMs
@@ -370,7 +414,7 @@ describe("Walking page", () => {
     });
 
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -378,7 +422,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -414,7 +458,7 @@ describe("Walking page", () => {
 
   test("hiding the Walking page does not stop background trajectory tracking", async () => {
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -422,7 +466,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -435,7 +479,7 @@ describe("Walking page", () => {
     expect(page._active).toBe(true);
   });
 
-  test("shows an error for an invalid route", () => {
+  test("shows an error for an invalid route", async () => {
     page.loadWalkingRoute({
       ...TEST_ROUTE,
       polyline: []
@@ -485,7 +529,7 @@ describe("Walking page", () => {
     warnSpy.mockRestore();
   });
 
-  test("calculates elapsed time from the original start timestamp", () => {
+  test("calculates elapsed time from the original start timestamp", async () => {
     page.loadWalkingRoute(TEST_ROUTE);
 
     jest.setSystemTime(new Date("2026-10-01T12:01:05.000Z"));
@@ -495,8 +539,8 @@ describe("Walking page", () => {
     expect(page.data.elapsedText).toBe("00:01:05");
   });
 
-  test("backgrounding and resuming does not reset elapsed walking time", () => {
-  page.onLoad({
+  test("backgrounding and resuming does not reset elapsed walking time", async () => {
+  await page.onLoad({
     routeId: TEST_ROUTE.routeId
   });
 
@@ -519,7 +563,7 @@ describe("Walking page", () => {
   expect(jest.getTimerCount()).toBe(1);
 });
 
-  test("finishing a walk stores the result and resets navigation to Feedback", () => {
+  test("finishing a walk stores the result and resets navigation to Feedback", async () => {
     wx.reLaunch.mockImplementation(options => {
       if (options.success) options.success();
     });
@@ -529,6 +573,7 @@ describe("Walking page", () => {
     jest.setSystemTime(new Date("2026-10-01T12:12:30.000Z"));
 
     page.finishWalk();
+    await flushCloud();
 
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
 
@@ -565,7 +610,7 @@ describe("Walking page", () => {
     });
 
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -573,7 +618,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -581,6 +626,7 @@ describe("Walking page", () => {
     await Promise.resolve();
 
     page.finishWalk();
+    await flushCloud();
 
     const trackingStopPromise = page._trackingStopPromise;
 
@@ -613,7 +659,7 @@ describe("Walking page", () => {
     });
 
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -621,7 +667,7 @@ describe("Walking page", () => {
       trackingEnabled: true
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -629,6 +675,7 @@ describe("Walking page", () => {
     await Promise.resolve();
 
     page.endWalkEarly();
+    await flushCloud();
 
     const trackingStopPromise = page._trackingStopPromise;
 
@@ -647,23 +694,24 @@ describe("Walking page", () => {
     );
   });
 
-  test("finishing clears the local active-walk lock", () => {
+  test("finishing clears the local active-walk lock", async () => {
     wx.reLaunch.mockImplementation(options => {
       if (options.success) options.success();
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
     expect(wx.getStorageSync("activeWalkSession")).toBeTruthy();
 
     page.finishWalk();
+    await flushCloud();
 
     expect(wx.getStorageSync("activeWalkSession")).toBeUndefined();
   });
 
-  test("confirming early end records ended_early", () => {
+  test("confirming early end records ended_early", async () => {
     wx.showModal.mockImplementation(options => {
       options.success({
         confirm: true,
@@ -677,6 +725,7 @@ describe("Walking page", () => {
 
     page.loadWalkingRoute(TEST_ROUTE);
     page.endWalkEarly();
+    await flushCloud();
 
     expect(wx.showModal).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -695,7 +744,7 @@ describe("Walking page", () => {
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
-  test("canceling early end keeps the walk active", () => {
+  test("canceling early end keeps the walk active", async () => {
     wx.showModal.mockImplementation(options => {
       options.success({
         confirm: false,
@@ -705,55 +754,54 @@ describe("Walking page", () => {
 
     page.loadWalkingRoute(TEST_ROUTE);
     page.endWalkEarly();
+    await flushCloud();
 
     expect(wx.reLaunch).not.toHaveBeenCalled();
     expect(page._active).toBe(true);
     expect(page.data.ended).toBe(false);
   });
 
-  test("duplicate finish actions do not open multiple Feedback pages", () => {
+  test("duplicate finish actions do not open multiple Feedback pages", async () => {
     page.loadWalkingRoute(TEST_ROUTE);
 
     page.finishWalk();
+    await flushCloud();
     page.finishWalk();
+    await flushCloud();
 
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
-  test("restores the active walk when opening Feedback fails", () => {
+  test("keeps the cloud walk terminal when opening Feedback fails", async () => {
   wx.reLaunch.mockImplementation(options => {
     options.fail();
   });
 
-  page.onLoad({
+  await page.onLoad({
     routeId: TEST_ROUTE.routeId
   });
 
   page.finishWalk();
+  await flushCloud();
 
-  expect(page._active).toBe(true);
-  expect(page.data.ended).toBe(false);
-  expect(page.data.finishing).toBe(false);
+  expect(page._active).toBe(false);
+  expect(page.data.ended).toBe(true);
+  expect(page.data.finishing).toBe(true);
 
   expect(wx.showToast).toHaveBeenCalledWith({
-    title: "暂时无法打开评价页面",
+    title: "散步已保存，暂时无法打开评价页面",
     icon: "none"
   });
 
   expect(wx.enableAlertBeforeUnload).toHaveBeenCalled();
-  expect(wx.getStorageSync("activeWalkSession")).toEqual(
-    expect.objectContaining({
-      routeId: TEST_ROUTE.routeId,
-      startTimeMs: new Date("2026-10-01T12:00:00.000Z").getTime()
-    })
-  );
-  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
-  expect(jest.getTimerCount()).toBe(1);
+  expect(wx.getStorageSync("activeWalkSession")).toBeUndefined();
+  expect(wx.getStorageSync("pendingWalkResult").walkId).toBe("walk-test");
+  expect(jest.getTimerCount()).toBe(0);
 });
 
-  test("restarts trajectory tracking when Feedback navigation fails", async () => {
+  test("does not restart trajectory tracking when Feedback navigation fails", async () => {
     wx.setStorageSync("activeWalkSession", {
-      version: 1,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
       status: "active",
       routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE,
@@ -765,7 +813,7 @@ describe("Walking page", () => {
       options.fail();
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -775,6 +823,7 @@ describe("Walking page", () => {
     expect(startTracking).toHaveBeenCalledTimes(1);
 
     page.finishWalk();
+    await flushCloud();
 
     const trackingStopPromise = page._trackingStopPromise;
 
@@ -785,22 +834,16 @@ describe("Walking page", () => {
     await Promise.resolve();
 
     expect(stopTracking).toHaveBeenCalledTimes(1);
-    expect(startTracking).toHaveBeenCalledTimes(2);
+    expect(startTracking).toHaveBeenCalledTimes(1);
 
-    expect(
-      wx.getStorageSync("activeWalkSession")
-    ).toEqual(
-      expect.objectContaining({
-        routeId: TEST_ROUTE.routeId,
-        trackingEnabled: true
-      })
-    );
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(storage.pendingWalkResult.walkId).toBe("walk-test");
 
-    expect(page._active).toBe(true);
-    expect(page.data.ended).toBe(false);
+    expect(page._active).toBe(false);
+    expect(page.data.ended).toBe(true);
   });
 
-  test("keeps completion authoritative when navigation rollback cannot clear the result", () => {
+  test("keeps completion authoritative when navigation rollback cannot clear the result", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     wx.removeStorageSync.mockImplementation(key => {
@@ -815,18 +858,15 @@ describe("Walking page", () => {
       options.fail();
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
     page.finishWalk();
+    await flushCloud();
 
-    expect(wx.getStorageSync("activeWalkSession")).toEqual(
-      expect.objectContaining({
-        routeId: TEST_ROUTE.routeId,
-        startTimeMs: new Date("2026-10-01T12:00:00.000Z").getTime()
-      })
-    );
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(storage.pendingWalkResult).toBeTruthy();
     expect(page._active).toBe(false);
     expect(page.data.ended).toBe(true);
     expect(page.data.finishing).toBe(true);
@@ -835,7 +875,7 @@ describe("Walking page", () => {
     warnSpy.mockRestore();
   });
 
-  test("cleans the pending result when completion fails after it was saved", () => {
+  test("retains terminal result when local active-lock cleanup fails", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     wx.removeStorageSync.mockImplementation(key => {
@@ -846,22 +886,23 @@ describe("Walking page", () => {
       delete storage[key];
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
     page.finishWalk();
+    await flushCloud();
 
-    expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
-    expect(wx.reLaunch).not.toHaveBeenCalled();
-    expect(page._active).toBe(true);
-    expect(page.data.ended).toBe(false);
-    expect(page.data.finishing).toBe(false);
+    expect(wx.getStorageSync("pendingWalkResult")).toBeTruthy();
+    expect(wx.reLaunch).toHaveBeenCalled();
+    expect(page._active).toBe(false);
+    expect(page.data.ended).toBe(true);
+    expect(page.data.finishing).toBe(true);
 
     warnSpy.mockRestore();
   });
 
-  test("custom back keeps the active route locked unless the user ends early", () => {
+  test("custom back keeps the active route locked unless the user ends early", async () => {
     wx.showModal.mockImplementation(options => {
       options.success({
         confirm: false,
@@ -869,7 +910,7 @@ describe("Walking page", () => {
       });
     });
 
-    page.onLoad({
+    await page.onLoad({
       routeId: TEST_ROUTE.routeId
     });
 
@@ -888,7 +929,7 @@ describe("Walking page", () => {
     expect(page._active).toBe(true);
   });
 
-  test("protects an active walk from accidental page exit", () => {
+  test("protects an active walk from accidental page exit", async () => {
     page.loadWalkingRoute(TEST_ROUTE);
 
     expect(wx.enableAlertBeforeUnload).toHaveBeenCalledWith({
@@ -901,7 +942,7 @@ describe("Walking page", () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
-  test("returnToRoute navigates back", () => {
+  test("returnToRoute navigates back", async () => {
     page.returnToRoute();
 
     expect(wx.navigateBack).toHaveBeenCalledTimes(1);
@@ -910,10 +951,10 @@ describe("Walking page", () => {
 describe("completion trajectory quality", () => {
   async function optedIn() {
     storage.activeWalkSession = {
-      version: 1, status: "active", routeId: TEST_ROUTE.routeId,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] }, status: "active", routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE, startTimeMs: Date.now(), trackingEnabled: true
     };
-    page.onLoad({ routeId: TEST_ROUTE.routeId });
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
     await Promise.resolve();
     await Promise.resolve();
   }
@@ -923,7 +964,9 @@ describe("completion trajectory quality", () => {
     let flushed;
     finalizeTracking.mockImplementation(() => new Promise(resolve => { flushed = resolve; }));
     const done = page.completeWalk(status);
+    await flushCloud();
     page.finishWalk();
+    await flushCloud();
     expect(finalizeTracking).toHaveBeenCalledTimes(1);
     expect(wx.reLaunch).not.toHaveBeenCalled();
     flushed({ trajectoryPartial: true });
@@ -950,7 +993,7 @@ describe("completion trajectory quality", () => {
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
-  test("navigation rollback retains partial quality on the resumed walk", async () => {
+  test("navigation failure retains partial quality on the terminal result", async () => {
     await optedIn();
     finalizeTracking.mockImplementation(async () => {
       await stopTracking();
@@ -958,19 +1001,19 @@ describe("completion trajectory quality", () => {
     });
     wx.reLaunch.mockImplementation(({ fail }) => fail());
     await page.finishWalk();
-    expect(page._active).toBe(true);
-    expect(startTracking).toHaveBeenLastCalledWith(expect.objectContaining({ trajectoryPartial: true }));
-    expect(storage.pendingWalkResult).toBeUndefined();
+    expect(page._active).toBe(false);
+    expect(startTracking).toHaveBeenCalledTimes(1);
+    expect(storage.pendingWalkResult.trajectoryPartial).toBe(true);
   });
 });
 
 test("failed navigation cannot restart tracking when the active lock cannot be restored", async () => {
   jest.spyOn(console, "warn").mockImplementation(() => {});
   storage.activeWalkSession = {
-    version: 1, status: "active", routeId: TEST_ROUTE.routeId,
+    version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] }, status: "active", routeId: TEST_ROUTE.routeId,
     route: TEST_ROUTE, startTimeMs: Date.now(), trackingEnabled: true
   };
-  page.onLoad({ routeId: TEST_ROUTE.routeId });
+  await page.onLoad({ routeId: TEST_ROUTE.routeId });
   await Promise.resolve();
   await Promise.resolve();
   wx.reLaunch.mockImplementation(({ fail }) => {
@@ -987,10 +1030,10 @@ describe("durable completion before trajectory cleanup", () => {
   let flushed;
   async function begin() {
     storage.activeWalkSession = {
-      version: 1, status: "active", routeId: TEST_ROUTE.routeId,
+      version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] }, status: "active", routeId: TEST_ROUTE.routeId,
       route: TEST_ROUTE, startTimeMs: Date.now() - 60000, trackingEnabled: true
     };
-    page.onLoad({ routeId: TEST_ROUTE.routeId });
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
     await page._trackingStartPromise;
     finalizeTracking.mockImplementation(() => new Promise(resolve => { flushed = resolve; }));
   }
@@ -1001,6 +1044,7 @@ describe("durable completion before trajectory cleanup", () => {
     wx.showModal.mockImplementation(({ success }) => success({ confirm: true }));
     if (status === "completed") page.finishWalk();
     else page.endWalkEarly();
+    await flushCloud();
     const stop = page._trackingStopPromise;
     expect(storage.pendingWalkResult).toMatchObject({
       endTime: new Date(confirmedAt).toISOString(),
@@ -1030,11 +1074,12 @@ describe("durable completion before trajectory cleanup", () => {
     await begin();
     const oldLock = JSON.parse(JSON.stringify(storage.activeWalkSession));
     page.finishWalk();
+    await flushCloud();
     const durable = JSON.parse(JSON.stringify(storage));
     if (remainingLock) durable.activeWalkSession = oldLock;
     page = loadWalkingPage();
-    Object.assign(storage, durable);
-    page.onLoad({ routeId: TEST_ROUTE.routeId });
+    storage = durable;
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
     const service = require("../miniprogram/services/active-walk-session");
     expect(service.getActiveWalkSession()).toBeNull();
     expect(page._active).toBe(false);
@@ -1052,9 +1097,11 @@ describe("durable completion before trajectory cleanup", () => {
   test("duplicate confirmation makes one durable completion and one final flush", async () => {
     await begin();
     const done = page.finishWalk();
+    await flushCloud();
     const writes = () => wx.setStorageSync.mock.calls.filter(([key]) => key === "pendingWalkResult");
     expect(writes()).toHaveLength(1);
     page.finishWalk();
+    await flushCloud();
     page.completeWalk("ended_early");
     expect(writes()).toHaveLength(1);
     expect(finalizeTracking).toHaveBeenCalledTimes(1);
@@ -1069,6 +1116,7 @@ describe("durable completion before trajectory cleanup", () => {
     jest.spyOn(console, "warn").mockImplementation(() => {});
     await begin();
     const done = page.finishWalk();
+    await flushCloud();
     wx.setStorageSync.mockImplementation(() => { throw new Error("storage unavailable"); });
     flushed({ trajectoryPartial: false });
     await done;
@@ -1079,32 +1127,30 @@ describe("durable completion before trajectory cleanup", () => {
     expect(wx.reLaunch).toHaveBeenCalledTimes(1);
   });
 
-  test("intentional rollback allows a later completion with its own timestamp", async () => {
+  test("navigation failure cannot change the saved confirmation timestamp", async () => {
     await begin();
     const firstTime = Date.now();
     const first = page.finishWalk();
+    await flushCloud();
     wx.reLaunch.mockImplementationOnce(({ fail }) => fail());
     await jest.advanceTimersByTimeAsync(5000);
     flushed({ trajectoryPartial: false });
     trackerActive = false;
     await first;
-    expect(page._active).toBe(true);
-    expect(storage.pendingWalkResult).toBeUndefined();
-    expect(storage.activeWalkSession.startTimeMs).toBe(firstTime - 60000);
-    await page._trackingStartPromise;
-    expect(startTracking).toHaveBeenCalledTimes(2);
+    expect(page._active).toBe(false);
+    expect(storage.activeWalkSession).toBeUndefined();
     await jest.advanceTimersByTimeAsync(5000);
-    const second = page.finishWalk();
-    expect(storage.pendingWalkResult.endTime).toBe(new Date(firstTime + 10000).toISOString());
-    expect(storage.pendingWalkResult.actualDurationSeconds).toBe(70);
-    flushed({ trajectoryPartial: false });
-    await second;
+    await page.finishWalk();
+    expect(storage.pendingWalkResult.endTime).toBe(new Date(firstTime).toISOString());
+    expect(walkRecords.completeWalk).toHaveBeenCalledTimes(1);
+    expect(startTracking).toHaveBeenCalledTimes(1);
   });
 
   test("incomplete navigation rollback cannot restart opted-in tracking", async () => {
     jest.spyOn(console, "warn").mockImplementation(() => {});
     await begin();
     const done = page.finishWalk();
+    await flushCloud();
     wx.reLaunch.mockImplementation(({ fail }) => {
       wx.removeStorageSync.mockImplementation(key => {
         if (key === "pendingWalkResult") throw new Error("cannot clear completion");

@@ -1450,6 +1450,7 @@ describe(
           "selectedRoute",
           GENERATED_ROUTE
         );
+        expect(detailEventChannel.emit).toHaveBeenCalledWith("routePreferences", page._routePreferences);
       }
     );
 

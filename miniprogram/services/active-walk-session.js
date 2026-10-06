@@ -1,7 +1,17 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
-const ACTIVE_WALK_SESSION_VERSION = 1;
+const ACTIVE_WALK_SESSION_VERSION = 2;
 const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
+const { isValidPreferences } = require("./walk-records");
+const { isValidGeoPoint } = require("../utils/geo");
+
+function isValidCompletionRequest(session) {
+  const request = session.completionRequest;
+  return request === undefined || Boolean(request && request.walkId === session.walkId &&
+    ["completed", "ended_early"].includes(request.completionStatus) &&
+    Number.isSafeInteger(request.endTimeMs) && request.endTimeMs >= session.startTimeMs &&
+    request.endTimeMs <= Date.now() + 60000 && typeof request.trajectoryPartial === "boolean");
+}
 
 function isValidRouteSnapshot(route) {
   return (
@@ -20,12 +30,16 @@ function isValidActiveWalkSession(session) {
     !Array.isArray(session) &&
     session.version === ACTIVE_WALK_SESSION_VERSION &&
     session.status === "active" &&
+    typeof session.walkId === "string" && session.walkId.trim() !== "" &&
+    isValidPreferences(session.preferences) &&
     typeof session.routeId === "string" &&
     session.routeId.trim() !== "" &&
     isValidRouteSnapshot(session.route) &&
     session.route.routeId === session.routeId &&
-    Number.isFinite(session.startTimeMs) &&
+    Number.isSafeInteger(session.startTimeMs) &&
     session.startTimeMs > 0 &&
+    session.startTimeMs <= Date.now() + 60000 &&
+    isValidCompletionRequest(session) &&
     (
       session.trackingEnabled === undefined ||
       typeof session.trackingEnabled === "boolean"
@@ -44,6 +58,7 @@ function isCompletedActiveWalkSession(session) {
     Date.parse(pendingResult.startTime);
 
   return (
+    pendingResult.walkId === session.walkId &&
     pendingResult.routeId === session.routeId &&
     Number.isFinite(pendingStartTimeMs) &&
     pendingStartTimeMs === session.startTimeMs
@@ -70,13 +85,13 @@ function getActiveWalkSession() {
   }
 
   if (!isValidActiveWalkSession(session)) {
+    require("./walking-tracker").stopTrackingForSession(session);
     wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
     return null;
   }
 
   if (
-    isCompletedActiveWalkSession(session) ||
-    isStaleActiveWalkSession(session)
+    isCompletedActiveWalkSession(session)
   ) {
     require("./walking-tracker").stopTrackingForSession(session);
     wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
@@ -89,7 +104,7 @@ function getActiveWalkSession() {
 function createActiveWalkSession(
   route,
   startTimeMs = Date.now(),
-  { trackingEnabled = false } = {}
+  { trackingEnabled = false, walkId, preferences = {} } = {}
 ) {
   const existingSession = getActiveWalkSession();
 
@@ -108,7 +123,12 @@ function createActiveWalkSession(
     throw new Error("Invalid walk start time.");
   }
 
+  if (typeof walkId !== "string" || !walkId.trim()) throw new Error("Missing durable walk identity.");
+  if (!isValidPreferences(preferences)) throw new Error("Invalid questionnaire snapshot.");
+
   const session = {
+    walkId,
+    preferences,
     version: ACTIVE_WALK_SESSION_VERSION,
     status: "active",
     routeId: route.routeId,
@@ -125,14 +145,14 @@ function createActiveWalkSession(
   };
 }
 
-function clearActiveWalkSession(routeId = null) {
+function clearActiveWalkSession(routeId = null, walkId = null) {
   const activeSession = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
   if (!activeSession) {
     return true;
   }
 
-  if (routeId && activeSession.routeId !== routeId) {
+  if ((routeId && activeSession.routeId !== routeId) || (walkId && activeSession.walkId !== walkId)) {
     return false;
   }
 
@@ -185,7 +205,42 @@ function clearPendingWalkResult() {
   wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
 }
 
+function restoreCloudWalk(walk, route) {
+  if (!route || route.routeId !== walk.routeId || !Array.isArray(route.polyline) || route.polyline.length < 2 ||
+      !route.polyline.every(isValidGeoPoint) || !Number.isFinite(route.durationMinutes) || route.durationMinutes < 0 ||
+      !Number.isFinite(route.distanceMeters) || route.distanceMeters < 0) {
+    throw Object.assign(new Error("当前设备缺少正在进行的散步路线，暂时无法恢复或开始新散步"), { code: "WALK_ROUTE_UNAVAILABLE" });
+  }
+  const result = createActiveWalkSession(route, Date.parse(walk.startTime), {
+    walkId: walk.walkId, preferences: walk.preferences, trackingEnabled: walk.trajectoryEnabled
+  });
+  if (result.session.walkId !== walk.walkId) throw new Error("Local walk changed during recovery.");
+  return result.session;
+}
+
+async function reconcileActiveWalk(route = null) {
+  const records = require("./walk-records");
+  const local = getActiveWalkSession();
+  if (local) {
+    const cloud = await records.getWalk(local.walkId);
+    if (cloud.status === "active") {
+      if (cloud.routeId !== local.routeId || Date.parse(cloud.startTime) !== local.startTimeMs) {
+        throw new Error("Local walk does not match cloud identity.");
+      }
+      return local;
+    }
+    require("./walking-tracker").stopTrackingForSession(local);
+    try { savePendingWalkResult({ ...cloud, route: local.route }); }
+    finally { clearActiveWalkSession(local.routeId, local.walkId); }
+    return null;
+  }
+  const cloud = await records.getActiveWalk();
+  return cloud ? restoreCloudWalk(cloud, route) : null;
+}
+
 module.exports = {
+  restoreCloudWalk,
+  reconcileActiveWalk,
   ACTIVE_WALK_STORAGE_KEY,
   PENDING_WALK_RESULT_STORAGE_KEY,
   ACTIVE_WALK_SESSION_VERSION,
