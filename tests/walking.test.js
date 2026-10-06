@@ -614,7 +614,7 @@ describe("Walking page", () => {
       if (options.success) options.success();
     });
 
-    page.loadWalkingRoute(TEST_ROUTE);
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
 
     jest.setSystemTime(new Date("2026-10-01T12:12:30.000Z"));
 
@@ -769,7 +769,7 @@ describe("Walking page", () => {
       if (options.success) options.success();
     });
 
-    page.loadWalkingRoute(TEST_ROUTE);
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
     page.endWalkEarly();
     await flushCloud();
 
@@ -808,7 +808,7 @@ describe("Walking page", () => {
   });
 
   test("duplicate finish actions do not open multiple Feedback pages", async () => {
-    page.loadWalkingRoute(TEST_ROUTE);
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
 
     page.finishWalk();
     await flushCloud();
