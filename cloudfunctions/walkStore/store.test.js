@@ -48,3 +48,51 @@ test('rollback error cannot replace the original error; startup failure opens no
   expect(f.transaction.rollback).toHaveBeenCalledTimes(1)
 })
 
+
+
+test('transaction conflicts retry with bounded exponential backoff and jitter', async () => {
+  const conflict = new Error('database transaction conflict');
+  const transaction = jest.fn()
+    .mockRejectedValueOnce(conflict)
+    .mockRejectedValueOnce({ message: 'write conflict' })
+    .mockRejectedValueOnce({ errMsg: 'DATABASE_TRANSACTION_CONFLICT' })
+    .mockResolvedValue('ok');
+  const sleep = jest.fn().mockResolvedValue();
+  const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.5);
+
+  try {
+    await expect(transact({ transaction }, jest.fn(), sleep)).resolves.toBe('ok');
+  } finally {
+    randomSpy.mockRestore();
+  }
+
+  expect(transaction).toHaveBeenCalledTimes(4);
+  expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([15, 30, 60]);
+});
+
+test('transaction retry stops after four attempts and never sleeps after the final conflict', async () => {
+  const conflict = { code: 'DATABASE_TRANSACTION_CONFLICT' };
+  const transaction = jest.fn().mockRejectedValue(conflict);
+  const sleep = jest.fn().mockResolvedValue();
+  const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+
+  try {
+    await expect(transact({ transaction }, jest.fn(), sleep)).rejects.toBe(conflict);
+  } finally {
+    randomSpy.mockRestore();
+  }
+
+  expect(transaction).toHaveBeenCalledTimes(4);
+  expect(sleep.mock.calls.map(([delay]) => delay)).toEqual([10, 20, 40]);
+});
+
+test('non-conflict database failures are not retried', async () => {
+  const failure = new Error('permission denied');
+  const transaction = jest.fn().mockRejectedValue(failure);
+  const sleep = jest.fn();
+
+  await expect(transact({ transaction }, jest.fn(), sleep)).rejects.toBe(failure);
+
+  expect(transaction).toHaveBeenCalledTimes(1);
+  expect(sleep).not.toHaveBeenCalled();
+});

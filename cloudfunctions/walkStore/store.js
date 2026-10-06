@@ -1,7 +1,11 @@
 // Explicit transactions, including missing-document reads, fence concurrent starts.
 function isTransactionConflict(error) {
-  return !!error && (error.code === 'DATABASE_TRANSACTION_CONFLICT' ||
-    /\bDATABASE_TRANSACTION_CONFLICT\b|\bdatabase transaction conflict\b|\bwrite conflict\b/i.test(error.errMsg || ''));
+  if (!error) return false;
+  if (error.code === 'DATABASE_TRANSACTION_CONFLICT') return true;
+  const detail = [error.errMsg, error.message]
+    .filter(value => typeof value === 'string')
+    .join(' ');
+  return /\bDATABASE_TRANSACTION_CONFLICT\b|\bdatabase transaction conflict\b|\bwrite conflict\b/i.test(detail);
 }
 
 function createStore(db) {
@@ -34,7 +38,8 @@ async function transact(store, work, sleep = ms => new Promise(resolve => setTim
   for (let attempt = 0; attempt < 4; attempt++) {
     try { return await store.transaction(work); } catch (error) {
       if (!isTransactionConflict(error) || attempt === 3) throw error;
-      await sleep(10 * (attempt + 1) + Math.floor(Math.random() * 10));
+      const baseDelayMs = 10 * (2 ** attempt);
+      await sleep(baseDelayMs + Math.floor(Math.random() * baseDelayMs));
     }
   }
 }

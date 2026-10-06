@@ -203,7 +203,10 @@ a walk and sets the lock atomically. Completion checks ownership, updates the sa
 walk, and clears only its matching lock to { walkId: null }. This tombstone
 continues to provide a deterministic transaction fence. There is no query-then-add
 race and no dependency on a process-local mutex. Explicit transactions retry only
-recognized conflicts, at most four attempts with bounded backoff.
+recognized conflicts, at most four attempts. Retry delays use bounded exponential
+backoff with jitter (10–19 ms, 20–39 ms, then 40–79 ms); non-conflict failures are
+propagated immediately. Conflict detection accepts the documented conflict code and
+the equivalent SDK message forms.
 
 Allowed terminal transitions are **active -> completed**, **active -> ended_early**,
 and server-driven **active -> abandoned** after 12 hours. `abandoned` means the
