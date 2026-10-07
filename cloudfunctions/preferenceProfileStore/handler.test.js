@@ -15,11 +15,10 @@ function fixture({ random = () => 0 } = {}) {
     })
   };
   const sleep = jest.fn(async () => {});
-  const logUnexpectedFields = jest.fn();
   const handle = createProfileHandler({
-    store, getOpenId: () => 'user', now: () => Date.parse(time), sleep, random, logUnexpectedFields
+    store, getOpenId: () => 'user', now: () => Date.parse(time), sleep, random
   });
-  return { handle, store, history, sleep, logUnexpectedFields };
+  return { handle, store, history, sleep };
 }
 test('authentication uses server context; get and empty refresh return null safely', async () => {
   const f = fixture();
@@ -30,17 +29,24 @@ test('authentication uses server context; get and empty refresh return null safe
   const unauthenticated = createProfileHandler({ store: f.store, getOpenId: () => '' });
   expect((await unauthenticated({ action: 'refreshProfile', OPENID: 'user' })).error.code).toBe('UNAUTHENTICATED');
 });
-test('ignores CloudBase-injected userInfo and still derives identity from server context', async () => {
+test('ignores non-action event fields and never trusts client-supplied identity/computation data', async () => {
   const f = fixture();
-  expect(await f.handle({ action: 'getProfile', userInfo: { openId: 'forged', appId: 'forged' } }))
-    .toEqual({ success: true, profile: null });
+  const result = await f.handle({
+    action: 'refreshProfile',
+    userInfo: { openId: 'forged', appId: 'forged' },
+    ownerKey: 'forged',
+    OPENID: 'forged',
+    walkIds: ['foreign'],
+    feedback: [{ walkId: 'foreign' }],
+    weights: { park: 999 },
+    profile: { preferredDurationMinutes: 120 },
+    history: { walks: [] }
+  });
+  expect(result.success).toBe(true);
+  expect(result.profile).toMatchObject({ evidenceWalkCount: 1, preferredDurationMinutes: 30 });
   expect(f.store.getProfile).toHaveBeenCalledWith(ownerKey);
-});
-test.each(['ownerKey', 'walkIds', 'feedback', 'weights', 'profile', 'history', 'OPENID'])('rejects client %s computation/identity inputs', async key => {
-  const f = fixture();
-  expect((await f.handle({ action: 'refreshProfile', [key]: 'forged' })).error.code).toBe('INVALID_INPUT');
-  expect(f.logUnexpectedFields).toHaveBeenCalledWith([key]);
-  expect(f.store.loadHistory).not.toHaveBeenCalled();
+  expect(f.store.loadHistory).toHaveBeenCalledWith(ownerKey);
+  expect(JSON.stringify(result)).not.toContain('forged');
 });
 test('invalid action is safe', async () => {
   expect((await fixture().handle(null)).error.code).toBe('INVALID_ACTION');
