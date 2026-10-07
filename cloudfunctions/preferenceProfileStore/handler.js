@@ -3,6 +3,7 @@ const { buildProfile } = require('./profile-builder');
 const { PUBLIC_FIELDS, validateProfile } = require('./profile-schema');
 const { conflict, revision } = require('./store');
 const REFRESH_ATTEMPTS = 4;
+const PLATFORM_EVENT_FIELDS = new Set(['userInfo']);
 const messages = {
   UNAUTHENTICATED: 'Unable to identify the current user.',
   INVALID_ACTION: 'Unsupported preference profile operation.',
@@ -33,7 +34,7 @@ function createProfileHandler({
       if (typeof openid !== 'string' || !openid.trim()) fail('UNAUTHENTICATED');
       const ownerKey = crypto.createHash('sha256').update(openid).digest('hex');
       if (!event || !['getProfile', 'refreshProfile'].includes(event.action)) fail('INVALID_ACTION');
-      if (Object.keys(event).some(key => key !== 'action')) fail('INVALID_INPUT');
+      if (Object.keys(event).some(key => key !== 'action' && !PLATFORM_EVENT_FIELDS.has(key))) fail('INVALID_INPUT');
       if (event.action === 'getProfile') return { success: true, profile: publicProfile(await store.getProfile(ownerKey), ownerKey) };
       for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt++) {
         try {
