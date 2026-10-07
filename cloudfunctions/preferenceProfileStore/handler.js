@@ -26,7 +26,8 @@ function createProfileHandler({
   getOpenId,
   now = Date.now,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  random = Math.random
+  random = Math.random,
+  logUnexpectedFields = fields => console.warn('[preferenceProfileStore] unexpected event fields:', fields)
 }) {
   return async (event = {}) => {
     try {
@@ -34,7 +35,13 @@ function createProfileHandler({
       if (typeof openid !== 'string' || !openid.trim()) fail('UNAUTHENTICATED');
       const ownerKey = crypto.createHash('sha256').update(openid).digest('hex');
       if (!event || !['getProfile', 'refreshProfile'].includes(event.action)) fail('INVALID_ACTION');
-      if (Object.keys(event).some(key => key !== 'action' && !PLATFORM_EVENT_FIELDS.has(key))) fail('INVALID_INPUT');
+      const unexpectedFields = Object.keys(event)
+        .filter(key => key !== 'action' && !PLATFORM_EVENT_FIELDS.has(key))
+        .sort();
+      if (unexpectedFields.length) {
+        logUnexpectedFields(unexpectedFields);
+        fail('INVALID_INPUT');
+      }
       if (event.action === 'getProfile') return { success: true, profile: publicProfile(await store.getProfile(ownerKey), ownerKey) };
       for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt++) {
         try {
