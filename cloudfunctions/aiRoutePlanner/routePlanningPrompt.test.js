@@ -19,7 +19,7 @@ test('history is secondary to conflicting current intent and never supplies POI 
   const prompt = result.data.prompt
   for (const rule of ['CURRENT WALK INTENT — Highest priority.',
     'Current questionnaire always overrides conflicting historical preferences.',
-    'Historical preferences may only be used as a soft secondary signal',
+    'Historical preferences may be used as a secondary ranking signal when choosing among waypoint sets that remain consistent with the current questionnaire.',
     'Do not replace the current requested duration with historical preferredDurationMinutes.',
     'Do not override the current route type, crowd preference, or environment ranking with history.',
     'Historical preference signals describe the user, not verified facts about any current POI.',
@@ -79,6 +79,13 @@ test('AI planning attempt limits stay synchronized across deployments', () => {
   expect(MAX_AI_PLANNING_ATTEMPTS).toBe(
     require('../../miniprogram/config/route-planning').MAX_AI_PLANNING_ATTEMPTS
   )
+})
+
+test('planner history limit matches the canonical public profile limit', () => {
+  const { PROFILE_HISTORY_LIMIT } = require('../preferenceProfileStore/profile-schema')
+  const input = { ...history, evidenceWalkCount: PROFILE_HISTORY_LIMIT }
+  expect(normalizeHistoricalPreferenceProfile(input)).toEqual(input)
+  expect(normalizeHistoricalPreferenceProfile({ ...input, evidenceWalkCount: PROFILE_HISTORY_LIMIT + 1 })).toBeNull()
 })
 
 const validInput = {

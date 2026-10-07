@@ -243,7 +243,7 @@ function buildRoutePlanningPrompt(input) {
   const personalization = history ? [
     '', 'PERSONALIZATION PRIORITY',
     'Current questionnaire always overrides conflicting historical preferences.',
-    'Historical preferences may only be used as a soft secondary signal for tie-breaking within current intent.',
+    'Historical preferences may be used as a secondary ranking signal when choosing among waypoint sets that remain consistent with the current questionnaire.',
     'Do not replace the current requested duration with historical preferredDurationMinutes.',
     'Do not override the current route type, crowd preference, or environment ranking with history.',
     'Historical preference signals describe the user, not verified facts about any current POI.',

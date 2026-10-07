@@ -690,11 +690,14 @@ async function generateWaypointPlan(
     }
   }
 
+  const historicalPreferenceProfile =
+    await loadHistoricalPreferenceProfile()
   const plan =
     await requestWaypointPlan({
       location,
       preferences,
-      nearbyPois
+      nearbyPois,
+      historicalPreferenceProfile
     })
 
   return {
