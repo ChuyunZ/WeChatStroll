@@ -101,7 +101,7 @@ An explicit transaction re-reads the profile document, including a missing-docum
 read for first creation. It writes only if the revision still matches the revision
 read **before** loading history. A revision mismatch or recognized database write
 conflict retries the entire history load/build/write, at most four attempts with
-10/20/40 ms backoff. This protects late feedback on an older walk even when both
+jittered exponential backoff (10–19 ms, 20–39 ms, then 40–79 ms). This protects late feedback on an older walk even when both
 source maximum timestamps are unchanged; timestamp comparison alone would not.
 Matching fingerprints retain the original snapshot, revision and update timestamp.
 An older in-flight refresh cannot overwrite a newer committed snapshot.
