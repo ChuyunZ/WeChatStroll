@@ -112,6 +112,25 @@ refresh. This API provides bounded recomputation, not a subscription or transact
 coupling to feedback submission. Profile failures cannot turn saved feedback into
 failed submissions. No automatic refresh integration is added in this issue.
 
+## Development CloudBase validation
+
+Manual development E2E on 2026-10-07 validated the deployed collection, indexes,
+Cloud Function and real stored history. Before the first persisted snapshot,
+`getProfile` returned null. The first refresh loaded five terminal walks plus one
+feedback record and created revision 1. Repeating refresh with unchanged history
+preserved the public profile, fingerprint, `lastUpdatedAt`, and revision.
+
+A second feedback record was saved through `feedbackStore`. The profile remained
+unchanged until explicit refresh. That refresh changed `feedbackCount` from 1 to 2,
+added `quiet` to `likedTags`, moved `crowdPreferenceSignal` from 0 to -0.25,
+changed the fingerprint/timestamp, and advanced revision from 1 to 2. The following
+`getProfile` matched the refresh response.
+
+Direct Mini Program testing also exposed CloudBase-added event metadata. The handler
+therefore reads only `event.action`; all other event fields are ignored and cannot
+influence authentication, history selection, or profile computation. Live multi-user
+isolation and forced transaction-conflict cases were not manually induced; those
+remain covered by deterministic automated tests.
 ## Ownership, queries and data boundaries
 
 OPENID comes only from `cloud.getWXContext()`. The handler reads only
