@@ -361,9 +361,11 @@ and preserves the server-side ownership checks introduced by walkStore.
 
 # Historical preference profile collection (implemented by Issue #81)
 
-`preference_profiles/{ownerKey}` is implemented in repository code by the independent
-`preferenceProfileStore` Cloud Function. It is intended for server-only / ADMINONLY
-access; deployment and collection/index/permission setup remain manual.
+`preference_profiles/{ownerKey}` is implemented by the independent
+`preferenceProfileStore` Cloud Function and is server-only / ADMINONLY. The
+development environment rollout was validated on 2026-10-07 with the required
+`walks` and `feedback` compound indexes and deployed Cloud Function; equivalent
+setup remains an operator step for any other environment.
 
 The version-1 document contains server-only `ownerKey` and `revision`, plus
 `schemaVersion`, `environmentWeights`, `preferredDurationMinutes`,
