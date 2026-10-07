@@ -18,11 +18,16 @@ test('history is secondary to conflicting current intent and never supplies POI 
   expect(result.success).toBe(true)
   const prompt = result.data.prompt
   for (const rule of ['CURRENT WALK INTENT — Highest priority.',
-    'Current questionnaire always overrides conflicting historical preferences.',
+    'Treat the current questionnaire as the highest-priority intent signal; never use history to contradict it.',
     'Historical preferences may be used as a secondary ranking signal when choosing among waypoint sets that remain consistent with the current questionnaire.',
-    'Do not replace the current requested duration with historical preferredDurationMinutes.',
+    'environmentWeights are historical questionnaire-ranking tendencies: a larger value means that environment was ranked more highly more often.',
+    'crowdPreferenceSignal ranges from -1 (quieter preference) through 0 (neutral) to +1 (livelier/crowded preference); intermediate values indicate direction and strength.',
+    'preferredDurationMinutes is a historical tendency only; do not replace the current requested duration with it.',
+    'likedTags and dislikedTags summarize explicit historical feedback. They are preference signals, not verified attributes of any current POI.',
+    'evidenceWalkCount is the number of recent terminal walks supporting the profile (1-20). Treat smaller counts as weaker evidence and larger counts as more established history.',
     'Do not override the current route type, crowd preference, or environment ranking with history.',
     'Historical preference signals describe the user, not verified facts about any current POI.',
+    'Use a historical signal only when supplied verified candidate data can support the distinction; otherwise do not infer matching POI attributes.',
     'Do not invent POI attributes, crowd facts, walkability, or route geometry from history.']) {
     expect(prompt).toContain(rule)
   }
