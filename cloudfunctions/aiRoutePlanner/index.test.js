@@ -45,6 +45,34 @@ const VALID_EVENT = {
 }
 
 describe("AI waypoint planner integration", () => {
+  const history = {
+    environmentWeights: { park: 1, water: 0, street: 0, shoppingStreet: 0 },
+    preferredDurationMinutes: 40, crowdPreferenceSignal: -1,
+    likedTags: ['quiet'], dislikedTags: [], evidenceWalkCount: 1
+  }
+
+  test.each(['park-1', 'invented-poi'])('history preserves verified POI validation: %s', async poiId => {
+    const client = { request: jest.fn().mockResolvedValue({ success: true,
+      data: { text: JSON.stringify({ candidates: [{ waypoints: [{ poiId }] }] }) } }) }
+    const result = await generateWaypointPlan({ ...VALID_EVENT,
+      historicalPreferenceProfile: { ...history, ownerKey: 'PRIVATE_SENTINEL', source: 'PRIVATE_SENTINEL' }
+    }, client)
+    expect(result).toEqual(poiId === 'park-1'
+      ? { success: true, plan: { candidates: [{ waypoints: [{ poiId }] }] } }
+      : { success: false, error: 'INVALID_AI_ROUTE_PLAN' })
+    expect(client.request.mock.calls[0][0]).toContain(JSON.stringify(history, null, 2))
+    expect(client.request.mock.calls[0][0]).not.toContain('PRIVATE_SENTINEL')
+  })
+
+  test('malformed history still requests a normal plan while invalid core inputs remain errors', async () => {
+    const client = { request: jest.fn().mockResolvedValue({ success: true, data: { text: '{"candidates":[]}' } }) }
+    const event = { ...VALID_EVENT, historicalPreferenceProfile: { ...history, likedTags: ['injected'] } }
+    expect(await generateWaypointPlan(event, client)).toEqual({ success: true, plan: { candidates: [] } })
+    expect(client.request.mock.calls[0][0]).not.toContain('HISTORICAL PREFERENCE PROFILE')
+    expect(await generateWaypointPlan({ ...event, startPoint: null }, client))
+      .toEqual({ success: false, error: 'INVALID_AI_ROUTE_INPUT' })
+    expect(client.request).toHaveBeenCalledTimes(1)
+  })
   test('returns an explicit empty plan as a successful no-result response', async () => {
     const client = { request: jest.fn().mockResolvedValue({
       success: true, data: { text: '{"candidates":[]}' }

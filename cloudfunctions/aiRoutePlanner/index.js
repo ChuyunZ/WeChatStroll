@@ -54,6 +54,7 @@ async function generateWaypointPlan(
       startPoint: normalizedEvent.startPoint,
       preferences: normalizedEvent.preferences,
       nearbyPois: normalizedEvent.nearbyPois,
+      historicalPreferenceProfile: normalizedEvent.historicalPreferenceProfile,
       replanningContext: normalizedEvent.replanningContext
     })
 

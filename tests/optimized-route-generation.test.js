@@ -1,8 +1,11 @@
 jest.mock('../miniprogram/services/location', () => ({ getCurrentLocation: jest.fn() }))
+jest.mock('../miniprogram/services/preference-profile-records', () => ({ refreshProfile: jest.fn() }))
 jest.mock('../miniprogram/services/cloud-function-client', () => ({ callCloudFunction: jest.fn() }))
 jest.mock('../miniprogram/services/walking-segment', () => ({ getWalkingSegment: jest.fn() }))
 
 const { getCurrentLocation } = require('../miniprogram/services/location')
+const { refreshProfile } = require('../miniprogram/services/preference-profile-records')
+const { buildProfile } = require('../cloudfunctions/preferenceProfileStore/profile-builder')
 const { callCloudFunction } = require('../miniprogram/services/cloud-function-client')
 const { getWalkingSegment } = require('../miniprogram/services/walking-segment')
 const { generateRoutes, buildOptimizedCandidateRoute } = require('../miniprogram/services/route-generation')
@@ -27,6 +30,7 @@ function cloudPlan(plan) {
 
 beforeEach(() => {
   jest.resetAllMocks()
+  refreshProfile.mockResolvedValue(null)
   getCurrentLocation.mockResolvedValue(location)
   cloudPlan({ candidates })
   getWalkingSegment.mockImplementation(async (from, to) => ({
@@ -337,6 +341,128 @@ function sequencePlans(plans) {
 }
 const planSets = (...sets) => ({ candidates: sets.map(ids => ({ waypoints: ids.map(poiId => ({ poiId })) })) })
 const aiCalls = () => callCloudFunction.mock.calls.filter(([name]) => name === 'aiRoutePlanner')
+
+function historicalProfile(feedback = []) {
+  return buildProfile({ ownerKey: 'private-owner', lastUpdatedAt: '2026-10-07T00:00:00Z',
+    walks: [{ ownerKey: 'private-owner', walkId: 'walk-1', status: 'completed',
+      endTime: '2026-10-06T00:00:00Z', actualDurationSeconds: 2400,
+      preferences: { durationMinutes: 40, crowdPreference: 'low',
+        environmentPreferences: ['公园', '水边', '街道', '商街'] } }], feedback })
+}
+
+const compactHistory = {
+  environmentWeights: { park: 1, water: 0.67, street: 0.33, shoppingStreet: 0 },
+  preferredDurationMinutes: 40, crowdPreferenceSignal: -1,
+  likedTags: [], dislikedTags: [], evidenceWalkCount: 1
+}
+
+test('first-time user refreshes once and omits history from successful AI planning', async () => {
+  expect((await generateRoutes(preferences)).source).toBe('ai')
+  expect(refreshProfile).toHaveBeenCalledTimes(1)
+  expect(refreshProfile).toHaveBeenCalledWith()
+  expect(aiCalls()[0][1]).not.toHaveProperty('historicalPreferenceProfile')
+})
+
+test('public history is projected into a detached six-field snapshot without changing current intent', async () => {
+  const profile = historicalProfile()
+  refreshProfile.mockResolvedValue(profile)
+  expect((await generateRoutes(preferences)).source).toBe('ai')
+  const input = aiCalls()[0][1]
+  expect(input.preferences).toEqual(preferences)
+  expect(input.historicalPreferenceProfile).toEqual(compactHistory)
+  profile.environmentWeights.park = 0
+  profile.likedTags.push('quiet')
+  expect(input.historicalPreferenceProfile).toEqual(compactHistory)
+  for (const key of ['evidence', 'source', 'fingerprint', 'lastUpdatedAt', 'completedWalkCount',
+    'endedEarlyWalkCount', 'feedbackCount', 'ownerKey', 'revision', 'history', 'comments']) {
+    expect(JSON.stringify(input.historicalPreferenceProfile)).not.toContain(`"${key}"`)
+  }
+})
+
+test.each([undefined, {}, { ...historicalProfile(), ownerKey: 'private-owner' },
+  { ...historicalProfile(), preferredDurationMinutes: 31 }])('malformed public history is non-fatal: %#', async profile => {
+  refreshProfile.mockResolvedValue(profile)
+  expect((await generateRoutes(preferences)).source).toBe('ai')
+  expect(aiCalls()[0][1]).not.toHaveProperty('historicalPreferenceProfile')
+})
+
+test('refresh failure is non-fatal and logs only a fixed safe code', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    refreshProfile.mockRejectedValue(Object.assign(new Error('private prompt GPS OPENID'), {
+      code: { ownerKey: 'private-owner', profile: historicalProfile(), coordinates: location }
+    }))
+    expect((await generateRoutes(preferences)).source).toBe('ai')
+    expect(aiCalls()[0][1]).not.toHaveProperty('historicalPreferenceProfile')
+    expect(warn.mock.calls).toEqual([['[Route Generation] Preference profile unavailable:',
+      { code: 'PREFERENCE_PROFILE_UNAVAILABLE' }]])
+  } finally { warn.mockRestore() }
+})
+
+test('replanning reuses one history snapshot and still updates failure context', async () => {
+  refreshProfile.mockResolvedValue(historicalProfile())
+  sequencePlans([planSets(['A', 'B']), planSets(['A', 'C'])])
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: from.nodeId === 'B' || to.nodeId === 'B' ? 100 : 1350,
+    distanceMeters: 200, polyline: [from, to]
+  }))
+  expect((await generateRoutes(preferences)).source).toBe('ai-replanned')
+  expect(refreshProfile).toHaveBeenCalledTimes(1)
+  expect(aiCalls()).toHaveLength(2)
+  expect(aiCalls()[0][1].historicalPreferenceProfile).toEqual(compactHistory)
+  expect(aiCalls()[1][1].historicalPreferenceProfile).toBe(aiCalls()[0][1].historicalPreferenceProfile)
+  expect(aiCalls()[0][1]).not.toHaveProperty('replanningContext')
+  expect(aiCalls()[1][1].replanningContext).toMatchObject({ attempt: 2,
+    previousFailures: [{ attempt: 1, waypointIds: ['A', 'B'], failure: { type: 'DURATION_TOO_SHORT' } }] })
+})
+
+test.each(['empty', 'error'])('AI %s uses identical fallback selection and walking facts with or without history', async mode => {
+  callCloudFunction.mockImplementation(async name => {
+    if (name === 'mapProvider') return { poisByCategory: { park: pois } }
+    if (mode === 'error') throw Object.assign(new Error('AI unavailable'), { code: 'AI_REQUEST_FAILED' })
+    return { plan: { candidates: [] } }
+  })
+  getWalkingSegment.mockImplementation(async (from, to) => ({
+    success: true, durationSeconds: 2700, distanceMeters: 1000, polyline: [from, to]
+  }))
+  const baseline = await generateRoutes(preferences)
+  const baselineSegments = getWalkingSegment.mock.calls.map(([from, to]) => [from.nodeId, to.nodeId])
+  getWalkingSegment.mockClear()
+  refreshProfile.mockResolvedValue(historicalProfile())
+  const personalized = await generateRoutes(preferences)
+  expect(personalized.source).toBe('fallback')
+  const facts = route => ({ ids: route.recommendedWaypointIds, duration: route.durationSeconds,
+    distance: route.distanceMeters, polyline: route.polyline })
+  expect(facts(personalized.routes[0])).toEqual(facts(baseline.routes[0]))
+  expect(getWalkingSegment.mock.calls.map(([from, to]) => [from.nodeId, to.nodeId])).toEqual(baselineSegments)
+  expect(aiCalls()[1][1].historicalPreferenceProfile).toEqual(compactHistory)
+})
+
+test('empty POIs and invalid locations never refresh history', async () => {
+  callCloudFunction.mockResolvedValue({ poisByCategory: {} })
+  expect(await generateRoutes(preferences)).toEqual({ status: 'empty', reason: 'NO_VALID_POI' })
+  getCurrentLocation.mockResolvedValue(null)
+  await expect(generateRoutes(preferences)).rejects.toMatchObject({ code: 'INVALID_LOCATION' })
+  expect(refreshProfile).not.toHaveBeenCalled()
+})
+
+test('the next planning invocation refreshes feedback changes into the AI prompt', async () => {
+  const changed = historicalProfile([{ ownerKey: 'private-owner', walkId: 'walk-1',
+    createdAt: '2026-10-06T01:00:00Z', positiveTags: ['nice_view'], negativeTags: ['duration_too_long'] }])
+  refreshProfile.mockResolvedValueOnce(historicalProfile()).mockResolvedValueOnce(changed)
+  await generateRoutes(preferences)
+  await generateRoutes(preferences)
+  expect(refreshProfile).toHaveBeenCalledTimes(2)
+  expect(aiCalls()[1][1].historicalPreferenceProfile).toMatchObject({
+    likedTags: ['nice_view'], dislikedTags: ['duration_too_long'], preferredDurationMinutes: 35
+  })
+  const { buildRoutePlanningPrompt } = require('../cloudfunctions/aiRoutePlanner/routePlanningPrompt')
+  const promptFor = call => buildRoutePlanningPrompt({ ...call[1], preferences: {
+    ...preferences, crowdPreference: 'high', environmentPreferences: ['商街', '街道', '水边', '公园']
+  } }).data.prompt
+  expect(promptFor(aiCalls()[0])).not.toContain('nice_view')
+  expect(promptFor(aiCalls()[1])).toContain('nice_view')
+})
 
 test('non-replannable provider failure stops remaining AI candidates and uses existing fallback', async () => {
   const log = jest.spyOn(console, 'log').mockImplementation(() => {})

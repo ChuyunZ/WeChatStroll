@@ -5,6 +5,11 @@ jest.mock(
   })
 )
 
+jest.mock('../miniprogram/services/preference-profile-records', () => ({ refreshProfile: jest.fn() }))
+
+const { refreshProfile } = require('../miniprogram/services/preference-profile-records')
+const { buildProfile } = require('../cloudfunctions/preferenceProfileStore/profile-builder')
+
 const locationService = require(
   '../miniprogram/services/location'
 )
@@ -63,6 +68,7 @@ function createPoisByCategory() {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  refreshProfile.mockReset().mockResolvedValue(null)
 
   global.wx = {
     cloud: {
@@ -108,7 +114,24 @@ describe('waypoint generation service', () => {
     expect(candidates[0]).not.toHaveProperty('providerMeta')
   })
 
-  test('generateWaypointPlan sends verified flattened POIs to aiRoutePlanner', async () => {
+  test.each(['null', 'valid', 'failure', 'malformed'])(
+    'generateWaypointPlan sends verified flattened POIs with %s history', async historyMode => {
+    const compactHistory = {
+      environmentWeights: { park: 1, water: 0.67, street: 0.33, shoppingStreet: 0 },
+      preferredDurationMinutes: 45, crowdPreferenceSignal: -1,
+      likedTags: [], dislikedTags: [], evidenceWalkCount: 1
+    }
+    if (historyMode === 'valid') {
+      refreshProfile.mockResolvedValue(buildProfile({
+        ownerKey: 'private-owner', lastUpdatedAt: '2026-10-08T00:00:00Z',
+        walks: [{ ownerKey: 'private-owner', walkId: 'walk-1', status: 'completed',
+          endTime: '2026-10-07T00:00:00Z', preferences: PREFERENCES }]
+      }))
+    } else if (historyMode === 'failure') {
+      refreshProfile.mockRejectedValue(new Error('Profile unavailable'))
+    } else if (historyMode === 'malformed') {
+      refreshProfile.mockResolvedValue({ environmentWeights: { park: 2 } })
+    }
     wx.cloud.callFunction.mockImplementation(
       async ({ name, data }) => {
         if (name === 'mapProvider' && data.action === 'nearbyPois') {
@@ -146,6 +169,8 @@ describe('waypoint generation service', () => {
         .generateWaypointPlan(PREFERENCES)
 
     expect(result.status).toBe('success')
+    expect(refreshProfile).toHaveBeenCalledTimes(1)
+    expect(refreshProfile).toHaveBeenCalledWith()
     expect(result.plan).toEqual({
       waypoints: [
         { poiId: 'park-1' },
@@ -163,6 +188,7 @@ describe('waypoint generation service', () => {
           data: {
             startPoint: TEST_LOCATION,
             preferences: PREFERENCES,
+            ...(historyMode === 'valid' ? { historicalPreferenceProfile: compactHistory } : {}),
             nearbyPois: [
               {
                 poiId: 'park-1',
@@ -209,6 +235,7 @@ describe('waypoint generation service', () => {
 
     expect(wx.cloud.callFunction)
       .toHaveBeenCalledTimes(1)
+    expect(refreshProfile).not.toHaveBeenCalled()
   })
 
   test('generateWaypointPlan preserves string AI error codes', async () => {

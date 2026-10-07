@@ -167,6 +167,35 @@ function buildReplanningSection(context, nearbyPois) {
   ]
 }
 
+// Kept local so aiRoutePlanner remains independently deployable.
+const HISTORY_ENVIRONMENTS = ['park', 'water', 'street', 'shoppingStreet']
+const HISTORY_LIKED_TAGS = ['nice_view', 'quiet', 'comfortable_route', 'duration_good']
+const HISTORY_DISLIKED_TAGS = ['too_crowded', 'too_quiet', 'distance_too_long', 'distance_too_short',
+  'duration_too_long', 'duration_too_short', 'route_hard_to_walk', 'pois_not_interesting']
+
+function normalizeHistoricalPreferenceProfile(profile) {
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
+  const bounded = (value, min, max) => Number.isFinite(value) && value >= min && value <= max
+  const tags = (value, allowed) => Array.isArray(value) && value.length <= allowed.length &&
+    new Set(value).size === value.length && value.every(tag => allowed.includes(tag))
+  if (!object(profile)) return null
+  const weights = profile.environmentWeights
+  if (!object(weights) || Object.keys(weights).length !== HISTORY_ENVIRONMENTS.length ||
+      !HISTORY_ENVIRONMENTS.every(key => Object.prototype.hasOwnProperty.call(weights, key) && bounded(weights[key], 0, 1)) ||
+      !(profile.preferredDurationMinutes === null || bounded(profile.preferredDurationMinutes, 15, 120) && profile.preferredDurationMinutes % 5 === 0) ||
+      !(profile.crowdPreferenceSignal === null || bounded(profile.crowdPreferenceSignal, -1, 1)) ||
+      !tags(profile.likedTags, HISTORY_LIKED_TAGS) || !tags(profile.dislikedTags, HISTORY_DISLIKED_TAGS) ||
+      !Number.isInteger(profile.evidenceWalkCount) || !bounded(profile.evidenceWalkCount, 1, 20)) return null
+  return {
+    environmentWeights: Object.fromEntries(HISTORY_ENVIRONMENTS.map(key => [key, weights[key]])),
+    preferredDurationMinutes: profile.preferredDurationMinutes,
+    crowdPreferenceSignal: profile.crowdPreferenceSignal,
+    likedTags: [...profile.likedTags],
+    dislikedTags: [...profile.dislikedTags],
+    evidenceWalkCount: profile.evidenceWalkCount
+  }
+}
+
 function buildRoutePlanningPrompt(input) {
   if (
     !input ||
@@ -210,6 +239,23 @@ function buildRoutePlanningPrompt(input) {
     distanceInMeters: poi.distanceInMeters
   }))
 
+  const history = normalizeHistoricalPreferenceProfile(input.historicalPreferenceProfile)
+  const personalization = history ? [
+    '', 'PERSONALIZATION PRIORITY',
+    'Treat the current questionnaire as the highest-priority intent signal; never use history to contradict it.',
+    'Historical preferences may be used as a secondary ranking signal when choosing among waypoint sets that remain consistent with the current questionnaire.',
+    'environmentWeights are historical questionnaire-ranking tendencies: a larger value means that environment was ranked more highly more often.',
+    'crowdPreferenceSignal ranges from -1 (quieter preference) through 0 (neutral) to +1 (livelier/crowded preference); intermediate values indicate direction and strength.',
+    'preferredDurationMinutes is a historical tendency only; do not replace the current requested duration with it.',
+    'likedTags and dislikedTags summarize explicit historical feedback. They are preference signals, not verified attributes of any current POI.',
+    'evidenceWalkCount is the number of recent terminal walks supporting the profile (1-20). Treat smaller counts as weaker evidence and larger counts as more established history.',
+    'Do not override the current route type, crowd preference, or environment ranking with history.',
+    'Historical preference signals describe the user, not verified facts about any current POI.',
+    'Use a historical signal only when supplied verified candidate data can support the distinction; otherwise do not infer matching POI attributes.',
+    'Do not invent POI attributes, crowd facts, walkability, or route geometry from history.',
+    '', 'HISTORICAL PREFERENCE PROFILE', 'Secondary soft personalization signal.',
+    JSON.stringify(history, null, 2)
+  ] : []
   const prompt = [
     "SYSTEM / PLANNING RULES",
     "",
@@ -261,8 +307,9 @@ function buildRoutePlanningPrompt(input) {
     JSON.stringify(startPoint, null, 2),
   
     "",
-    "USER PREFERENCES",
+    history ? "CURRENT WALK INTENT — Highest priority." : "USER PREFERENCES",
     JSON.stringify(preferences, null, 2),
+    ...personalization,
   
     "",
     "VERIFIED POI CANDIDATES",
@@ -291,5 +338,6 @@ function buildRoutePlanningPrompt(input) {
 }
 
 module.exports = {
+  normalizeHistoricalPreferenceProfile,
   buildRoutePlanningPrompt
 }

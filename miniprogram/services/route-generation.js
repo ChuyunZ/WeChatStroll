@@ -1,5 +1,7 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
 const locationService = require('./location')
+const { refreshProfile } = require('./preference-profile-records')
+const { validateProfile } = require('../utils/preference-profile-schema')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
 const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
@@ -395,12 +397,36 @@ async function searchNearbyPois(
   return result.poisByCategory
 }
 
-async function requestWaypointPlan(
+async function loadHistoricalPreferenceProfile() {
+  try {
+    const profile = await refreshProfile()
+    if (profile === null) return null
+    validateProfile(profile)
+    const { park, water, street, shoppingStreet } = profile.environmentWeights
+    return {
+      environmentWeights: { park, water, street, shoppingStreet },
+      preferredDurationMinutes: profile.preferredDurationMinutes,
+      crowdPreferenceSignal: profile.crowdPreferenceSignal,
+      likedTags: [...profile.likedTags],
+      dislikedTags: [...profile.dislikedTags],
+      evidenceWalkCount: profile.evidenceWalkCount
+    }
+  } catch (error) {
+    // Never log upstream error messages/codes that could contain private data.
+    console.warn('[Route Generation] Preference profile unavailable:', {
+      code: 'PREFERENCE_PROFILE_UNAVAILABLE'
+    })
+    return null
+  }
+}
+
+async function requestWaypointPlan({
   location,
   preferences,
   nearbyPois,
+  historicalPreferenceProfile,
   replanningContext
-) {
+}) {
   const result =
     await callCloudFunction(
       'aiRoutePlanner',
@@ -416,6 +442,7 @@ async function requestWaypointPlan(
           latitude: poi.latitude, longitude: poi.longitude,
           distanceInMeters: poi.distanceInMeters
         })),
+        ...(historicalPreferenceProfile ? { historicalPreferenceProfile } : {}),
         ...(replanningContext ? { replanningContext } : {})
       },
       {
@@ -663,12 +690,15 @@ async function generateWaypointPlan(
     }
   }
 
+  const historicalPreferenceProfile =
+    await loadHistoricalPreferenceProfile()
   const plan =
-    await requestWaypointPlan(
+    await requestWaypointPlan({
       location,
       preferences,
-      nearbyPois
-    )
+      nearbyPois,
+      historicalPreferenceProfile
+    })
 
   return {
     status: 'success',
@@ -1201,6 +1231,8 @@ async function generateRoutes(
     }
   }
 
+  // One detached snapshot per invocation, shared by every replanning attempt.
+  const historicalPreferenceProfile = await loadHistoricalPreferenceProfile()
   const session = createRoutePlanningSession({
     start: location,
     verifiedWaypointPool: nearbyPois,
@@ -1217,8 +1249,10 @@ async function generateRoutes(
     let plan
     let planFailure
     try {
-      plan = await requestWaypointPlan(location, preferences, nearbyPois,
-        attempt === 1 ? undefined : { attempt, previousFailures: [...observations] })
+      plan = await requestWaypointPlan({
+        location, preferences, nearbyPois, historicalPreferenceProfile,
+        replanningContext: attempt === 1 ? undefined : { attempt, previousFailures: [...observations] }
+      })
       if (!hasValidWaypointPlanShape(plan)) planFailure = { error: 'INVALID_AI_ROUTE_PLAN' }
     } catch (error) {
       if (error && isProviderUnavailableCode(error.code)) throw error

@@ -215,7 +215,51 @@ Failures use `{ "success": false, "error": { "code", "message" } }` with codes
 exhaustion is a normalized storage failure; callers may retry refresh later.
 Unchanged history preserves the saved timestamp and values. Concurrent refreshes
 use a revision fence and reread history on conflicts. No feedback transaction,
-current-questionnaire update, planning or UI integration is part of this API.
+current-questionnaire update or UI integration is part of this API. Route planning
+consumes `refreshProfile()` as described below.
+
+## aiRoutePlanner historical input (Issue #82)
+
+The existing `startPoint`, `preferences`, `nearbyPois` and optional
+`replanningContext` inputs now accept an optional `historicalPreferenceProfile`:
+
+```js
+{
+  environmentWeights: { park, water, street, shoppingStreet }, // each finite 0–1
+  preferredDurationMinutes, // null or 15–120, multiple of 5
+  crowdPreferenceSignal, // null or finite -1–1
+  likedTags, // unique positive allowlisted tags, at most 4
+  dislikedTags, // unique negative allowlisted tags, at most 8
+  evidenceWalkCount // integer 1–20
+}
+```
+
+Positive tags: `nice_view`, `quiet`, `comfortable_route`, `duration_good`.
+Negative tags: `too_crowded`, `too_quiet`, `distance_too_long`, `distance_too_short`,
+`duration_too_long`, `duration_too_short`, `route_hard_to_walk`, `pois_not_interesting`.
+
+`generateRoutes()` refreshes once after finding nearby POIs and before the AI loop,
+then projects the validated public profile into these six fields. Replanning reuses
+that snapshot. Missing/malformed/unavailable profiles, including refresh errors,
+are non-fatal: omit the history field entirely rather than sending null. No raw
+evidence, source metadata, ownership, timestamps, other counts, history records,
+feedback comments, historical location/geometry or provider data are sent to AI.
+
+The cloud prompt builder independently normalizes this untrusted optional input.
+Extra top-level fields are stripped; malformed required fields, unknown or duplicate
+tags, oversized arrays and non-exact environment keys cause history to be ignored.
+They do not produce `INVALID_AI_ROUTE_INPUT`; core inputs retain strict validation.
+Without valid history, the original prompt remains unchanged.
+
+The AI prompt explicitly instructs the planner to prioritize the current duration,
+route type, crowd preference and environment ranking over conflicting history. This
+is prompt-level guidance for soft waypoint selection; hard downstream validation and
+Route Engine facts remain authoritative. History is only a secondary personalization
+signal, never current POI/crowd/walkability facts. The prompt also explains the
+direction of environment/crowd signals and treats smaller evidenceWalkCount values as
+weaker history. Output schema and verified POI ID validation are unchanged. Current
+requested duration still controls POI discovery, optimization and route validation;
+deterministic fallback does not consume history.
 
 ## feedbackStore Cloud Function (Issue #80)
 

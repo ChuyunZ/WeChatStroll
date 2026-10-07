@@ -53,6 +53,7 @@ test.each(failures)('%s is not cached as an unreachable edge and stops generatio
   })
   const handler = gateway(request)
   wx.cloud.callFunction.mockImplementation(async ({ name, data }) => {
+    if (name === 'preferenceProfileStore') return { result: { success: true, profile: null } }
     if (name === 'aiRoutePlanner') return { result: { success: true, plan: {
       candidates: [{ waypoints: [{ poiId: poi.poiId }] }, { waypoints: [{ poiId: alternative.poiId }] }]
     } } }
@@ -74,7 +75,7 @@ test.each(failures)('%s is not cached as an unreachable edge and stops generatio
   await expect(generateRoutes({ durationMinutes: 30, routeType: 'point_to_point' }))
     .rejects.toMatchObject({ code: 'PROVIDER_GATEWAY_FAILED' })
   expect(wx.cloud.callFunction.mock.calls.map(([{ name, data }]) => data.action || name))
-    .toEqual(['nearbyPois', 'aiRoutePlanner', 'walkingRoute'])
+    .toEqual(['nearbyPois', 'refreshProfile', 'aiRoutePlanner', 'walkingRoute'])
   expect(request).toHaveBeenCalledTimes(1)
 })
 
