@@ -1,3 +1,5 @@
+jest.mock('../miniprogram/services/preference-profile-records', () => ({ refreshProfile: jest.fn(async () => null) }))
+
 jest.mock(
   '../miniprogram/services/location',
   () => ({

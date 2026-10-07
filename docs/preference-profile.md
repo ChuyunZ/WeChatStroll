@@ -3,9 +3,58 @@
 `preferenceProfileStore` recomputes a small, versioned, explainable profile from
 application-owned durable `walks` and structured `feedback`. It is a soft historical
 signal, separate from current questionnaire intent. The current questionnaire is
-never changed and will take precedence in future integrations. No ML, AI inference,
-route ranking, planner integration or Profile UI is included (#82/#83/#87 remain
-separate).
+never changed and takes precedence in AI waypoint planning (Issue #82). Profile
+computation remains deterministic; route ranking (#83) and Profile UI (#87) remain
+separate.
+
+## AI waypoint planning integration (Issue #82)
+
+`route-generation.generateRoutes()` obtains and validates the current location,
+searches nearby POIs using the current requested duration, and builds the verified
+POI pool. An empty pool returns before refreshing history. Otherwise it calls
+`preference-profile-records.refreshProfile()` once, before creating the route
+planning session and entering the AI attempt loop. Refresh is necessary because
+saving feedback does not automatically recompute the profile.
+
+The validated public profile is projected into a detached snapshot containing only:
+
+| Field | AI input bounds |
+| --- | --- |
+| `environmentWeights` | Exactly `park`, `water`, `street`, `shoppingStreet`; finite numbers in [0, 1] |
+| `preferredDurationMinutes` | null or 15–120, multiple of 5 |
+| `crowdPreferenceSignal` | null or finite number in [-1, 1] |
+| `likedTags` | Unique allowed positive tags, at most 4 |
+| `dislikedTags` | Unique allowed negative tags, at most 8 |
+| `evidenceWalkCount` | Integer 1–20 |
+
+The tag allowlists are the same as the public schema below. No schema metadata,
+completed/ended-early/feedback counts, evidence tree, source/fingerprint, timestamps,
+ownership fields, raw walks, feedback comments, GPS, geometry or provider payloads
+are sent as history. `aiRoutePlanner` treats this client input as untrusted and
+independently validates all bounds, drops extra top-level fields, and reconstructs
+the six-field object. Invalid required fields or extra environment keys cause the
+whole history signal to be ignored, without weakening core input validation.
+
+Missing history, malformed profiles and refresh failures are non-fatal: the AI
+request omits `historicalPreferenceProfile`, and the original no-history prompt is
+preserved. The refresh failure log contains only a fixed unavailable code, never
+the upstream error, profile, prompt or coordinates. Every replanning attempt reuses
+the same snapshot; previous-failure observations continue to evolve independently.
+A new `generateRoutes()` invocation refreshes again. Background candidate filling
+uses cached candidates and does not refresh or call AI again.
+
+With valid history, the prompt labels CURRENT WALK INTENT as highest priority and
+HISTORICAL PREFERENCE PROFILE as a secondary soft signal. Current duration, route
+type, crowd preference and environment ranking always override conflicting history.
+Historical tags and crowd signals describe the user, not verified facts about any
+current POI. AI still only selects verified POI IDs; the route contract and Route
+Engine remain authoritative for coordinates, walking facts and route geometry.
+POI search radius, optimizer target and duration validation use current requested
+duration. Deterministic fallback continues to use only the current questionnaire.
+
+Demo evidence should show saved feedback producing a changed refreshed profile
+that reaches a later AI prompt. A different final route is not guaranteed: it also
+depends on the verified POI pool, current intent and model behavior.
 
 ## Canonical history and schema
 
