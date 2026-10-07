@@ -1,5 +1,6 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
 const locationService = require('./location')
+const { rankRoutes } = require('./route-ranking')
 const { refreshProfile } = require('./preference-profile-records')
 const { validateProfile } = require('../utils/preference-profile-schema')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
@@ -1302,7 +1303,9 @@ async function generateRoutes(
           logCandidateSummary(candidateCache)
           console.log('[Agent Planning] Success:', { attempt, source })
           return {
-            status: 'success', source, location, routes: [result.route],
+            status: 'success', source, location,
+            routes: rankRoutes([result.route], { preferences, historicalPreferenceProfile }),
+            historicalPreferenceProfile,
             routePlanningSession: session, waypointCandidateCache: candidateCache,
             planningMetadata: buildPlanningMetadata(attemptCount, false, [...observations, ...attemptObservations])
           }
@@ -1336,7 +1339,12 @@ async function generateRoutes(
   const result = await buildFallbackGenerationResult({
     location, poisByCategory, preferences, trigger, routePlanningSession: session
   })
-  return { ...result, planningMetadata: buildPlanningMetadata(attemptCount, true, observations) }
+  return { ...result,
+    ...(result.status === 'success' ? {
+      routes: rankRoutes(result.routes, { preferences, historicalPreferenceProfile }),
+      historicalPreferenceProfile
+    } : {}),
+    planningMetadata: buildPlanningMetadata(attemptCount, true, observations) }
 }
 
 async function generateFirstRoute(

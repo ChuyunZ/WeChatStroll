@@ -330,6 +330,35 @@ describe('progressive initial route loading', () => {
     expect(page.data.routes).toHaveLength(1);
     expect(page.data.isLoadingMoreRoutes).toBe(false);
   });
+
+  test('progressive ranking renders immediately, reranks each success and never scores a failure', async () => {
+    const { pending } = setup();
+    const ranking = require('../miniprogram/services/route-ranking');
+    const rank = jest.spyOn(ranking, 'rankRoutes');
+    const first = { ...GENERATED_ROUTE, durationSeconds: 2100 };
+    const second = { ...GENERATED_ROUTE, routeId: 'second', durationSeconds: 1920 };
+    const third = { ...GENERATED_ROUTE, routeId: 'third', durationSeconds: 1800 };
+    const initial = await page.getRoutes();
+    page.getRoutes.mockResolvedValue({ ...initial, routes: [first] });
+    page._routePreferences = { durationMinutes: 30 };
+    await page.loadRoutes();
+    expect(page.data.routeState).toBe('success');
+    expect(page.data.routes).toHaveLength(1);
+    expect(page.data.routes[0].isBestMatch).toBe(false);
+    page.viewRoute({ currentTarget: { dataset: { id: first.routeId } } });
+    expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+    await settle(pending[0], { success: false, route: { ...first, routeId: 'invalid' } });
+    expect(rank).toHaveBeenCalledTimes(1);
+    await settle(pending[1], { success: true, route: second });
+    expect(page._rawRoutes).toEqual([second, first]);
+    expect(page.data.routes.map(route => route.isBestMatch)).toEqual([true, false]);
+    await settle(pending[2], { success: true, route: third });
+    await page._initialFillPromise;
+    expect(page._rawRoutes).toEqual([third, second, first]);
+    expect(rank).toHaveBeenCalledTimes(3);
+    expect(page.data.routes.map(route => route.isBestMatch)).toEqual([true, false, false]);
+    expect(page._rawRoutes.every(route => !('isBestMatch' in route) && !('totalScore' in route))).toBe(true);
+  });
 });
 
 beforeEach(() => {
@@ -542,6 +571,7 @@ describe(
 
           routePlanningSession,
           waypointCandidateCache,
+          historicalPreferenceProfile: null,
           location:
             ROUTE_LOCATION
         });
@@ -1516,6 +1546,48 @@ describe(
       expect(page._rawRoutes).toEqual([route]);
       expect(page.data.routes[0].optimization).toEqual(route.optimization);
       expect(page._routePlanningSession).toBe(session);
+    });
+
+    test('showOtherRoutes removes one displayed route then ranks the replacement set', async () => {
+      prepareReplacement();
+      const removed = { ...GENERATED_ROUTE, routeId: 'removed', durationSeconds: 2700 };
+      const retained = { ...GENERATED_ROUTE, routeId: 'retained', durationSeconds: 2900 };
+      const replacement = { ...GENERATED_ROUTE, routeId: 'replacement', durationSeconds: 2750 };
+      page._rawRoutes = [removed, retained];
+      routeGenerationServiceMock.buildOptimizedCandidateRoute.mockResolvedValue({ success: true, route: replacement });
+      await page.showOtherRoutes();
+      expect(page._rawRoutes).toEqual([replacement, retained]);
+      expect(page.data.routes.map(route => route.isBestMatch)).toEqual([true, false]);
+      expect(routeGenerationServiceMock.generateRoutes).not.toHaveBeenCalled();
+    });
+
+    test('ranking reuses the returned history privately and resets it on a new load and unload', async () => {
+      const history = { environmentWeights: { park: 0, water: 1 } };
+      const park = { ...GENERATED_ROUTE, routeId: 'park', durationSeconds: 1800, pointsOfInterest: [{ category: 'park' }] };
+      const water = { ...park, routeId: 'water', pointsOfInterest: [{ category: 'water' }] };
+      page._routePreferences = { durationMinutes: 30 };
+      routeGenerationServiceMock.generateRoutes.mockResolvedValue({
+        status: 'success', ...createSuccessfulRouteLoadResult({ routes: [park, water] }),
+        historicalPreferenceProfile: history
+      });
+      await page.loadRoutes();
+      expect(page._historicalPreferenceProfile).toBe(history);
+      expect(page._rawRoutes).toEqual([water, park]);
+      expect(page.data).not.toHaveProperty('historicalPreferenceProfile');
+      const ranking = require('../miniprogram/services/route-ranking');
+      const rank = jest.spyOn(ranking, 'rankRoutes');
+      page.rankCurrentRoutes([park, water]);
+      expect(rank.mock.calls[0][1].historicalPreferenceProfile).toBe(history);
+      const deferred = createDeferred();
+      routeGenerationServiceMock.generateRoutes.mockReturnValueOnce(deferred.promise);
+      const load = page.loadRoutes();
+      expect(page._historicalPreferenceProfile).toBeNull();
+      deferred.resolve({ status: 'success', ...createSuccessfulRouteLoadResult() });
+      await load;
+      expect(page._historicalPreferenceProfile).toBeNull();
+      page._historicalPreferenceProfile = history;
+      page.onUnload();
+      expect(page._historicalPreferenceProfile).toBeNull();
     });
 
     test("showOtherRoutes skips failed candidates and displays the next success", async () => {

@@ -31,6 +31,33 @@ The goal is to make sure every part of the application uses the same field names
 
 ## 2. Allowed values
 
+### Runtime recommendation ranking
+
+Validated complete routes are ranked progressively: the first valid route is
+available immediately, and successful alternatives, replacements and confirmed
+validated edits rerank the displayed set. Ranking is distinct from optimizing
+waypoint order and never relaxes route validation.
+
+V1 uses real `durationSeconds` and unique verified `pointsOfInterest[].category`
+values (`park`, `water`, `shoppingStreet`). Current duration/environment weights
+are 0.50/0.30, with 0.20 for secondary history from the same compact snapshot used
+by AI planning. Missing components are excluded and weights renormalized. Street,
+crowd, feedback tags and generic quality are not grounded route-level signals and
+do not contribute; duplicate POI categories do not increase their weight.
+
+`scoreRoute()` exposes scores, components, normalized weights and deterministic
+tie-break keys as separate runtime data. `rankRoutes()` returns unchanged route
+objects in a new array. No scoring metadata, historical profile or `isBestMatch`
+field belongs in the persisted Route/Walk snapshot. The latter is derived only
+for the Routes page, and appears only on the first of at least two alternatives.
+`recommendationReason` remains unchanged.
+
+Tie-breaking never uses `routeId` or timestamps: score components and duration
+error precede a canonical waypoint key, followed by stable route facts for shared
+or missing IDs. Fact-identical duplicates remain equivalent. See the
+[runtime ranking API](api-contract.md#runtime-ranking-api-v1) for exact formulas,
+missing-value handling and tie-break order.
+
 ### `routeType`
 
 Use one of:

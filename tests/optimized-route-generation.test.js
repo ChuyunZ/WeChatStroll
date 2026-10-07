@@ -366,8 +366,10 @@ test('first-time user refreshes once and omits history from successful AI planni
 test('public history is projected into a detached six-field snapshot without changing current intent', async () => {
   const profile = historicalProfile()
   refreshProfile.mockResolvedValue(profile)
-  expect((await generateRoutes(preferences)).source).toBe('ai')
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai')
   const input = aiCalls()[0][1]
+  expect(result.historicalPreferenceProfile).toBe(input.historicalPreferenceProfile)
   expect(input.preferences).toEqual(preferences)
   expect(input.historicalPreferenceProfile).toEqual(compactHistory)
   profile.environmentWeights.park = 0
@@ -406,7 +408,9 @@ test('replanning reuses one history snapshot and still updates failure context',
     success: true, durationSeconds: from.nodeId === 'B' || to.nodeId === 'B' ? 100 : 1350,
     distanceMeters: 200, polyline: [from, to]
   }))
-  expect((await generateRoutes(preferences)).source).toBe('ai-replanned')
+  const result = await generateRoutes(preferences)
+  expect(result.source).toBe('ai-replanned')
+  expect(result.historicalPreferenceProfile).toBe(aiCalls()[0][1].historicalPreferenceProfile)
   expect(refreshProfile).toHaveBeenCalledTimes(1)
   expect(aiCalls()).toHaveLength(2)
   expect(aiCalls()[0][1].historicalPreferenceProfile).toEqual(compactHistory)
@@ -431,6 +435,7 @@ test.each(['empty', 'error'])('AI %s uses identical fallback selection and walki
   refreshProfile.mockResolvedValue(historicalProfile())
   const personalized = await generateRoutes(preferences)
   expect(personalized.source).toBe('fallback')
+  expect(personalized.historicalPreferenceProfile).toBe(aiCalls()[1][1].historicalPreferenceProfile)
   const facts = route => ({ ids: route.recommendedWaypointIds, duration: route.durationSeconds,
     distance: route.distanceMeters, polyline: route.polyline })
   expect(facts(personalized.routes[0])).toEqual(facts(baseline.routes[0]))

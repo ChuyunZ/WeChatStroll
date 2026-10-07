@@ -91,6 +91,7 @@
 
         <!-- Right information -->
         <view class="route-summary">
+          <view wx:if="{{item.isBestMatch}}" class="best-match">最佳匹配</view>
 
           <text class="route-title">
             {{item.title}}
