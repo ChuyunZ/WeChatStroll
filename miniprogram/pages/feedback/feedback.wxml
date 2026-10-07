@@ -13,6 +13,7 @@
   <view wx:elif="{{state === 'error'}}" class="card">
     <text class="error">{{error}}</text>
     <button class="primary" bindtap="loadFeedback">重新读取</button>
+    <button wx:if="{{canSkip}}" class="skip" bindtap="skipFeedback" disabled="{{submitting || skipping}}">暂时跳过</button>
     <button class="skip" bindtap="returnHome">返回首页</button>
   </view>
   <block wx:else>
