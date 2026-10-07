@@ -198,8 +198,10 @@ Call `wx.cloud.callFunction` with `name: 'preferenceProfileStore'`, via
 Both return `{ "success": true, "profile": null }` when no snapshot/evidence
 exists, otherwise `{ "success": true, "profile": { ... } }`. The service unwraps
 and strictly validates the public profile. It sends no history or computation
-inputs. Additional request fields (including ownerKey, walk IDs, records, weights,
-profile or OPENID) are rejected. Authentication is exclusively server context.
+inputs. CloudBase-injected `event.userInfo` is ignored and is never used for
+identity. Other additional request fields (including ownerKey, walk IDs, records,
+weights, profile or OPENID) are rejected. Authentication is exclusively server
+context via `cloud.getWXContext()`.
 
 The [version-1 public schema](preference-profile.md#canonical-history-and-schema)
 contains bounded environment/duration/crowd signals, ordered tag arrays, evidence
