@@ -20,7 +20,13 @@ function publicProfile(record, ownerKey) {
   if (record.profile === null && Object.keys(record).every(key => ['_id', 'ownerKey', 'revision', 'profile'].includes(key))) return null;
   return validateProfile(Object.fromEntries(PUBLIC_FIELDS.map(key => [key, record[key]])));
 }
-function createProfileHandler({ store, getOpenId, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
+function createProfileHandler({
+  store,
+  getOpenId,
+  now = Date.now,
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  random = Math.random
+}) {
   return async (event = {}) => {
     try {
       const openid = getOpenId();
@@ -40,7 +46,10 @@ function createProfileHandler({ store, getOpenId, now = Date.now, sleep = ms => 
           const result = await store.compareAndSet(ownerKey, revision(previous), profile);
           if (!result.retry) return { success: true, profile: publicProfile(result.record, ownerKey) };
         } catch (error) { if (!conflict(error)) throw error; }
-        if (attempt + 1 < REFRESH_ATTEMPTS) await sleep(10 * (2 ** attempt));
+        if (attempt + 1 < REFRESH_ATTEMPTS) {
+          const baseDelayMs = 10 * (2 ** attempt);
+          await sleep(baseDelayMs + Math.floor(random() * baseDelayMs));
+        }
       }
       fail('PREFERENCE_PROFILE_STORE_FAILED');
     } catch (error) { return publicFailure(error); }
