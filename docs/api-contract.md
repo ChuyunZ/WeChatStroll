@@ -198,10 +198,11 @@ Call `wx.cloud.callFunction` with `name: 'preferenceProfileStore'`, via
 Both return `{ "success": true, "profile": null }` when no snapshot/evidence
 exists, otherwise `{ "success": true, "profile": { ... } }`. The service unwraps
 and strictly validates the public profile. It sends no history or computation
-inputs. CloudBase-injected `event.userInfo` is ignored and is never used for
-identity. Other additional request fields (including ownerKey, walk IDs, records,
-weights, profile or OPENID) are rejected. Authentication is exclusively server
-context via `cloud.getWXContext()`.
+inputs. The handler reads only `event.action`; all other event fields
+(including CloudBase-injected metadata or caller-supplied ownerKey, OPENID, walk IDs,
+records, weights, profile or history) are ignored and cannot influence identity,
+history loading or profile computation. Authentication is exclusively server context
+via `cloud.getWXContext()`.
 
 The [version-1 public schema](preference-profile.md#canonical-history-and-schema)
 contains bounded environment/duration/crowd signals, ordered tag arrays, evidence
@@ -210,8 +211,7 @@ contains ownerKey, revision, comments, raw history, geometry or provider data.
 The client rejects unknown/malformed fields, including any public ownerKey.
 
 Failures use `{ "success": false, "error": { "code", "message" } }` with codes
-`UNAUTHENTICATED`, `INVALID_ACTION`, `INVALID_INPUT`, or
-`PREFERENCE_PROFILE_STORE_FAILED`. Database details are not exposed. Conflict
+`UNAUTHENTICATED`, `INVALID_ACTION`, or `PREFERENCE_PROFILE_STORE_FAILED`. Database details are not exposed. Conflict
 exhaustion is a normalized storage failure; callers may retry refresh later.
 Unchanged history preserves the saved timestamp and values. Concurrent refreshes
 use a revision fence and reread history on conflicts. No feedback transaction,
