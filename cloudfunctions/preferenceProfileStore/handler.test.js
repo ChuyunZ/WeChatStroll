@@ -27,7 +27,13 @@ test('authentication uses server context; get and empty refresh return null safe
   const unauthenticated = createProfileHandler({ store: f.store, getOpenId: () => '' });
   expect((await unauthenticated({ action: 'refreshProfile', OPENID: 'user' })).error.code).toBe('UNAUTHENTICATED');
 });
-test.each(['ownerKey', 'walkIds', 'feedback', 'weights', 'profile', 'history'])('rejects client %s computation/identity inputs', async key => {
+test('ignores CloudBase-injected userInfo and still derives identity from server context', async () => {
+  const f = fixture();
+  expect(await f.handle({ action: 'getProfile', userInfo: { openId: 'forged', appId: 'forged' } }))
+    .toEqual({ success: true, profile: null });
+  expect(f.store.getProfile).toHaveBeenCalledWith(ownerKey);
+});
+test.each(['ownerKey', 'walkIds', 'feedback', 'weights', 'profile', 'history', 'OPENID'])('rejects client %s computation/identity inputs', async key => {
   const f = fixture();
   expect((await f.handle({ action: 'refreshProfile', [key]: 'forged' })).error.code).toBe('INVALID_INPUT');
   expect(f.store.loadHistory).not.toHaveBeenCalled();
