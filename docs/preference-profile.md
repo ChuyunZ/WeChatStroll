@@ -44,8 +44,9 @@ A new `generateRoutes()` invocation refreshes again. Background candidate fillin
 uses cached candidates and does not refresh or call AI again.
 
 With valid history, the prompt labels CURRENT WALK INTENT as highest priority and
-HISTORICAL PREFERENCE PROFILE as a secondary soft signal. Current duration, route
-type, crowd preference and environment ranking always override conflicting history.
+HISTORICAL PREFERENCE PROFILE as a secondary soft signal. The prompt explicitly
+gives current duration, route type, crowd preference and environment ranking higher
+priority than conflicting history; hard downstream validation remains authoritative.
 Historical tags and crowd signals describe the user, not verified facts about any
 current POI. AI still only selects verified POI IDs; the route contract and Route
 Engine remain authoritative for coordinates, walking facts and route geometry.
