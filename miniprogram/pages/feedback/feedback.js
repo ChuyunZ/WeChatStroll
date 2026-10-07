@@ -4,7 +4,7 @@ const { validId, fields, POSITIVE_TAGS, NEGATIVE_TAGS } = require('../../utils/f
 const options = (values, labels) => values.map((value, index) => ({ value, label: labels[index], selected: false }));
 Page({
   data: {
-    state: 'loading', error: '', summary: '', submitting: false, skipping: false, canSubmit: false,
+    state: 'loading', error: '', summary: '', submitting: false, skipping: false, canSubmit: false, canSkip: false,
     rating: null, observedCrowdLevel: '', wouldRecommend: null, comment: '', positiveTags: [], negativeTags: [],
     ratings: [1, 2, 3, 4, 5],
     crowds: options(['low', 'medium', 'high'], ['人少', '适中', '人多']),
@@ -15,17 +15,22 @@ Page({
   async loadFeedback() {
     if (this._loading) return;
     this._loading = true;
-    this.setData({ state: 'loading', error: '' });
+    this.setData({ state: 'loading', error: '', canSkip: false });
+    let pending = null;
     try {
       if (!validId(this._walkId)) { this.setData({ state: 'empty' }); return; }
-      const pending = sessions.getPendingWalkResult();
+      pending = sessions.getPendingWalkResult();
       if (pending && pending.walkId !== this._walkId) { this.setData({ state: 'empty' }); return; }
       const existing = await records.getFeedback(this._walkId);
       if (existing) { this.showSuccess(); return; }
       if (!pending) { this.setData({ state: 'empty' }); return; }
-      this.setData({ state: 'form', summary: `${pending.completionStatus === 'completed' ? '已完成散步' : '提前结束'} · ${Math.floor(pending.actualDurationSeconds / 60)} 分钟` });
+      this.setData({ state: 'form', canSkip: true, summary: `${pending.completionStatus === 'completed' ? '已完成散步' : '提前结束'} · ${Math.floor(pending.actualDurationSeconds / 60)} 分钟` });
     } catch (_) {
-      this.setData({ state: 'error', error: '暂时无法读取评价，请重试。散步记录已保留。' });
+      this.setData({
+        state: 'error',
+        error: '暂时无法读取评价，请重试。散步记录已保留。',
+        canSkip: Boolean(pending && pending.walkId === this._walkId)
+      });
     } finally { this._loading = false; }
   },
   editable() { return this.data.state === 'form' && !this.data.submitting && !this.data.skipping; },
@@ -51,7 +56,7 @@ Page({
   showSuccess() {
     // Local cleanup failure cannot undo a confirmed cloud save; next load recovers it.
     try { sessions.clearPendingWalkResult(this._walkId); } catch (_) { /* recover on next load */ }
-    this.setData({ state: 'success', error: '' });
+    this.setData({ state: 'success', error: '', canSkip: false });
   },
   async submitFeedback() {
     if (!this.editable()) return;
@@ -64,13 +69,24 @@ Page({
     finally { this.setData({ submitting: false }); }
   },
   skipFeedback() {
-    if (!this.editable()) return;
+    if (
+      !this.data.canSkip ||
+      !['form', 'error'].includes(this.data.state) ||
+      this.data.submitting ||
+      this.data.skipping
+    ) return;
     this.setData({ skipping: true });
     wx.showModal({ title: '跳过本次评价？', content: '本次散步记录仍会保留，但这次评价不会保存。',
       success: result => {
         if (!result.confirm) return;
-        try { sessions.clearPendingWalkResult(this._walkId); this.returnHome(); }
-        catch (_) { this.setData({ error: '暂时无法跳过，请重试。' }); }
+        try {
+          if (!sessions.clearPendingWalkResult(this._walkId)) {
+            this.setData({ error: '待评价的散步已发生变化，请重新进入评价。', canSkip: false });
+            return;
+          }
+          this.setData({ canSkip: false });
+          this.returnHome();
+        } catch (_) { this.setData({ error: '暂时无法跳过，请重试。' }); }
       },
       complete: () => this.setData({ skipping: false })
     });
