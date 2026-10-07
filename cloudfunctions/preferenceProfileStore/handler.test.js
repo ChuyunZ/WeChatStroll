@@ -15,8 +15,11 @@ function fixture({ random = () => 0 } = {}) {
     })
   };
   const sleep = jest.fn(async () => {});
-  const handle = createProfileHandler({ store, getOpenId: () => 'user', now: () => Date.parse(time), sleep, random });
-  return { handle, store, history, sleep };
+  const logUnexpectedFields = jest.fn();
+  const handle = createProfileHandler({
+    store, getOpenId: () => 'user', now: () => Date.parse(time), sleep, random, logUnexpectedFields
+  });
+  return { handle, store, history, sleep, logUnexpectedFields };
 }
 test('authentication uses server context; get and empty refresh return null safely', async () => {
   const f = fixture();
@@ -36,6 +39,7 @@ test('ignores CloudBase-injected userInfo and still derives identity from server
 test.each(['ownerKey', 'walkIds', 'feedback', 'weights', 'profile', 'history', 'OPENID'])('rejects client %s computation/identity inputs', async key => {
   const f = fixture();
   expect((await f.handle({ action: 'refreshProfile', [key]: 'forged' })).error.code).toBe('INVALID_INPUT');
+  expect(f.logUnexpectedFields).toHaveBeenCalledWith([key]);
   expect(f.store.loadHistory).not.toHaveBeenCalled();
 });
 test('invalid action is safe', async () => {
