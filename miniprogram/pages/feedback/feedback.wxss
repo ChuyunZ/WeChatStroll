@@ -1,0 +1,20 @@
+page { background: #f7f7f7; color: #25382c; }
+.feedback-page { padding: 40rpx 32rpx 64rpx; padding-bottom: calc(64rpx + env(safe-area-inset-bottom)); }
+.title { display: block; font-size: 42rpx; font-weight: 600; }
+.subtitle { display: block; color: #718078; font-size: 28rpx; margin: 16rpx 0 32rpx; }
+.card { background: #fff; border-radius: 24rpx; padding: 30rpx; margin: 24rpx 0; }
+.label { display: block; font-size: 30rpx; font-weight: 500; }
+.required { color: #239e51; }
+.hint { display: block; color: #7a857e; font-size: 24rpx; margin-top: 12rpx; }
+.choices { display: flex; flex-wrap: wrap; gap: 16rpx; margin-top: 24rpx; }
+button.choice { margin: 0; padding: 0 24rpx; font-size: 26rpx; line-height: 72rpx; border-radius: 36rpx; background: #f3f5f3; color: #4b5e51; }
+button.choice.selected { background: #e3f8e9; color: #177c3e; box-shadow: inset 0 0 0 2rpx #2fc766; }
+button.rating { padding: 0 18rpx; }
+button::after { border: none; }
+textarea { box-sizing: border-box; width: 100%; height: 200rpx; padding: 20rpx; margin-top: 24rpx; border-radius: 16rpx; background: #f7f7f7; font-size: 28rpx; }
+.counter { text-align: right; }
+button.primary { background: #2fc766; color: #fff; border-radius: 44rpx; margin-top: 24rpx; font-size: 30rpx; }
+button.primary[disabled] { background: #bce6c9; color: #fff; }
+button.skip { background: transparent; color: #69776e; font-size: 28rpx; margin-top: 12rpx; }
+.error { display: block; color: #b84936; font-size: 26rpx; line-height: 1.6; }
+.completion { text-align: center; padding: 56rpx 30rpx; }

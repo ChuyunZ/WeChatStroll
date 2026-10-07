@@ -59,6 +59,23 @@ Current planned-route cloud architecture:
   metadata. It does not store planned-route geometry, POIs, raw provider responses,
   or GPS samples.
 
+- **feedbackStore**: Issue #80 structured post-walk feedback. Actions getFeedback
+  and submitFeedback own feedback/{walkId}, derive ownership from authenticated
+  OPENID, read authoritative walks, and transactionally prevent duplicate writes.
+  Feedback contains only allowlisted metadata, with no geometry/POIs/GPS.
+
+Issue #80 development rollout status:
+
+1. The `feedback` collection has been created in the development CloudBase
+   environment and configured as server-only / ADMINONLY.
+2. `cloudfunctions/feedbackStore` has been deployed with its locked dependencies.
+   It uses DYNAMIC_CURRENT_ENV, needs no new environment variables or custom query
+   indexes, and requires the existing `walks` collection.
+3. Manual development E2E validation confirmed authenticated lookup, real
+   `ended_early` feedback persistence, duplicate-submit immutability,
+   response-loss recovery, and `completed`-walk Skip behavior.
+4. The validation did not change Tencent Maps or Track Cloud configuration.
+
 See [map provider deployment](map-provider-deployment.md) for server configuration,
 shared limiter state, the 2026-10-04 development smoke/E2E validation record and the
 still-unresolved data-use/AI/persistence release checkpoint.

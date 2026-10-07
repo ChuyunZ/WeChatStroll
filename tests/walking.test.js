@@ -626,7 +626,7 @@ describe("Walking page", () => {
     const navigationOptions = wx.reLaunch.mock.calls[0][0];
 
     expect(navigationOptions.url).toBe(
-      `/pages/feedback/feedback?routeId=${encodeURIComponent(TEST_ROUTE.routeId)}`
+      `/pages/feedback/feedback?walkId=${encodeURIComponent("walk-test")}`
     );
 
     expect(wx.getStorageSync("pendingWalkResult")).toEqual(
@@ -1148,7 +1148,7 @@ describe("durable completion before trajectory cleanup", () => {
     expect(startTracking).not.toHaveBeenCalled();
     expect(storage.pendingWalkResult.trajectoryPartial).toBe(true);
     expect(wx.reLaunch).toHaveBeenCalledWith(expect.objectContaining({
-      url: `/pages/feedback/feedback?routeId=${encodeURIComponent(TEST_ROUTE.routeId)}`
+      url: `/pages/feedback/feedback?walkId=${encodeURIComponent("walk-test")}`
     }));
     const tracker = require("../miniprogram/services/walking-tracker");
     expect(tracker.stopTrackingForSession).toHaveBeenCalledWith(expect.objectContaining({

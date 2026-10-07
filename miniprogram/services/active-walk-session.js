@@ -190,8 +190,11 @@ function getPendingWalkResult() {
   return result;
 }
 
-function clearPendingWalkResult() {
+function clearPendingWalkResult(walkId) {
+  const pending = wx.getStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+  if (typeof walkId !== "string" || !walkId || (pending && pending.walkId !== walkId)) return false;
   wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+  return true;
 }
 
 function restoreCloudWalk(walk, route) {

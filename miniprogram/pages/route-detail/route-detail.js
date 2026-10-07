@@ -156,7 +156,7 @@ Page({
       const pending = activeWalkSessionService.getPendingWalkResult();
       if (pending && pending.walkId) {
         wx.reLaunch({
-          url: `/pages/feedback/feedback?routeId=${encodeURIComponent(pending.routeId)}`,
+          url: `/pages/feedback/feedback?walkId=${encodeURIComponent(pending.walkId)}`,
           fail: () => wx.showToast({ title: "散步已保存，暂时无法打开评价页面", icon: "none" })
         });
       }

@@ -1,4 +1,63 @@
-<view class="container">
-  <text class="title">Feedback</text>
-  <text class="subtitle">Walking feedback will go here.</text>
+<view class="feedback-page">
+  <view wx:if="{{state === 'loading'}}" class="card">正在读取评价…</view>
+  <view wx:elif="{{state === 'success'}}" class="card completion">
+    <text class="title">感谢你的反馈</text>
+    <text class="subtitle">你的体验已经保存，散步记录也已保留。</text>
+    <button class="primary" bindtap="returnHome">返回首页</button>
+  </view>
+  <view wx:elif="{{state === 'empty'}}" class="card completion">
+    <text class="title">没有待评价的散步</text>
+    <text class="subtitle">请从已结束的散步进入评价。</text>
+    <button class="primary" bindtap="returnHome">返回首页</button>
+  </view>
+  <view wx:elif="{{state === 'error'}}" class="card">
+    <text class="error">{{error}}</text>
+    <button class="primary" bindtap="loadFeedback">重新读取</button>
+    <button wx:if="{{canSkip}}" class="skip" bindtap="skipFeedback" disabled="{{submitting || skipping}}">暂时跳过</button>
+    <button class="skip" bindtap="returnHome">返回首页</button>
+  </view>
+  <block wx:else>
+    <text class="title">这次散步怎么样？</text>
+    <text class="subtitle">{{summary}}</text>
+    <view class="card">
+      <text class="label">整体体验怎么样？<text class="required"> *</text></text>
+      <view class="choices">
+        <button wx:for="{{ratings}}" wx:key="*this" class="choice rating {{rating === item ? 'selected' : ''}}" data-value="{{item}}" bindtap="selectRating" disabled="{{submitting || skipping}}">{{item}} ★</button>
+      </view>
+      <text class="hint">1 分不满意，5 分非常满意</text>
+    </view>
+    <view class="card">
+      <text class="label">实际人流怎么样？<text class="required"> *</text></text>
+      <view class="choices">
+        <button wx:for="{{crowds}}" wx:key="value" class="choice {{observedCrowdLevel === item.value ? 'selected' : ''}}" data-value="{{item.value}}" bindtap="selectCrowd" disabled="{{submitting || skipping}}">{{item.label}}</button>
+      </view>
+    </view>
+    <view class="card">
+      <text class="label">你会推荐这条路线吗？<text class="required"> *</text></text>
+      <view class="choices">
+        <button class="choice {{wouldRecommend === true ? 'selected' : ''}}" data-value="yes" bindtap="selectRecommend" disabled="{{submitting || skipping}}">会</button>
+        <button class="choice {{wouldRecommend === false ? 'selected' : ''}}" data-value="no" bindtap="selectRecommend" disabled="{{submitting || skipping}}">不会</button>
+      </view>
+    </view>
+    <view class="card">
+      <text class="label">哪些体验不错？</text><text class="hint">可多选，选填</text>
+      <view class="choices">
+        <button wx:for="{{positiveOptions}}" wx:key="value" class="choice {{item.selected ? 'selected' : ''}}" data-group="positive" data-value="{{item.value}}" bindtap="toggleTag" disabled="{{submitting || skipping}}">{{item.label}}</button>
+      </view>
+    </view>
+    <view class="card">
+      <text class="label">哪些地方可以改进？</text><text class="hint">可多选，选填</text>
+      <view class="choices">
+        <button wx:for="{{negativeOptions}}" wx:key="value" class="choice {{item.selected ? 'selected' : ''}}" data-group="negative" data-value="{{item.value}}" bindtap="toggleTag" disabled="{{submitting || skipping}}">{{item.label}}</button>
+      </view>
+    </view>
+    <view class="card">
+      <text class="label">还有什么想告诉我们？</text>
+      <textarea value="{{comment}}" maxlength="500" bindinput="onComment" placeholder="分享你的体验（选填）" disabled="{{submitting || skipping}}" />
+      <text class="hint counter">{{comment.length}} / 500</text>
+    </view>
+    <text wx:if="{{error}}" class="error">{{error}}</text>
+    <button class="primary" bindtap="submitFeedback" loading="{{submitting}}" disabled="{{!canSubmit || submitting || skipping}}">{{submitting ? '正在保存' : '提交评价'}}</button>
+    <button class="skip" bindtap="skipFeedback" disabled="{{submitting || skipping}}">暂时跳过</button>
+  </block>
 </view>

@@ -1048,3 +1048,15 @@ test("late consent callbacks cannot create a walk after Route Detail unloads", (
   page.requestTrajectoryConsent(GENERATED_ROUTE);
   expect(wx.showModal).not.toHaveBeenCalled();
 });
+
+test("Route Detail recovers pending feedback using the durable walk identity", async () => {
+  wx.setStorageSync("pendingWalkResult", {
+    walkId: "walk-feedback", routeId: GENERATED_ROUTE.routeId, route: GENERATED_ROUTE,
+    startTime: "2026-10-07T01:00:00Z", endTime: "2026-10-07T01:05:00Z",
+    actualDurationSeconds: 300, completionStatus: "completed"
+  });
+  await page.onShow();
+  expect(wx.reLaunch).toHaveBeenCalledWith(expect.objectContaining({
+    url: "/pages/feedback/feedback?walkId=walk-feedback"
+  }));
+});
