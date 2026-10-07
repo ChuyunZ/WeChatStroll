@@ -251,11 +251,15 @@ tags, oversized arrays and non-exact environment keys cause history to be ignore
 They do not produce `INVALID_AI_ROUTE_INPUT`; core inputs retain strict validation.
 Without valid history, the original prompt remains unchanged.
 
-The current questionnaire always overrides historical duration, route type, crowd
-preference and environment ranking. History is only a secondary personalization
-signal, never current POI/crowd/walkability facts. Output schema and verified POI ID
-validation are unchanged. Current requested duration still controls POI discovery,
-optimization and route validation; deterministic fallback does not consume history.
+The AI prompt explicitly instructs the planner to prioritize the current duration,
+route type, crowd preference and environment ranking over conflicting history. This
+is prompt-level guidance for soft waypoint selection; hard downstream validation and
+Route Engine facts remain authoritative. History is only a secondary personalization
+signal, never current POI/crowd/walkability facts. The prompt also explains the
+direction of environment/crowd signals and treats smaller evidenceWalkCount values as
+weaker history. Output schema and verified POI ID validation are unchanged. Current
+requested duration still controls POI discovery, optimization and route validation;
+deterministic fallback does not consume history.
 
 ## feedbackStore Cloud Function (Issue #80)
 
