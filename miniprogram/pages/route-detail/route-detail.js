@@ -7,7 +7,21 @@ const {
   ROUTE_TYPES
 } = require("../../constants/route-types");
 
+const walkRecords = require("../../services/walk-records");
+
 const ACTIVE_WALK_REDIRECT_LOCK_MS = 3000;
+
+const DEV_DEFAULT_PREFERENCES = {
+  durationMinutes: 30,
+  routeType: ROUTE_TYPES.LOOP,
+  crowdPreference: "medium",
+  environmentPreferences: [
+    "公园",
+    "水边",
+    "街道",
+    "商街"
+  ]
+};
 
 Page({
   data: {
@@ -41,6 +55,12 @@ Page({
     this._activeWalkRedirectStartedAtMs = 0;
 
     const routeId = options.id;
+    this._routePreferences =
+      options.from === "routes"
+        ? null
+        : walkRecords.preferencesSnapshot(
+            DEV_DEFAULT_PREFERENCES
+          );
 
     // 正常从 Routes 页面进入时，
     // 真实 Route 会通过 EventChannel 传过来。
@@ -56,6 +76,9 @@ Page({
         typeof eventChannel.on === "function"
       ) {
         this._eventChannel = eventChannel;
+        eventChannel.on("routePreferences", value => {
+          this._routePreferences = walkRecords.preferencesSnapshot(value);
+        });
         this._previewHandler = result => this.receiveRoutePreview(result);
         this._confirmHandler = result => this.receiveRouteConfirmation(result);
         eventChannel.on("routePreviewResult", this._previewHandler);
@@ -90,7 +113,7 @@ Page({
     this.loadRoute(mockRoute);
   },
 
-  onShow() {
+  async onShow() {
     if (this._unloaded || this._startingWalk) {
       return;
     }
@@ -114,14 +137,29 @@ Page({
     let activeSession;
 
     try {
-      activeSession = activeWalkSessionService.getActiveWalkSession();
+      activeSession = await activeWalkSessionService.reconcileActiveWalk(this._confirmedRoute);
     } catch (error) {
-      console.warn("[Route Detail] Unable to read active walk session.");
+      wx.showToast({
+        title:
+          error.code === "WALK_ROUTE_UNAVAILABLE" || error.code === "WALK_ABANDONED"
+            ? error.message
+            : "暂时无法恢复散步状态，请重试",
+        icon: "none"
+      });
       return;
     }
 
+    if (this._unloaded) return;
     if (activeSession) {
       this.resumeActiveWalk(activeSession);
+    } else {
+      const pending = activeWalkSessionService.getPendingWalkResult();
+      if (pending && pending.walkId) {
+        wx.reLaunch({
+          url: `/pages/feedback/feedback?routeId=${encodeURIComponent(pending.routeId)}`,
+          fail: () => wx.showToast({ title: "散步已保存，暂时无法打开评价页面", icon: "none" })
+        });
+      }
     }
   },
 
@@ -537,7 +575,7 @@ Page({
     });
   },
 
-  beginWalk(route, trackingEnabled) {
+  async beginWalk(route, trackingEnabled) {
     if (this._unloaded) return;
     if (
       this._startingWalk ||
@@ -551,23 +589,29 @@ Page({
     let sessionResult;
 
     try {
-      sessionResult =
-        activeWalkSessionService.createActiveWalkSession(
-          route,
-          Date.now(),
-          {
-            trackingEnabled
-          }
-        );
+      let existing = null;
+      try {
+        existing = await activeWalkSessionService.reconcileActiveWalk(route);
+      } catch (error) {
+        if (error.code !== "WALK_ABANDONED") throw error;
+        wx.showToast({ title: error.message, icon: "none" });
+      }
+      if (existing) sessionResult = { session: existing, created: false };
+      else {
+        const walk = await walkRecords.startWalk({ routeId: route.routeId,
+          preferences: this._routePreferences, trajectoryEnabled: trackingEnabled });
+        sessionResult = { session: activeWalkSessionService.restoreCloudWalk(walk, route), created: true };
+      }
     } catch (error) {
       this._startingWalk = false;
       wx.showToast({
-        title: "暂时无法开始散步",
+        title: error.code === "WALK_ROUTE_UNAVAILABLE" ? error.message : "暂时无法开始散步，请重试",
         icon: "none"
       });
       return;
     }
 
+    if (this._unloaded) { this._startingWalk = false; return; }
     const { session, created } = sessionResult;
 
     if (
@@ -599,18 +643,6 @@ Page({
       },
 
       fail: () => {
-        if (created) {
-          try {
-            activeWalkSessionService.clearActiveWalkSession(
-              session.routeId
-            );
-          } catch (error) {
-            console.warn(
-              "[Route Detail] Unable to clear failed walk session."
-            );
-          }
-        }
-
         wx.showToast({
           title: "暂时无法打开散步页面",
           icon: "none"

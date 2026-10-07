@@ -8,7 +8,7 @@ The goal is to make sure every part of the application uses the same field names
 
 | Field | Type | Required | Description |
 |---|---|---:|---|
-| `routeId` | string | Yes | Unique identifier for the route |
+| `routeId` | string | Yes | Application-generated route identity. Generated IDs are provider-neutral and combine a timestamp, local monotonic sequence and random suffix; they must not embed provider POI IDs or coordinates because `routeId` may be persisted as walk lifecycle metadata. |
 | `title` | string | Yes | User-facing route title |
 | `durationMinutes` | number | Yes | Estimated walking duration in minutes |
 | `durationSeconds` | number | For optimized routes | Complete walking duration used for ordering; minutes are rounded up for display |

@@ -5,6 +5,8 @@ const locationService = require("../../services/location");
 const activeWalkSessionService = require("../../services/active-walk-session");
 const walkingTracker = require("../../services/walking-tracker");
 
+const walkRecords = require("../../services/walk-records");
+
 const TIMER_INTERVAL_MS = 1000;
 
 function formatElapsedTime(totalSeconds) {
@@ -64,7 +66,8 @@ Page({
     navigationBarHeight: 44
   },
 
-  onLoad(options = {}) {
+  async onLoad(options = {}) {
+    this._unloaded = false;
     this._pageVisible = true;
     this._active = false;
     this._finishing = false;
@@ -85,18 +88,37 @@ Page({
     let pendingResult;
 
     try {
-      activeSession = activeWalkSessionService.getActiveWalkSession();
+      activeSession = await activeWalkSessionService.reconcileActiveWalk();
       if (!activeSession) pendingResult = activeWalkSessionService.getPendingWalkResult();
     } catch (error) {
+      if (error && error.code === "WALK_ABANDONED") {
+        this._active = false;
+        this.setData({
+          loading: false,
+          error: false,
+          finishing: false,
+          ended: true
+        });
+        wx.showToast({
+          title: "本次散步因长时间未结束，已自动关闭",
+          icon: "none"
+        });
+        wx.navigateBack();
+        return;
+      }
       this.showRouteError();
       wx.showToast({
-        title: "暂时无法恢复散步状态",
+        title: error.code === "WALK_ROUTE_UNAVAILABLE" ? error.message : "暂时无法恢复散步状态，请重试",
         icon: "none"
       });
-      return;
+      // A matching EventChannel/local mock route may still restore the cloud lock.
+      if (error.code !== "WALK_ROUTE_UNAVAILABLE") return;
     }
 
+    if (this._unloaded) return;
     if (activeSession) {
+      this._walkId = activeSession.walkId;
+      this._completionRequest = activeSession.completionRequest;
       if (!this.isValidRoute(activeSession.route)) {
         try {
           activeWalkSessionService.clearActiveWalkSession(activeSession.routeId);
@@ -148,7 +170,7 @@ Page({
             return;
           }
 
-          this.startWalkingRoute(route);
+          return this.startWalkingRoute(route);
         });
 
         return;
@@ -157,7 +179,7 @@ Page({
 
     // 兼容开发阶段直接打开 Walking 页面。
     const mockRoute = mockRoutes.find(route => route.routeId === routeId);
-    this.startWalkingRoute(mockRoute);
+    return this.startWalkingRoute(mockRoute);
   },
 
   onShow() {
@@ -221,12 +243,13 @@ Page({
   },
 
   onUnload() {
+    this._unloaded = true;
     this._pageVisible = false;
     this.stopTimer();
     this.disableLeaveProtection();
 
     this._active = false;
-    this._route = null;
+    if (!this._finishing) this._route = null;
     this._eventChannel = null;
   },
 
@@ -247,30 +270,18 @@ Page({
     );
   },
 
-  startWalkingRoute(route) {
-    if (!this.isValidRoute(route)) {
-      this.showRouteError();
-      return;
-    }
-
-    let sessionResult;
-
+  async startWalkingRoute(route) {
     try {
-      sessionResult = activeWalkSessionService.createActiveWalkSession(route);
+      const session = await activeWalkSessionService.reconcileActiveWalk(route);
+      if (this._unloaded) return;
+      if (!session) { this.showRouteError(); return; }
+      this._walkId = session.walkId;
+      this._completionRequest = session.completionRequest;
+      this.loadWalkingRoute(session.route, session.startTimeMs, session.trackingEnabled);
     } catch (error) {
       this.showRouteError();
-      wx.showToast({
-        title: "暂时无法保存散步状态",
-        icon: "none"
-      });
-      return;
+      wx.showToast({ title: "请返回路线详情开始散步，或重试恢复", icon: "none" });
     }
-
-    this.loadWalkingRoute(
-      sessionResult.session.route,
-      sessionResult.session.startTimeMs,
-      sessionResult.session.trackingEnabled === true
-    );
   },
 
   loadWalkingRoute(
@@ -589,25 +600,6 @@ Page({
     return stopPromise;
   },
 
-  restartTrajectoryTrackingAfterRollback() {
-    const restart = () => {
-      if (!this._active || this.data.ended) {
-        return;
-      }
-
-      this._trackingFinalizing = false;
-      this._trackingUnavailable = false;
-      this.initializeTrajectoryTracking();
-    };
-
-    if (this._trackingStopPromise) {
-      this._trackingStopPromise.finally(restart);
-      return;
-    }
-
-    restart();
-  },
-
   updateElapsedTime() {
     if (!this._active || !Number.isFinite(this._startTimeMs)) {
       return;
@@ -730,6 +722,7 @@ Page({
     );
 
     const walkResult = {
+      walkId: this._walkId,
       routeId: this._route.routeId,
       route: this._route,
       startTime: new Date(this._startTimeMs).toISOString(),
@@ -744,30 +737,44 @@ Page({
       trajectoryPartial: knownPartial || this._trackingEnabled
     };
 
+    // Retain the original confirmation on retry, including response-loss retries.
+    const request = this._completionRequest || { walkId: this._walkId, completionStatus,
+      endTimeMs, trajectoryPartial: walkResult.trajectoryPartial };
+    this._completionRequest = request;
+    let terminal;
+    try {
+      const session = activeWalkSessionService.getActiveWalkSession();
+      if (session && session.walkId === this._walkId) {
+        wx.setStorageSync(activeWalkSessionService.ACTIVE_WALK_STORAGE_KEY, { ...session, completionRequest: request });
+      }
+      terminal = await walkRecords.completeWalk(request);
+    } catch (error) {
+      this._finishing = false;
+      if (error && error.code === "WALK_ABANDONED") {
+        const session = activeWalkSessionService.getActiveWalkSession();
+        if (session && session.walkId === this._walkId) {
+          walkingTracker.stopTrackingForSession(session);
+          activeWalkSessionService.clearActiveWalkSession(session.routeId, session.walkId);
+        }
+        this._active = false;
+        this.stopTimer();
+        this.disableLeaveProtection();
+        this.setData({ finishing: false, ended: true });
+        wx.showToast({ title: "本次散步因长时间未结束，已自动关闭", icon: "none" });
+        wx.navigateBack();
+        return;
+      }
+      wx.showToast({ title: "暂时无法结束散步，请重试", icon: "none" });
+      return;
+    }
+    Object.assign(walkResult, { endTime: terminal.endTime, completionStatus: terminal.status,
+      actualDurationSeconds: terminal.actualDurationSeconds, trajectoryEndTimeMs: terminal.trajectoryEndTimeMs });
     try {
       activeWalkSessionService.savePendingWalkResult(walkResult);
-
-      const cleared = activeWalkSessionService.clearActiveWalkSession(
-        this._route.routeId
-      );
-
-      if (!cleared) {
-        activeWalkSessionService.clearPendingWalkResult();
-        throw new Error("Active walk session changed.");
-      }
+      activeWalkSessionService.clearActiveWalkSession(walkResult.routeId, walkResult.walkId);
     } catch (error) {
-      try {
-        activeWalkSessionService.clearPendingWalkResult();
-      } catch (cleanupError) {
-        console.warn("[Walking] Unable to clear pending walk result after completion failure.");
-      }
-
-      this._finishing = false;
-      wx.showToast({
-        title: "暂时无法结束散步，请重试",
-        icon: "none"
-      });
-      return;
+      // Cloud is terminal even when device storage is unavailable. Next load reconciles by walkId.
+      wx.showToast({ title: "散步已保存，本地恢复信息暂时无法更新", icon: "none" });
     }
 
     this._active = false;
@@ -776,14 +783,15 @@ Page({
     this.disableLeaveProtection();
 
     this.setData({
-      elapsedSeconds: actualDurationSeconds,
-      elapsedText: formatElapsedTime(actualDurationSeconds),
+      elapsedSeconds: walkResult.actualDurationSeconds,
+      elapsedText: formatElapsedTime(walkResult.actualDurationSeconds),
       finishing: true,
       ended: true
     });
 
     if (this._trackingEnabled) {
-      const quality = await this.finalizeTrajectoryTracking();
+      let quality;
+      try { quality = await this.finalizeTrajectoryTracking(); } catch (_) { quality = null; }
       const completedResult = {
         ...walkResult,
         trajectoryPartial: Boolean(knownPartial || !quality || quality.trajectoryPartial),
@@ -803,8 +811,18 @@ Page({
           activeWalkSessionService.savePendingWalkResult(completedResult);
         }
       } catch (error) {
-        // Completion is already durable. Keep the conservative quality marker.
+        // Completion is already durable. Cloud metadata is updated independently below.
         console.warn("[Walking] Unable to update completed trajectory quality.");
+      }
+      try {
+        await walkRecords.updateTrajectoryMetadata({
+          walkId: completedResult.walkId,
+          trajectoryPartial: completedResult.trajectoryPartial,
+          trajectoryEndTimeMs: completedResult.trajectoryEndTimeMs
+        });
+      } catch (error) {
+        // Never reactivate a terminal walk because a post-finalization metadata write failed.
+        console.warn("[Walking] Unable to persist finalized trajectory metadata.");
       }
     }
 
@@ -814,48 +832,8 @@ Page({
       )}`,
 
       fail: () => {
-        let restored = false;
-        try {
-          const result = activeWalkSessionService.createActiveWalkSession(
-            this._route,
-            this._startTimeMs,
-            {
-              trackingEnabled: this._trackingEnabled
-            }
-          );
-          restored = result.session.routeId === this._route.routeId &&
-            result.session.startTimeMs === this._startTimeMs;
-        } catch (error) {
-          console.warn("[Walking] Unable to restore active session after navigation failure.");
-        }
-
-        if (!restored) return;
-
-        try {
-          activeWalkSessionService.clearPendingWalkResult();
-        } catch (error) {
-          console.warn("[Walking] Unable to clear pending walk result after navigation failure.");
-          return;
-        }
-
-        this._active = true;
-        this._finishing = false;
-
-        this.setData({
-          finishing: false,
-          ended: false
-        });
-
-        this.enableLeaveProtection();
-
-        if (this._pageVisible) {
-          this.startTimer();
-        }
-
-        this.restartTrajectoryTrackingAfterRollback();
-
         wx.showToast({
-          title: "暂时无法打开评价页面",
+          title: "散步已保存，暂时无法打开评价页面",
           icon: "none"
         });
       }

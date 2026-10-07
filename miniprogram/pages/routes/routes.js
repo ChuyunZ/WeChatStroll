@@ -522,6 +522,7 @@ Page({
           res.eventChannel &&
           typeof res.eventChannel.emit === "function"
         ) {
+          res.eventChannel.emit("routePreferences", this._routePreferences);
           res.eventChannel.emit(
             "selectedRoute",
             selectedRoute

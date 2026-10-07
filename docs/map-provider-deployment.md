@@ -271,5 +271,9 @@ raw fields but does not itself confer permission to store or process derived dat
 
 `activeWalkSession` currently stores a route snapshot locally. That existing behavior
 is unchanged and must be reviewed as a deployment/data-policy checkpoint, not treated
-as an approved exception. Actual GPS trajectory via Track Cloud is a separate data
-flow; its separation does not resolve permission for Tencent planned-route data.
+as an approved exception. Issue #79's `walkStore` persistence is deliberately narrower:
+it stores lifecycle/questionnaire metadata plus a provider-neutral application
+`routeId`, but no Tencent POI IDs, route geometry, planned coordinates, or provider
+payloads. This does not establish permission to persist a planned-route summary later.
+Actual GPS trajectory via Track Cloud is a separate data flow; its separation does not
+resolve permission for Tencent planned-route data.

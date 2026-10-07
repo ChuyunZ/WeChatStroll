@@ -1,3 +1,6 @@
+const { mockWalkRecords } = require("./helpers/walk-records");
+let walkRecords;
+async function flushCloud() { for (let i = 0; i < 12; i++) await Promise.resolve(); }
 const {
   mockRoutes
 } = require(
@@ -134,6 +137,8 @@ function loadRouteDetailPage({
 
   pageDefinition = null;
   storage = {};
+  walkRecords = mockWalkRecords(() => storage);
+  jest.doMock("../miniprogram/services/walk-records", () => walkRecords);
 
 
   global.Page =
@@ -144,6 +149,7 @@ function loadRouteDetailPage({
 
 
   global.wx = {
+    reLaunch: jest.fn(),
     navigateBack:
       jest.fn(),
 
@@ -200,6 +206,7 @@ function loadRouteDetailPage({
     );
 
 
+  pageInstance._routePreferences = { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] };
   return pageInstance;
 }
 
@@ -215,6 +222,65 @@ afterEach(() => {
 
   delete global.Page;
   delete global.wx;
+});
+
+test("direct development Route Detail initializes valid fallback questionnaire context", async () => {
+  delete page._routePreferences;
+  page.onLoad({ id: mockRoutes[0].routeId });
+  expect(page._routePreferences).toEqual({
+    durationMinutes: 30,
+    routeType: "loop",
+    crowdPreference: "medium",
+    environmentPreferences: ["公园", "水边", "街道", "商街"]
+  });
+  await page.beginWalk(mockRoutes[0], false);
+  expect(walkRecords.startWalk).toHaveBeenCalledWith({
+    routeId: mockRoutes[0].routeId,
+    preferences: page._routePreferences,
+    trajectoryEnabled: false
+  });
+});
+
+test("questionnaire context reaches Start separately from the selected route", async () => {
+  const eventChannel = createEventChannel();
+  page = loadRouteDetailPage({ eventChannel });
+  page.onLoad({ id: GENERATED_ROUTE.routeId, from: "routes" });
+  const preferences = { durationMinutes: 45, routeType: "loop", crowdPreference: "low", environmentPreferences: ["公园"] };
+  eventChannel.handlers.routePreferences(preferences);
+  eventChannel.handlers.selectedRoute(GENERATED_ROUTE);
+  await page.beginWalk(GENERATED_ROUTE, true);
+  expect(walkRecords.startWalk).toHaveBeenCalledWith({ routeId: GENERATED_ROUTE.routeId, preferences, trajectoryEnabled: true });
+  expect(storage.activeWalkSession).toMatchObject({ version: 2, walkId: "walk-test", preferences });
+  expect(GENERATED_ROUTE).not.toHaveProperty("preferences");
+});
+
+test("durable Start failure never creates a local-only walk and remains retryable", async () => {
+  walkRecords.startWalk.mockRejectedValueOnce(new Error("database unavailable"));
+  await page.beginWalk(GENERATED_ROUTE, false);
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(page._startingWalk).toBe(false);
+  await page.beginWalk(GENERATED_ROUTE, false);
+  expect(storage.activeWalkSession.walkId).toBe("walk-test");
+  expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+});
+
+test("navigation failure after Start keeps durable identity and retry resumes it", async () => {
+  wx.navigateTo.mockImplementation(options => { options.fail(); options.complete(); });
+  await page.beginWalk(GENERATED_ROUTE, true);
+  const local = storage.activeWalkSession;
+  await page.beginWalk(GENERATED_ROUTE, false);
+  expect(storage.activeWalkSession).toEqual(local);
+  expect(walkRecords.startWalk).toHaveBeenCalledTimes(1);
+});
+
+test("existing cloud walk on another route blocks Start without local geometry", async () => {
+  walkRecords.getActiveWalk.mockResolvedValue({ walkId: "other", routeId: "another-route", status: "active" });
+  await page.beginWalk(GENERATED_ROUTE, false);
+  expect(walkRecords.startWalk).not.toHaveBeenCalled();
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(wx.showToast).toHaveBeenCalledWith(expect.objectContaining({ title: expect.stringContaining("当前设备缺少") }));
 });
 
 
@@ -649,9 +715,9 @@ describe(
 
     test(
       "Route Detail recovers from an interrupted redirect lock",
-      () => {
+      async () => {
         wx.setStorageSync("activeWalkSession", {
-          version: 1,
+          version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
           status: "active",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
@@ -665,7 +731,7 @@ describe(
 
         wx.navigateTo.mockClear();
 
-        page.onShow();
+        await page.onShow();
 
         expect(wx.navigateTo).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -681,7 +747,7 @@ describe(
 
     test(
       "startWalk confirms, locks the route, and opens Walking",
-      () => {
+      async () => {
         const walkingEventChannel = {
           emit: jest.fn()
         };
@@ -695,6 +761,7 @@ describe(
 
         page.loadRoute(GENERATED_ROUTE);
         page.startWalk();
+        await flushCloud();
 
         expect(wx.showModal).toHaveBeenNthCalledWith(
           1,
@@ -719,7 +786,7 @@ describe(
         expect(wx.setStorageSync).toHaveBeenCalledWith(
           "activeWalkSession",
           expect.objectContaining({
-            version: 1,
+            version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
             status: "active",
             routeId: GENERATED_ROUTE.routeId,
             route: GENERATED_ROUTE,
@@ -750,7 +817,7 @@ describe(
 
     test(
       "rapid duplicate Start Walk taps open only one confirmation and one Walking page",
-      () => {
+      async () => {
         let confirmStart;
         let confirmTracking;
 
@@ -776,7 +843,9 @@ describe(
         page.loadRoute(GENERATED_ROUTE);
 
         page.startWalk();
+        await flushCloud();
         page.startWalk();
+        await flushCloud();
 
         expect(wx.showModal).toHaveBeenCalledTimes(1);
         expect(wx.navigateTo).not.toHaveBeenCalled();
@@ -786,11 +855,13 @@ describe(
         expect(wx.showModal).toHaveBeenCalledTimes(2);
 
         page.startWalk();
+        await flushCloud();
 
         expect(wx.showModal).toHaveBeenCalledTimes(2);
         expect(wx.navigateTo).not.toHaveBeenCalled();
 
         confirmTracking();
+        await flushCloud();
 
         expect(wx.navigateTo).toHaveBeenCalledTimes(1);
         expect(wx.setStorageSync).toHaveBeenCalledTimes(1);
@@ -800,7 +871,7 @@ describe(
 
     test(
       "declining trajectory recording still starts the walk",
-      () => {
+      async () => {
         wx.showModal.mockImplementation(options => {
           if (options.title === "确认开始这次散步？") {
             options.success({
@@ -818,6 +889,7 @@ describe(
 
         page.loadRoute(GENERATED_ROUTE);
         page.startWalk();
+        await flushCloud();
 
         expect(wx.setStorageSync).toHaveBeenCalledWith(
           "activeWalkSession",
@@ -834,7 +906,7 @@ describe(
 
     test(
       "canceling the start confirmation does not create an active walk",
-      () => {
+      async () => {
         wx.showModal.mockImplementation(options => {
           options.success({
             confirm: false,
@@ -844,6 +916,7 @@ describe(
 
         page.loadRoute(GENERATED_ROUTE);
         page.startWalk();
+        await flushCloud();
 
         expect(wx.setStorageSync).not.toHaveBeenCalled();
         expect(wx.navigateTo).not.toHaveBeenCalled();
@@ -853,9 +926,9 @@ describe(
 
     test(
       "Route Detail resumes an existing active walk instead of allowing another route",
-      () => {
+      async () => {
         wx.setStorageSync("activeWalkSession", {
-          version: 1,
+          version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
           status: "active",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
@@ -864,7 +937,7 @@ describe(
 
         wx.navigateTo.mockClear();
 
-        page.onShow();
+        await page.onShow();
 
         expect(wx.navigateTo).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -877,11 +950,11 @@ describe(
 
     test(
       "Route Detail clears a completed active-walk lock instead of resuming it",
-      () => {
+      async () => {
         const startTimeMs = Date.now() - 30 * 60 * 1000;
 
         wx.setStorageSync("activeWalkSession", {
-          version: 1,
+          version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
           status: "active",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
@@ -890,6 +963,7 @@ describe(
         });
 
         wx.setStorageSync("pendingWalkResult", {
+          walkId: "walk-test",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
           startTime: new Date(startTimeMs).toISOString(),
@@ -900,7 +974,7 @@ describe(
 
         wx.navigateTo.mockClear();
 
-        page.onShow();
+        await page.onShow();
 
         expect(wx.navigateTo).not.toHaveBeenCalled();
         expect(
@@ -911,37 +985,49 @@ describe(
 
 
     test(
-      "Route Detail clears an abandoned active-walk lock older than 12 hours",
-      () => {
+      "Route Detail clears a server-abandoned walk instead of resuming it",
+      async () => {
+        const startTimeMs =
+          Date.now() - 13 * 60 * 60 * 1000;
+
         wx.setStorageSync("activeWalkSession", {
-          version: 1,
+          version: 2, walkId: "walk-test", preferences: { durationMinutes: 30, routeType: "loop", crowdPreference: "medium", environmentPreferences: [] },
           status: "active",
           routeId: GENERATED_ROUTE.routeId,
           route: GENERATED_ROUTE,
-          startTimeMs:
-            Date.now() - 13 * 60 * 60 * 1000,
+          startTimeMs,
           trackingEnabled: true
+        });
+        walkRecords.getWalk.mockResolvedValueOnce({
+          walkId: "walk-test",
+          routeId: GENERATED_ROUTE.routeId,
+          status: "abandoned",
+          completionStatus: "abandoned"
         });
 
         wx.navigateTo.mockClear();
 
-        page.onShow();
+        await page.onShow();
 
         expect(wx.navigateTo).not.toHaveBeenCalled();
-        expect(
-          wx.getStorageSync("activeWalkSession")
-        ).toBeUndefined();
+        expect(wx.getStorageSync("activeWalkSession")).toBeUndefined();
+        expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+        expect(wx.showToast).toHaveBeenCalledWith({
+          title: "上一次散步因长时间未结束，已自动关闭",
+          icon: "none"
+        });
       }
     );
 
 
     test(
       "startWalk does nothing while route editing is active",
-      () => {
+      async () => {
         page.loadRoute(GENERATED_ROUTE);
         page.data.editing = true;
 
         page.startWalk();
+        await flushCloud();
 
         expect(wx.showModal).not.toHaveBeenCalled();
         expect(wx.navigateTo).not.toHaveBeenCalled();

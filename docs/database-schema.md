@@ -24,9 +24,16 @@
 
 ---
 
-# 2. Preferences Collection
+# 2. Preferences Collection (future proposal; not implemented by #79)
 
-The `preferences` collection stores location-based walking preferences for each user.
+The `preferences` collection below is a future personalization proposal, not an
+implemented #79 collection. Issue #79 stores only the questionnaire snapshot inside
+each `walks` record. In that snapshot, `environmentPreferences` uses the four
+user-facing questionnaire labels `公园`, `水边`, `街道`, and `商街`.
+Internal route/provider category tokens such as `park`, `water`, and
+`shoppingStreet` are not valid persisted questionnaire values.
+
+The proposed `preferences` collection stores location-based walking preferences for each user.
 
 A user may have multiple preference records associated with different locations. When recommending routes, the backend first searches for a preference within 2 km of the user's current location. If no matching preference is found, the user's most frequently used preference is used as the fallback.
 
@@ -45,8 +52,8 @@ Preferences are initially generated from questionnaire answers and may later be 
   "durationMinutes": 30,
   "crowdPreference": "medium",
   "environmentPreferences": [
-    "park",
-    "river"
+    "公园",
+    "水边"
   ],
   "routeType": "loop",
   "usageCount": 5
@@ -62,7 +69,7 @@ Preferences are initially generated from questionnaire answers and may later be 
 | `location` | object | Yes | Location associated with this walking preference | See GeoPoint |
 | `durationMinutes` | number | Yes | Preferred walking duration in minutes | `30` |
 | `crowdPreference` | string | Yes | Preferred crowd level | `"medium"` |
-| `environmentPreferences` | string[] | Yes | Preferred environment or route features | `["park", "river"]` |
+| `environmentPreferences` | string[] | Yes | Preferred environment or route features; current questionnaire snapshots use the four user-facing labels | `["公园", "水边"]` |
 | `routeType` | string | Yes | Preferred route shape/type | `"loop"` |
 | `usageCount` | number | Yes | Number of times this preference has been used for route recommendations | `5` |
 
@@ -82,7 +89,14 @@ Preferences are initially generated from questionnaire answers and may later be 
 
 ---
 
-# 3. Routes Collection
+# 3. Routes Collection (historical proposal; persistence blocked)
+
+**This section is not authoritative permission to persist planned routes.** The examples
+below describe an earlier proposal, not an implemented/approved CloudBase collection.
+Tencent WebService persistence and AI-use remain blocked pending written confirmation
+under #94. See [data policy](route-data-contract.md) and
+[deployment checkpoint](map-provider-deployment.md#data-use-and-deployment-checkpoint).
+Issue #79 does not write this collection or planned-route/POI data.
 
 The route structure mainly follows `docs/route-data-contract.md`.
 
@@ -158,63 +172,114 @@ The route structure mainly follows `docs/route-data-contract.md`.
 
 ---
 
-# 4. Walks Collection
+# 4. Walk lifecycle collections (Issue #79, schema version 1)
 
-## Example Active Walk Document
+The walkStore Cloud Function owns **walks** and **active_walks**. Authentication
+comes only from cloud.getWXContext().OPENID; no user provisioning is required.
+The owner key is the SHA-256 hex digest of that authenticated OpenID. It is not
+returned to clients and raw OpenID is never used as a document ID.
 
-```json
-{
-  "_id": "walk_001",
-  "userId": "user_1837",
-  "routeId": "route_001",
-  "durationMinutes": 0,
-  "distanceMeters": 0,
-  "completed": false,
-  "startTime": "2026-08-13T14:30:00+08:00",
-  "endTime": null
-}
-```
+| Walk field | Stored value |
+| --- | --- |
+| _id / walkId | Random opaque 128-bit identifier of the same lifecycle document |
+| ownerKey | Server-derived user hash used for ownership checks |
+| status | active, completed, ended_early, or abandoned |
+| routeId | Application route identity; not a reference to a persisted Routes snapshot |
+| preferences | Allowlisted questionnaire: durationMinutes, routeType, crowdPreference, environmentPreferences |
+| requestedDurationMinutes / routeType | Copied from the questionnaire, not provider estimates |
+| startTime | Server-generated ISO timestamp |
+| endTime | Null while active or abandoned; user-confirmed timestamp for completed / ended_early |
+| actualDurationSeconds | Zero while active; server-computed for completed / ended_early; null when abandoned because the real end is unknown |
+| completionStatus | Null while active; completed / ended_early after user completion; abandoned after stale-session cleanup |
+| trajectoryEnabled | Explicit consent choice captured at start |
+| trajectoryPartial | Conservative quality flag; true for opted-in walks pending trajectory cleanup |
+| trajectoryEndTimeMs | Null while active or abandoned; confirmation/query boundary for completed / ended_early |
+| schemaVersion | 1 |
+| createdAt / updatedAt | Server-generated ISO timestamps |
 
-## Example Completed Walk Document
+A deterministic active_walks/{ownerKey} document holds { walkId }.
+Start transactionally reads that lock, returns its existing active walk, or creates
+a walk and sets the lock atomically. Completion checks ownership, updates the same
+walk, and clears only its matching lock to { walkId: null }. This tombstone
+continues to provide a deterministic transaction fence. There is no query-then-add
+race and no dependency on a process-local mutex. Explicit transactions retry only
+recognized conflicts, at most four attempts. Retry delays use bounded exponential
+backoff with jitter (10–19 ms, 20–39 ms, then 40–79 ms); non-conflict failures are
+propagated immediately. Conflict detection accepts the documented conflict code and
+the equivalent SDK message forms.
 
-```json
-{
-  "_id": "walk_001",
-  "userId": "user_1837",
-  "routeId": "route_001",
-  "durationMinutes": 32,
-  "distanceMeters": 2540,
-  "completed": true,
-  "startTime": "2026-08-13T14:30:00+08:00",
-  "endTime": "2026-08-13T15:02:00+08:00"
-}
-```
+Allowed terminal transitions are **active -> completed**, **active -> ended_early**,
+and server-driven **active -> abandoned** after 12 hours. `abandoned` means the
+user never supplied a trustworthy Finish / End Early boundary: `endTime`,
+`actualDurationSeconds`, and `trajectoryEndTimeMs` therefore remain null instead
+of fabricating a 12-hour walk. Repeating the same user terminal status returns the
+original record without changing its time; a different terminal status is rejected.
+Database failures return normalized errors. Navigation and Track Cloud failures
+cannot reactivate any terminal walk.
 
-## Fields
+The five actions are startWalk, getActiveWalk, getWalk, completeWalk and
+updateTrajectoryMetadata. The last action is limited to opted-in completed /
+ended_early walks and can update only trajectoryPartial, trajectoryEndTimeMs and
+updatedAt; it cannot change lifecycle state or user-confirmed timing.
+All read/write operations are scoped to authenticated ownership. The response is
+{ success: true, walk } (null only for no active walk), or
+{ success: false, error: { code, message } }.
 
-| Field | Type | Required | Description | Example |
-| --- | --- | ---: | --- | --- |
-| `_id` | string | Yes | Unique identifier for the walk | `"walk_001"` |
-| `userId` | string | Yes | `_id` of the user who owns the walk | `"user_1837"` |
-| `routeId` | string | Yes | `_id` of the route used for the walk | `"route_001"` |
-| `durationMinutes` | number | Yes | Actual duration of the walk in minutes | `32` |
-| `distanceMeters` | number | Yes | Actual distance walked in meters | `2540` |
-| `completed` | boolean | Yes | Whether the walk has been completed | `true` |
-| `startTime` | string | Yes | Time the walk started in ISO 8601 format | `"2026-08-13T14:30:00+08:00"` |
-| `endTime` | string \| null | Yes | Time the walk ended. `null` while the walk is still active | `"2026-08-13T15:02:00+08:00"` |
+## Local recovery and trajectory boundary
 
-A newly created walk should use:
+Local activeWalkSession version 2 stores walkId, the LOCAL route snapshot,
+questionnaire, original cloud start time and tracking choice. Pending Feedback results
+also require the same durable walkId; routeId alone is never treated as walk identity.
+v1/malformed sessions or pending results are discarded, and stale active tracking is
+stopped; they are never treated as durable.
+The 12-hour active-walk limit is enforced by `walkStore` using server time, not
+by deleting only the local session. `getActiveWalk`, `getWalk`, `startWalk`,
+and late `completeWalk` access all converge stale active records to `abandoned`.
+`startWalk` may abandon an expired lock and create its replacement atomically in the
+same transaction. Track Cloud keeps its independent 12-hour tracking expiry.
 
-```json
-{
-  "durationMinutes": 0,
-  "distanceMeters": 0,
-  "completed": false,
-  "endTime": null
-}
-```
+Before resuming, the client checks the specific cloud walk. completed / ended_early
+stops stale tracking, clears the local active lock and reconstructs the local pending
+Feedback result when the route is available. abandoned stops stale tracking and
+clears the local lock but deliberately does **not** create a Feedback payload. Missing local geometry plus a cloud
+active walk blocks a second walk. The current route can restore it only if its ID
+matches and map geometry is available; cloud reconstruction is not implemented.
 
-When the walk is finished, the backend updates the duration, distance, completion status, and end time.
+The client saves its completion intent (state and confirmation time) with the local
+active session before requesting completion. Database failure leaves it retryable.
+After cloud success the local pending result is saved, the active session is cleared,
+and the existing Track Cloud final flush runs. Local quality and trajectory query
+boundary are then updated without changing the logical end time. The client also
+best-effort writes that final quality/query boundary back to the already-terminal
+CloudBase record. This metadata update is monotonic: the query boundary cannot move
+backward and a confirmed non-partial trajectory cannot regress to partial because of
+a stale retry. Failure of this post-finalization write never reactivates the walk.
+Feedback navigation failure retains the terminal result for later recovery. Issue #80
+Feedback authoring remains out of scope.
+
+## Data excluded from CloudBase
+
+No full route, polyline, POI records/IDs, selectedWaypointIds, providerMeta, raw provider
+response, walking segments, planned coordinates or GPS samples are uploaded by this
+flow. Questionnaire data is user input. The existing complete route snapshot stays
+local for map rendering, subject to the existing data-policy checkpoint. Actual GPS
+geometry remains exclusively in Tencent Track Cloud; no segment cache is introduced.
+
+## Manual rollout later (not performed by this change)
+
+1. Create walks and active_walks in the intended CloudBase environment.
+2. Configure these collections for server-only access (deny direct Mini Program reads
+   and writes); ownership enforcement is in walkStore. No custom query index is
+   required: operations use document IDs.
+3. Deploy cloudfunctions/walkStore with its locked dependencies, then release the
+   client changes together. It uses DYNAMIC_CURRENT_ENV and needs no new variables.
+4. On a test account, verify Start/retry, concurrent Start, app recreation, Finish/End
+   Early, 12-hour abandonment/replacement, offline retry, missing local route and
+   Feedback navigation failure.
+
+These are future operator steps only. This implementation does not deploy functions,
+change console permissions/environment variables or mutate live documents. It does
+not establish Tencent planned-route persistence approval.
 
 ---
 
@@ -276,26 +341,24 @@ Example feedback tags:
 
 # 6. Collection Relationships
 
-The collections are connected using IDs rather than embedding complete related documents.
+The currently implemented Issue #79 ownership/lifecycle relationship is:
 
 ```text
-users._id
+authenticated OPENID
+    ↓ SHA-256 (server only)
+ownerKey
     ↓
-preferences.userId
-
-users._id
+active_walks/{ownerKey}.walkId
     ↓
-walks.userId
-
-routes._id
-    ↓
-walks.routeId
-
-walks._id
-    ↓
-feedback.walkId
-
-routes._id
-    ↓
-feedback.routeId
+walks/{walkId}
 ```
+
+`walks.routeId` is an application route identity only. It is **not** a foreign key
+to a persisted `routes` collection while planned-route persistence remains blocked
+under the Tencent data-use checkpoint.
+
+The Users, Preferences, Routes, and Feedback sections above include historical/future
+schema proposals that are not all implemented today. In particular, Issue #79 does
+not write `walks.userId`, and the blocked Routes proposal must not be treated as an
+implemented relationship. Future Feedback should reference the durable `walkId`
+without weakening the server-side ownership checks introduced by `walkStore`.
