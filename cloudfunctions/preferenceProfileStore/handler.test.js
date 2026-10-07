@@ -3,7 +3,7 @@ const { createProfileHandler } = require('./handler');
 const { PUBLIC_FIELDS } = require('./profile-schema');
 const ownerKey = crypto.createHash('sha256').update('user').digest('hex');
 const time = '2026-10-07T00:00:00.000Z';
-function fixture() {
+function fixture({ random = () => 0 } = {}) {
   let record = null;
   const history = { walks: [{ ownerKey, walkId: 'walk-1', status: 'completed', endTime: time, requestedDurationMinutes: 30 }], feedback: [] };
   const store = {
@@ -14,8 +14,9 @@ function fixture() {
       return { retry: false, record };
     })
   };
-  const handle = createProfileHandler({ store, getOpenId: () => 'user', now: () => Date.parse(time), sleep: async () => {} });
-  return { handle, store, history };
+  const sleep = jest.fn(async () => {});
+  const handle = createProfileHandler({ store, getOpenId: () => 'user', now: () => Date.parse(time), sleep, random });
+  return { handle, store, history, sleep };
 }
 test('authentication uses server context; get and empty refresh return null safely', async () => {
   const f = fixture();
@@ -75,11 +76,14 @@ test('stale refresh loses CAS, reloads feedback even when latest timestamp is un
   expect(f.store.loadHistory).toHaveBeenCalledTimes(3);
   expect((await f.store.getProfile()).revision).toBe(1);
 });
-test('conflicts re-read full history; retry budget is bounded', async () => {
-  const f = fixture();
+test('conflicts re-read full history; retry budget is bounded and jittered', async () => {
+  const random = jest.fn(() => 0.5);
+  const f = fixture({ random });
   f.store.compareAndSet.mockRejectedValue({ code: 'DATABASE_TRANSACTION_CONFLICT' });
   expect((await f.handle({ action: 'refreshProfile' })).error.code).toBe('PREFERENCE_PROFILE_STORE_FAILED');
   expect(f.store.loadHistory).toHaveBeenCalledTimes(4);
+  expect(f.sleep.mock.calls.map(([ms]) => ms)).toEqual([15, 30, 60]);
+  expect(random).toHaveBeenCalledTimes(3);
 });
 test('corrupt stored owner or profile fails closed', async () => {
   const f = fixture();
