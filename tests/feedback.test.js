@@ -86,6 +86,23 @@ test('lookup failure allows retry without consuming pending', async () => {
   expect(page.data.state).toBe('error'); expect(storage.pendingWalkResult).toBeTruthy();
   await page.loadFeedback(); expect(page.data.state).toBe('form');
 });
+test('lookup failure with matching pending can be explicitly skipped', async () => {
+  records.getFeedback.mockRejectedValueOnce(new Error('offline')); await load();
+  expect(page.data).toMatchObject({ state: 'error', canSkip: true });
+  page.skipFeedback();
+  const modal = wx.showModal.mock.calls[0][0];
+  modal.success({ confirm: true }); modal.complete();
+  expect(records.submitFeedback).not.toHaveBeenCalled();
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(wx.reLaunch).toHaveBeenCalledWith({ url: '/pages/home/home' });
+});
+test('lookup failure without pending does not offer skip', async () => {
+  delete storage.pendingWalkResult;
+  records.getFeedback.mockRejectedValueOnce(new Error('offline')); await load();
+  expect(page.data).toMatchObject({ state: 'error', canSkip: false });
+  page.skipFeedback();
+  expect(wx.showModal).not.toHaveBeenCalled();
+});
 test('storage cleanup failure still displays confirmed cloud success', async () => {
   await load(); fill(); wx.removeStorageSync.mockImplementation(() => { throw new Error('storage'); });
   await page.submitFeedback(); expect(page.data.state).toBe('success'); expect(storage.pendingWalkResult).toBeTruthy();
