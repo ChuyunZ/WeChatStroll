@@ -1,5 +1,9 @@
 # Frontend APIs
 
+The historical HTTP and location/current-preference proposals below are not the
+Issue #81 personalization contract. The implemented historical profile API is
+`preferenceProfileStore` (`getProfile` / `refreshProfile`), documented below.
+
 These APIs are called by the WeChat mini program frontend.
 
 ---
@@ -180,6 +184,36 @@ Authorization: Bearer <OAuth Token>
 ```
 
 ---
+
+## preferenceProfileStore Cloud Function (Issue #81)
+
+Call `wx.cloud.callFunction` with `name: 'preferenceProfileStore'`, via
+`miniprogram/services/preference-profile-records.js`:
+
+| Service method | Exact data | Behavior |
+| --- | --- | --- |
+| `getProfile()` | `{ "action": "getProfile" }` | Read saved snapshot, without recalculating |
+| `refreshProfile()` | `{ "action": "refreshProfile" }` | Load bounded own canonical history, recompute and conditionally save snapshot |
+
+Both return `{ "success": true, "profile": null }` when no snapshot/evidence
+exists, otherwise `{ "success": true, "profile": { ... } }`. The service unwraps
+and strictly validates the public profile. It sends no history or computation
+inputs. Additional request fields (including ownerKey, walk IDs, records, weights,
+profile or OPENID) are rejected. Authentication is exclusively server context.
+
+The [version-1 public schema](preference-profile.md#canonical-history-and-schema)
+contains bounded environment/duration/crowd signals, ordered tag arrays, evidence
+counts, nested explainability, source metadata and `lastUpdatedAt`. It never
+contains ownerKey, revision, comments, raw history, geometry or provider data.
+The client rejects unknown/malformed fields, including any public ownerKey.
+
+Failures use `{ "success": false, "error": { "code", "message" } }` with codes
+`UNAUTHENTICATED`, `INVALID_ACTION`, `INVALID_INPUT`, or
+`PREFERENCE_PROFILE_STORE_FAILED`. Database details are not exposed. Conflict
+exhaustion is a normalized storage failure; callers may retry refresh later.
+Unchanged history preserves the saved timestamp and values. Concurrent refreshes
+use a revision fence and reread history on conflicts. No feedback transaction,
+current-questionnaire update, planning or UI integration is part of this API.
 
 ## feedbackStore Cloud Function (Issue #80)
 
@@ -768,7 +802,7 @@ These functions are used internally by backend services.
 
 ---
 
-## getUserPreferences()
+## getUserPreferences() (historical proposal; not Issue #81)
 
 Returns the user's saved walking preference associated with the current location. If no preference is found within the configured matching radius, returns the user's most frequently used preference.
 
@@ -801,7 +835,7 @@ Returns the user's saved walking preference associated with the current location
 
 ---
 
-## updateOrCreateUserPreferences()
+## updateOrCreateUserPreferences() (historical proposal; not Issue #81)
 
 Updates current user preferences after AI analysis.
 
@@ -877,7 +911,7 @@ Use AI to analyze user's answers to questionnaire.
 
 ---
 
-## updatePreferenceFromFeedback()
+## updatePreferenceFromFeedback() (historical proposal; not Issue #81)
 
 Update preferences for current route.
 

@@ -2,6 +2,32 @@
 
 This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` and `dbHealthCheck` cloud functions.
 
+## Issue #81 preference profile: manual setup pending
+
+The repository implements `cloudfunctions/preferenceProfileStore` and the client
+service `miniprogram/services/preference-profile-records.js`. This does **not** mean
+the function, collection, permissions or indexes have been deployed/configured.
+
+Before manually enabling this API in an environment:
+
+1. Create `preference_profiles`, with server-only / **ADMINONLY** access. Preserve
+   server-only access to `walks` and `feedback`. No client direct reads or writes.
+2. Prepare a compound index on `walks`: `ownerKey ASC, status ASC, endTime DESC,
+   walkId ASC`. The function performs separate completed/ended_early equality
+   queries, each limited to 20. Prepare a `feedback` compound index on
+   `ownerKey ASC, walkId ASC` for the bounded selected-ID query. Verify those query
+   shapes with the deployed CloudBase environment's index requirements.
+3. Deploy `preferenceProfileStore` with its own locked `wx-server-sdk` dependencies.
+   It uses `DYNAMIC_CURRENT_ENV`, authenticated `getWXContext().OPENID`, explicit
+   document transactions and `throwOnNotFound: false`; no new environment variables
+   or provider keys are required.
+4. Manually verify first-user null responses, owner isolation, bounded queries and
+   concurrent refresh behavior against that environment before downstream use.
+
+No live CloudBase setup or deployment is performed by Issue #81's local change.
+Feedback saving remains independent; no automatic refresh hook or UI is added.
+See [algorithm, schema and concurrency](preference-profile.md).
+
 ## 1. CloudBase Environment
 
 The project uses the following CloudBase development environment:

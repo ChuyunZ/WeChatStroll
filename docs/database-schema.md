@@ -26,6 +26,11 @@
 
 # 2. Preferences Collection (future proposal; not implemented by #79)
 
+**Historical location/current-questionnaire proposal only.** This is not the
+historical preference profile implemented by Issue #81. That profile uses the
+separate `preference_profiles` collection documented below; #81 does not implement
+location matching or modify current questionnaire preferences.
+
 The `preferences` collection below is a future personalization proposal, not an
 implemented #79 collection. Issue #79 stores only the questionnaire snapshot inside
 each `walks` record. In that snapshot, `environmentPreferences` uses the four
@@ -353,3 +358,25 @@ schema proposals that are not all implemented today. In particular, Issue #79 do
 not write `walks.userId`, and the blocked Routes proposal must not be treated as an
 implemented relationship. Implemented feedback/{walkId} references the durable walk
 and preserves the server-side ownership checks introduced by walkStore.
+
+# Historical preference profile collection (implemented by Issue #81)
+
+`preference_profiles/{ownerKey}` is implemented in repository code by the independent
+`preferenceProfileStore` Cloud Function. It is intended for server-only / ADMINONLY
+access; deployment and collection/index/permission setup remain manual.
+
+The version-1 document contains server-only `ownerKey` and `revision`, plus
+`schemaVersion`, `environmentWeights`, `preferredDurationMinutes`,
+`crowdPreferenceSignal`, `likedTags`, `dislikedTags`, `evidenceWalkCount`,
+`completedWalkCount`, `endedEarlyWalkCount`, `feedbackCount`, `evidence`, `source`,
+and `lastUpdatedAt`. [The exact nested schema and algorithms](preference-profile.md)
+define the bounded tag counts, environment counters and source fingerprint.
+Public responses omit ownership and revision. Empty evidence returns null; a
+previously populated document can become a revision-preserving null tombstone.
+
+Sources are at most 20 own completed/ended_early walk questionnaire snapshots and
+their structured feedback. Environment weights express questionnaire ranking
+tendency, not actual route environments. No raw history, comments, planned route
+data, POIs, provider responses or GPS samples are stored in this collection.
+This derived historical signal never overwrites current questionnaire preferences.
+The older `preferences` location/current-questionnaire proposal is unrelated.
