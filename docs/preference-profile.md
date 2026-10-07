@@ -114,8 +114,10 @@ failed submissions. No automatic refresh integration is added in this issue.
 
 ## Ownership, queries and data boundaries
 
-OPENID comes only from `cloud.getWXContext()`. Requests accept only `action`, never
-an owner key, IDs, histories or computed profile values. Every query includes the
+OPENID comes only from `cloud.getWXContext()`. CloudBase may inject `event.userInfo`
+for direct Mini Program calls; that platform metadata is ignored and is never used
+for identity. Client-supplied inputs still accept only `action`, never an owner key,
+OPENID, IDs, histories or computed profile values. Every query includes the
 server-derived owner key; builder and feedback join recheck ownership. Document IDs
 must match the persisted walk IDs. Database errors expose normalized messages only.
 Both collections and this derived collection must remain server-only / ADMINONLY.
