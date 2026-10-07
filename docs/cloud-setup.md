@@ -2,31 +2,28 @@
 
 This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` and `dbHealthCheck` cloud functions.
 
-## Issue #81 preference profile: manual setup pending
+## Issue #81 preference profile: development rollout validated
 
-The repository implements `cloudfunctions/preferenceProfileStore` and the client
-service `miniprogram/services/preference-profile-records.js`. This does **not** mean
-the function, collection, permissions or indexes have been deployed/configured.
+The development CloudBase rollout was completed and manually validated on
+2026-10-07. `preference_profiles` is ADMINONLY; `walks` has
+`ownerKey ASC, status ASC, endTime DESC, walkId ASC`; `feedback` has
+`ownerKey ASC, walkId ASC`; and `preferenceProfileStore` is deployed with no
+new environment variables or provider keys.
 
-Before manually enabling this API in an environment:
+Manual E2E verified: no saved snapshot returns `profile: null`; the first refresh
+loaded five terminal walks plus one feedback and created revision 1; an unchanged
+refresh preserved the profile, fingerprint, timestamp and revision; saving a second
+feedback did not mutate the profile until explicit refresh; that refresh changed
+`feedbackCount` 1 -> 2, added `quiet`, moved the crowd signal 0 -> -0.25,
+changed fingerprint/timestamp and advanced revision 1 -> 2. Direct Mini Program
+testing also exposed CloudBase-added event metadata, so the handler now reads only
+`event.action` and ignores all other event fields while deriving identity only
+from `getWXContext().OPENID`.
 
-1. Create `preference_profiles`, with server-only / **ADMINONLY** access. Preserve
-   server-only access to `walks` and `feedback`. No client direct reads or writes.
-2. Prepare a compound index on `walks`: `ownerKey ASC, status ASC, endTime DESC,
-   walkId ASC`. The function performs separate completed/ended_early equality
-   queries, each limited to 20. Prepare a `feedback` compound index on
-   `ownerKey ASC, walkId ASC` for the bounded selected-ID query. Verify those query
-   shapes with the deployed CloudBase environment's index requirements.
-3. Deploy `preferenceProfileStore` with its own locked `wx-server-sdk` dependencies.
-   It uses `DYNAMIC_CURRENT_ENV`, authenticated `getWXContext().OPENID`, explicit
-   document transactions and `throwOnNotFound: false`; no new environment variables
-   or provider keys are required.
-4. Manually verify first-user null responses, owner isolation, bounded queries and
-   concurrent refresh behavior against that environment before downstream use.
-
-No live CloudBase setup or deployment is performed by Issue #81's local change.
-Feedback saving remains independent; no automatic refresh hook or UI is added.
-See [algorithm, schema and concurrency](preference-profile.md).
+Live multi-user isolation and forced transaction-conflict scenarios were not
+manually induced; deterministic automated tests cover those cases. Feedback saving
+remains independent and no automatic refresh hook or Profile UI is added. See
+[algorithm, schema and concurrency](preference-profile.md).
 
 ## 1. CloudBase Environment
 
