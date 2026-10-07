@@ -148,7 +148,7 @@ Page({
       this._finishing = true;
       this.setData({ ended: true, finishing: true });
       wx.reLaunch({
-        url: `/pages/feedback/feedback?routeId=${encodeURIComponent(pendingResult.routeId)}`
+        url: `/pages/feedback/feedback?walkId=${encodeURIComponent(pendingResult.walkId)}`
       });
       return;
     }
@@ -827,8 +827,8 @@ Page({
     }
 
     wx.reLaunch({
-      url: `/pages/feedback/feedback?routeId=${encodeURIComponent(
-        this._route.routeId
+      url: `/pages/feedback/feedback?walkId=${encodeURIComponent(
+        walkResult.walkId
       )}`,
 
       fail: () => {

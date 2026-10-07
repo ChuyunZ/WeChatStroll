@@ -255,7 +255,7 @@ CloudBase record. This metadata update is monotonic: the query boundary cannot m
 backward and a confirmed non-partial trajectory cannot regress to partial because of
 a stale retry. Failure of this post-finalization write never reactivates the walk.
 Feedback navigation failure retains the terminal result for later recovery. Issue #80
-Feedback authoring remains out of scope.
+feedback authoring and recovery are described below.
 
 ## Data excluded from CloudBase
 
@@ -285,57 +285,48 @@ not establish Tencent planned-route persistence approval.
 
 # 5. Feedback Collection
 
-The `feedback` collection stores feedback submitted after a walk.
+Implemented by Issue #80 through the independent **feedbackStore** Cloud Function.
+The deterministic document ID is **feedback/{walkId}**: exactly one immutable
+submission per durable walk, even when the same route is walked repeatedly.
 
-Each feedback record is associated with a specific user and walk.
+| Field | Stored type / rule |
+| --- | --- |
+| walkId | Durable walks/{walkId} ID, also the feedback document ID |
+| ownerKey | Server-derived SHA-256 of authenticated OPENID; never accepted from or returned to client |
+| routeId | Copied from the authoritative walk, never from the request |
+| rating | Integer 1 through 5 |
+| observedCrowdLevel | low, medium, or high; actual experience, not questionnaire crowdPreference |
+| wouldRecommend | Boolean, including explicit false |
+| positiveTags | Array from the positive allowlist below; empty allowed |
+| negativeTags | Array from the negative allowlist below; empty allowed |
+| comment | Optional input, at most 500 characters; trimmed, empty/omitted stored as null |
+| schemaVersion | Integer 1 |
+| createdAt | Server-generated ISO timestamp |
 
-## Example Feedback Document
+Positive tags: nice_view, quiet, comfortable_route, duration_good.
+Negative tags: too_crowded, too_quiet, distance_too_long, distance_too_short,
+duration_too_long, duration_too_short, route_hard_to_walk, pois_not_interesting.
+Duplicate tags and tags from the wrong group are rejected. Both arrays are
+required in the API payload. Unknown request fields are not persisted.
 
-```json
-{
-  "_id": "feedback_001",
-  "userId": "user_1837",
-  "walkId": "walk_001",
-  "routeId": "route_001",
-  "rating": 4,
-  "feedbackTags": [
-    "too_crowded",
-    "distance_too_long"
-  ],
-  "comment": "The route was nice but slightly crowded."
-}
-```
+Every read or submission verifies ownership against walks/{walkId} inside a
+transaction. Only completed and ended_early walks accept submissions;
+active and abandoned are rejected. A missing or non-owned walk returns the
+same WALK_NOT_FOUND error. The transaction reads the deterministic feedback
+path and creates it only when absent; retries return the original submission,
+without overwriting values. Transaction conflicts use bounded retries.
 
-## Fields
+The collection must be server-only / ADMINONLY; the Mini Program calls the
+cloud function, never the database directly. No route snapshot, polyline,
+planned coordinates, POIs, Tencent IDs, provider metadata, raw provider responses,
+GPS samples, or Track Cloud geometry are stored. Feedback operations never
+write a walk or active-walk lock and do not implement personalization.
 
-| Field | Type | Required | Description | Example |
-| --- | --- | ---: | --- | --- |
-| `_id` | string | Yes | Unique identifier for the feedback record | `"feedback_001"` |
-| `userId` | string | Yes | `_id` of the user who submitted the feedback | `"user_1837"` |
-| `walkId` | string | Yes | `_id` of the walk being reviewed | `"walk_001"` |
-| `routeId` | string | Yes | `_id` of the route associated with the walk | `"route_001"` |
-| `rating` | number | Yes | User rating for the completed walk | `4` |
-| `feedbackTags` | string[] | Yes | Structured feedback tags selected by the user | `["too_crowded", "distance_too_long"]` |
-| `comment` | string | No | Optional free-text feedback | `"The route was nice but slightly crowded."` |
-
-Rating range:
-
-- `1`
-- `2`
-- `3`
-- `4`
-- `5`
-
-Example feedback tags:
-
-- `too_crowded`
-- `too_quiet`
-- `distance_too_long`
-- `distance_too_short`
-- `duration_too_long`
-- `duration_too_short`
-- `nice_view`
-- `comfortable_route`
+The local pendingWalkResult remains until confirmed submission (including
+recovery of existing server feedback) or explicit Skip confirmation. Cleanup
+requires the same walkId, protecting a newer pending walk. Failed saves keep
+form input and pending results. Skip creates no feedback document and does not
+change the terminal walk. Feedback navigation uses walkId, never routeId.
 
 ---
 
@@ -357,8 +348,8 @@ walks/{walkId}
 to a persisted `routes` collection while planned-route persistence remains blocked
 under the Tencent data-use checkpoint.
 
-The Users, Preferences, Routes, and Feedback sections above include historical/future
+The Users, Preferences, and Routes sections above include historical/future
 schema proposals that are not all implemented today. In particular, Issue #79 does
 not write `walks.userId`, and the blocked Routes proposal must not be treated as an
-implemented relationship. Future Feedback should reference the durable `walkId`
-without weakening the server-side ownership checks introduced by `walkStore`.
+implemented relationship. Implemented feedback/{walkId} references the durable walk
+and preserves the server-side ownership checks introduced by walkStore.

@@ -181,91 +181,64 @@ Authorization: Bearer <OAuth Token>
 
 ---
 
-## POST /walks/{walkId}/feedback
+## feedbackStore Cloud Function (Issue #80)
 
-Save current user's feedback to the walk.
+Call wx.cloud.callFunction with name "feedbackStore" and the data below, through
+miniprogram/services/feedback-records.js. This replaces the historical HTTP
+feedback endpoint. Identity comes from server-side cloud.getWXContext().OPENID;
+no OAuth header, userId, ownerKey, routeId, or route snapshot is sent.
 
-### URL Params
-walkId
+### getFeedback
 
-### Data Params
+Input: { "action": "getFeedback", "walkId": "walk_001" }.
+Success: { "success": true, "feedback": null } when absent, or the public
+feedback object when already saved. The walk must exist and belong to the caller.
 
-```json
+### submitFeedback
+
+~~~json
 {
-  "routeId": "route_143",
+  "action": "submitFeedback",
+  "walkId": "walk_001",
   "rating": 4,
-  "feedbackTags": [
-    "too_crowded",
-    "distance_too_long"
-  ]
+  "observedCrowdLevel": "medium",
+  "wouldRecommend": false,
+  "positiveTags": ["nice_view"],
+  "negativeTags": ["too_crowded"],
+  "comment": "A pleasant walk."
 }
-```
+~~~
 
-### Headers
+Required: valid walkId, integer rating 1-5, observedCrowdLevel low/medium/high,
+real boolean wouldRecommend, and both tag arrays (empty allowed). Comment is
+optional, trimmed, empty becomes null, maximum input length 500 characters.
+Positive tags: nice_view, quiet, comfortable_route, duration_good.
+Negative tags: too_crowded, too_quiet, distance_too_long, distance_too_short,
+duration_too_long, duration_too_short, route_hard_to_walk, pois_not_interesting.
+Duplicates and wrong-group tags are rejected. walkId uses 1-200 ASCII letters,
+digits, underscore, period, colon, or hyphen. Unknown request fields are ignored.
 
-Content-Type: application/json
-Authorization: Bearer <OAuth Token>
+Success: { "success": true, "feedback": { ... }, "created": true }.
+Existing submissions return the original object with created: false, including
+response-loss retries and concurrent requests. Values are never overwritten.
+Public feedback contains exactly walkId, routeId, rating, observedCrowdLevel,
+wouldRecommend, positiveTags, negativeTags, comment, schemaVersion: 1, and
+server-generated ISO createdAt. ownerKey is never returned; routeId is copied
+from the authoritative walk.
 
-### Success Response
+Only completed/ended_early walks accept submissions. Ownership checks, eligibility,
+and deterministic feedback/{walkId} creation occur in one transaction.
+No feedback operation changes the walk lifecycle. Skip is local-only and calls no
+feedback write API. Local pending results are cleared only after confirmed success
+or explicit Skip, and only if their walkId matches.
 
-**Code:** 200 OK
+Errors: { "success": false, "error": { "code": "...", "message": "..." } }.
+Codes: UNAUTHENTICATED, INVALID_ACTION, INVALID_INPUT, WALK_NOT_FOUND
+(same for missing/another user's walk), FEEDBACK_NOT_ALLOWED (active/abandoned),
+and FEEDBACK_STORE_FAILED (normalized database failure; safe to retry).
+See [the implemented schema](database-schema.md#5-feedback-collection).
 
-**Content**
-
-```json
-{
-  "success": true
-}
-```
-### Error Response
-
-#### Bad Request
-
-**Code:** 400 Bad Request
-
-**Content:**
-
-```json
-{
- "success":false,
- "error":{
-   "code":"INVALID_REQUEST",
-   "message":"Invalid request parameters."
- }
-}
-```
-
-#### Unauthorized
-
-**Code:** 401 Unauthorized
-
-**Content:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "UNAUTHORIZED",
-    "message": "You are unauthorized to make this request."
-  }
-}
-```
-
-### Database Connection Error
-
-**Code:** 500 Internal Server Error
-
-**Content:**
-
-```json
-{
- "success":false,
- "error":{
-   "code":"DATABASE_ERROR",
-   "message":"Unable to access database."
- }
-}
-```
+---
 
 # Walk (all fields are required)
 

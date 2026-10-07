@@ -59,6 +59,21 @@ Current planned-route cloud architecture:
   metadata. It does not store planned-route geometry, POIs, raw provider responses,
   or GPS samples.
 
+- **feedbackStore**: Issue #80 structured post-walk feedback. Actions getFeedback
+  and submitFeedback own feedback/{walkId}, derive ownership from authenticated
+  OPENID, read authoritative walks, and transactionally prevent duplicate writes.
+  Feedback contains only allowlisted metadata, with no geometry/POIs/GPS.
+
+Issue #80 future/manual rollout (not performed by the local implementation):
+
+1. Create the feedback collection in the intended CloudBase environment.
+2. Configure server-only / ADMINONLY access (deny direct Mini Program reads/writes).
+3. Deploy cloudfunctions/feedbackStore with its locked dependencies before releasing
+   the client. It uses DYNAMIC_CURRENT_ENV, needs no new environment variables or
+   custom query indexes, and requires the existing walks collection.
+4. Manually verify owned completed/ended_early submissions, duplicate/retry recovery,
+   and rejection of another user's walk. Keep terminal lifecycle records unchanged.
+
 See [map provider deployment](map-provider-deployment.md) for server configuration,
 shared limiter state, the 2026-10-04 development smoke/E2E validation record and the
 still-unresolved data-use/AI/persistence release checkpoint.
