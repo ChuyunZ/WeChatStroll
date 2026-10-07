@@ -3,11 +3,9 @@ const { buildProfile } = require('./profile-builder');
 const { PUBLIC_FIELDS, validateProfile } = require('./profile-schema');
 const { conflict, revision } = require('./store');
 const REFRESH_ATTEMPTS = 4;
-const PLATFORM_EVENT_FIELDS = new Set(['userInfo']);
 const messages = {
   UNAUTHENTICATED: 'Unable to identify the current user.',
   INVALID_ACTION: 'Unsupported preference profile operation.',
-  INVALID_INPUT: 'Only the action may be supplied.',
   PREFERENCE_PROFILE_STORE_FAILED: 'Preference profile storage is temporarily unavailable.'
 };
 function fail(code) { throw Object.assign(new Error(messages[code]), { code }); }
@@ -26,8 +24,7 @@ function createProfileHandler({
   getOpenId,
   now = Date.now,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  random = Math.random,
-  logUnexpectedFields = fields => console.warn('[preferenceProfileStore] unexpected event fields:', fields)
+  random = Math.random
 }) {
   return async (event = {}) => {
     try {
@@ -35,13 +32,6 @@ function createProfileHandler({
       if (typeof openid !== 'string' || !openid.trim()) fail('UNAUTHENTICATED');
       const ownerKey = crypto.createHash('sha256').update(openid).digest('hex');
       if (!event || !['getProfile', 'refreshProfile'].includes(event.action)) fail('INVALID_ACTION');
-      const unexpectedFields = Object.keys(event)
-        .filter(key => key !== 'action' && !PLATFORM_EVENT_FIELDS.has(key))
-        .sort();
-      if (unexpectedFields.length) {
-        logUnexpectedFields(unexpectedFields);
-        fail('INVALID_INPUT');
-      }
       if (event.action === 'getProfile') return { success: true, profile: publicProfile(await store.getProfile(ownerKey), ownerKey) };
       for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt++) {
         try {
