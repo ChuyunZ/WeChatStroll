@@ -2,6 +2,29 @@
 
 This document describes how CloudBase is configured for the WeChatStroll mini program and how to verify the setup using the `cloudHealthCheck` and `dbHealthCheck` cloud functions.
 
+## Issue #81 preference profile: development rollout validated
+
+The development CloudBase rollout was completed and manually validated on
+2026-10-07. `preference_profiles` is ADMINONLY; `walks` has
+`ownerKey ASC, status ASC, endTime DESC, walkId ASC`; `feedback` has
+`ownerKey ASC, walkId ASC`; and `preferenceProfileStore` is deployed with no
+new environment variables or provider keys.
+
+Manual E2E verified: no saved snapshot returns `profile: null`; the first refresh
+loaded five terminal walks plus one feedback and created revision 1; an unchanged
+refresh preserved the profile, fingerprint, timestamp and revision; saving a second
+feedback did not mutate the profile until explicit refresh; that refresh changed
+`feedbackCount` 1 -> 2, added `quiet`, moved the crowd signal 0 -> -0.25,
+changed fingerprint/timestamp and advanced revision 1 -> 2. Direct Mini Program
+testing also exposed CloudBase-added event metadata, so the handler now reads only
+`event.action` and ignores all other event fields while deriving identity only
+from `getWXContext().OPENID`.
+
+Live multi-user isolation and forced transaction-conflict scenarios were not
+manually induced; deterministic automated tests cover those cases. Feedback saving
+remains independent and no automatic refresh hook or Profile UI is added. See
+[algorithm, schema and concurrency](preference-profile.md).
+
 ## 1. CloudBase Environment
 
 The project uses the following CloudBase development environment:
