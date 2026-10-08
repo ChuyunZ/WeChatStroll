@@ -1,9 +1,9 @@
 const cloud = require('wx-server-sdk');
 const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopy } = require('./contract');
 const { buildPrompt } = require('./prompt');
-cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const AI_MODEL = 'hy3';
 const MODEL_REQUEST_TIMEOUT_MS = 60000;
+cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: MODEL_REQUEST_TIMEOUT_MS });
 const MESSAGES = {
   COPY_UNAUTHORIZED: 'Authentication is required.',
   COPY_INVALID_INPUT: 'Route copy input is invalid.',
@@ -25,7 +25,7 @@ async function generateCopy(event, { openid, createModel }) {
   let result;
   try {
     result = await model.generateText({ model: AI_MODEL, maxSteps: 1,
-      messages: [{ role: 'user', content: buildPrompt(payload) }] }, { timeout: MODEL_REQUEST_TIMEOUT_MS });
+      messages: [{ role: 'user', content: buildPrompt(payload) }] });
   } catch (_) {
     // A timed-out transport does not prove that upstream inference stopped.
     // Never log upstream errors: they may echo input or model output.
