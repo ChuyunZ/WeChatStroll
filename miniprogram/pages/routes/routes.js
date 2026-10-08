@@ -3,7 +3,7 @@ const routeGenerationService = require(
 );
 const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
-const { waypointSetKey } = require("../../services/agentic-route-planning");
+const { waypointSetKey, normalizePlanningFailure } = require("../../services/agentic-route-planning");
 const { isProviderUnavailableCode } = require("../../utils/provider-errors");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
@@ -693,6 +693,7 @@ Page({
         ...this._manualAttemptedKeys,
         ...candidateCache.getAllCandidates().map(c => waypointSetKey(c.waypointIds))
       ]);
+      const observations = [];
       for (let round = 0; round <= 3; round++) {
         if (!isCurrent()) return;
         let batch = unusedCandidates;
@@ -705,9 +706,7 @@ Page({
               nearbyPois: this._verifiedWaypointPool,
               historicalPreferenceProfile: this._historicalPreferenceProfile,
               attempt: round,
-              previousFailures: [...previouslyAttempted].map(key => ({
-                waypointIds: JSON.parse(key), failure: { type: 'NO_COMPLETE_ROUTE' }
-              }))
+              previousFailures: observations
             });
           } catch (error) {
             if (!isCurrent()) return;
@@ -715,6 +714,8 @@ Page({
               wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
               return;
             }
+            observations.push({ attempt: round, waypointIds: [],
+              failure: { type: 'INVALID_AI_PLAN' } });
             continue;
           }
           if (!isCurrent()) return;
@@ -759,6 +760,9 @@ Page({
             wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
+          if (round > 0) observations.push({ attempt: round,
+            waypointIds: [...candidate.waypointIds],
+            failure: normalizePlanningFailure(result, candidate.waypointIds) });
           continue;
         }
         if (!this.isUnseenCandidateRoute(result.route, candidate)) continue;
