@@ -104,7 +104,10 @@ are 1, 0.67, 0.33, 0 by rank, averaged over valid rankings. Rating, recommendati
 `nice_view`, `quiet` and all other feedback do not affect environment weights.
 This measures historical questionnaire selection tendency, not observed route
 environment. There is no trustworthy durable actual-route environment evidence;
-the absent trusted POI category for `街道` remains a future integration concern.
+`街道` has no POI category. #84's [Street preference bonus](street-preference-ranking.md)
+instead uses runtime walking-route evidence and current questionnaire rank only.
+Historical `street` remains excluded from deterministic environment fit, preventing
+double counting. No Street route evidence is written into this profile, walks or feedback.
 
 **Duration:** valid requested duration contributes weight 1 (fall back to the
 questionnaire duration if the top-level field is invalid). This represents intent

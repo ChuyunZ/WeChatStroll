@@ -87,13 +87,19 @@ The adapter calls Tencent walking direction
     distanceMeters,
     durationSeconds,
     polyline: [/* { latitude, longitude }, ... */]
+    // streetEvidence: { coverageRatio, ordinaryRoadRatio } // optional, runtime only
   }
 }
 ```
 
 The adapter converts duration to seconds and decodes the polyline. There is no
-`environmentStats`, raw Tencent steps, `type` or `road_class`. Client segment and
-public route construction preserve normalized facts, without deriving a street score.
+`environmentStats`, raw Tencent steps, `type` or `road_class` in the response.
+#84 optionally normalizes documented walking types and step meters into
+`streetEvidence`; missing or malformed evidence is omitted. The client moves it
+into a runtime-only sidecar, not public segments or Route snapshots. See
+[Street source, coverage and limitations](street-preference-ranking.md).
+This extension is local until a future release; the earlier development smoke
+tests below do not verify its live availability. No configuration changes are needed.
 
 ## Error semantics
 

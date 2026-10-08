@@ -1,4 +1,5 @@
 const { isProviderCode } = require('./errors')
+const { normalizeStreetEvidence } = require('./street-evidence')
 
 const WALKING_URL = 'https://apis.map.qq.com/ws/direction/v1/walking/'
 
@@ -67,10 +68,12 @@ function createWalkingHandler({ apiKey, request }) {
       }
       const durationSeconds = route.duration * 60
       if (!Number.isFinite(durationSeconds)) throw new Error('Invalid walking duration')
+      const streetEvidence = normalizeStreetEvidence(route)
       return { success: true, route: {
         distanceMeters: route.distance,
         durationSeconds,
-        polyline: decodePolyline(route.polyline)
+        polyline: decodePolyline(route.polyline),
+        ...(streetEvidence ? { streetEvidence } : {})
       } }
     } catch (_) {
       return failure('PROVIDER_GATEWAY_FAILED')

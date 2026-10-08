@@ -1,4 +1,5 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { rememberStreetEvidence } = require('./street-evidence')
 const {
   isValidGeoPoint,
   copyGeoPoint
@@ -95,7 +96,9 @@ async function getWalkingSegment(
     }
   }
 
-  return normalizedRoute
+  // Only the allowlisted cloud aggregate enters the sidecar. Caller inputs,
+  // raw steps and legacy environmentStats never become evidence.
+  return rememberStreetEvidence(normalizedRoute, result.route.streetEvidence)
 }
 
 module.exports = {

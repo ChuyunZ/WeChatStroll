@@ -438,6 +438,62 @@ describe('bounded manual alternatives', () => {
     return cache;
   }
 
+  test.each(['progressive', 'add', 'replace'])('Street sidecar controls %s ranking without entering page snapshots', async mode => {
+    const cache = setup(mode === 'replace' ? 3 : 1, [['A', 'B']]);
+    const { rememberStreetEvidence, getStreetEvidence } = require('../miniprogram/services/street-evidence');
+    page._routePreferences.environmentPreferences = ['街道', '公园', '水边', '商街'];
+    const original = [...page._rawRoutes];
+    const built = route(['A', 'B']);
+    rememberStreetEvidence(built, { coverageRatio: 1, ordinaryRoadRatio: 1 });
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate }) => {
+      cache.markBuilding(candidate.candidateId);
+      cache.markSuccess(candidate.candidateId, built);
+      return { success: true, route: built };
+    });
+    if (mode === 'progressive') await page.fillInitialRoutes(page._routeRequestId);
+    else if (mode === 'add') await page.showOtherRoutes();
+    else {
+      await page.showOtherRoutes();
+      await page.selectRouteToReplace(tap(original[0].routeId));
+      expect(page._rawRoutes).not.toContain(original[0]);
+    }
+    expect(page._rawRoutes[0]).toBe(built);
+    expect(page.data.routes[0].isBestMatch).toBe(true);
+    expect(getStreetEvidence(built)).toEqual({ coverageRatio: 1, ordinaryRoadRatio: 1 });
+    expect(JSON.stringify(page.data)).not.toMatch(/streetEvidence|coverageRatio|ordinaryRoadRatio/);
+  });
+
+  test('replacement reusing a removed route ID cannot inherit its Street bonus', async () => {
+    setup(3, [['A', 'B']]);
+    const { rememberStreetEvidence, getStreetEvidence } = require('../miniprogram/services/street-evidence');
+    page._routePreferences.environmentPreferences = ['街道', '公园', '水边', '商街'];
+    const removed = page._rawRoutes[0];
+    rememberStreetEvidence(removed, { coverageRatio: 1, ordinaryRoadRatio: 1 });
+    const built = route(['A', 'B'], removed.routeId);
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockResolvedValue({ success: true, route: built });
+    await page.showOtherRoutes();
+    await page.selectRouteToReplace(tap(removed.routeId));
+    expect(page._rawRoutes).toContain(built);
+    expect(page._rawRoutes).not.toContain(removed);
+    expect(getStreetEvidence(built)).toBeNull();
+  });
+
+  test.each(['progressive', 'add'])('late %s evidence cannot change the new session ranking', async mode => {
+    setup(1, [['A', 'B']]);
+    const pending = createDeferred();
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockReturnValue(pending.promise);
+    const operation = mode === 'progressive' ? page.fillInitialRoutes(page._routeRequestId) : page.showOtherRoutes();
+    setup(1, [['C', 'D']]);
+    const current = page._rawRoutes[0];
+    const { rememberStreetEvidence, getStreetEvidence } = require('../miniprogram/services/street-evidence');
+    const late = route(['A', 'B'], current.routeId);
+    rememberStreetEvidence(late, { coverageRatio: 1, ordinaryRoadRatio: 1 });
+    pending.resolve({ success: true, route: late });
+    await operation;
+    expect(page._rawRoutes).toEqual([current]);
+    expect(getStreetEvidence(current)).toBeNull();
+  });
+
   test('manual Add replenishes exhausted candidates and retains the unused AI batch', async () => {
     setup(1, []);
     page._verifiedWaypointPool = [{ poiId: 'A', name: 'A', latitude: 23.13, longitude: 113.26 }];

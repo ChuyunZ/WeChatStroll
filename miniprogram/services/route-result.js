@@ -1,3 +1,4 @@
+const { transferStreetEvidence, rememberStreetEvidence, aggregateStreetEvidence } = require('./street-evidence')
 const {
   isValidGeoPoint,
   copyGeoPoint,
@@ -67,12 +68,12 @@ function normalizeSuccessfulSegment(result) {
     return null
   }
 
-  return {
+  return transferStreetEvidence(result, {
     success: true,
     distanceMeters: result.distanceMeters,
     durationSeconds: result.durationSeconds,
     polyline: result.polyline.map(copyGeoPoint)
-  }
+  })
 }
 
 function normalizeSegmentFailure(result) {
@@ -143,7 +144,7 @@ function buildSuccessfulRouteResult({
 
   const normalizedSource = normalizeRouteSource(source)
 
-  return {
+  return rememberStreetEvidence({
     success: true,
     distanceMeters,
     durationSeconds,
@@ -160,7 +161,7 @@ function buildSuccessfulRouteResult({
       ),
       source: normalizedSource
     }
-  }
+  }, aggregateStreetEvidence(resolvedEdges.map(edge => edge.segment)))
 }
 
 module.exports = {

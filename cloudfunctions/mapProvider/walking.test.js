@@ -7,6 +7,37 @@ const validRoute = () => ({ distance: 1250.5, duration: 12.5,
   providerMeta: { secret: true }, environmentStats: { normalRoadRatio: 1 }, request_id: 'private-id' })
 let request
 let handler
+
+test.each([
+  ['complete', [{ type: 0, distance: 750 }, { type: 1, distance: 250 }], 1000, { coverageRatio: 1, ordinaryRoadRatio: 0.75 }],
+  ['known non-road', [{ type: 2, distance: 500 }, { type: 3, distance: 500 }], 1000, { coverageRatio: 1, ordinaryRoadRatio: 0 }],
+  ['partial list', [{ type: 0, distance: 250 }], 1000, { coverageRatio: 0.25, ordinaryRoadRatio: 1 }],
+  ['partial types', [{ type: 0, distance: 250 }, { distance: 750 }], 1000, { coverageRatio: 0.25, ordinaryRoadRatio: 1 }],
+  ['unknown type', [{ type: 99, distance: 1000 }], 1000, null],
+  ['string type', [{ type: '0', distance: 1000 }], 1000, null],
+  ['missing', undefined, 1000, null],
+  ['empty', [], 1000, null],
+  ['malformed', {}, 1000, null],
+  ['overcount', [{ type: 0, distance: 1001 }], 1000, null],
+  ['overflowing total', [{ type: 0, distance: 1e308 }, { type: 0, distance: 1e308 }], 1e308, null],
+  ['zero route', [{ type: 0, distance: 0 }], 0, null],
+  ['zero step', [{ type: 0, distance: 0 }], 1000, null],
+  ...[undefined, null, -1, NaN, Infinity, '1000', {}, true].map(distance =>
+    ['invalid distance', [{ type: 0, distance }], 1000, null]),
+  ['null step', [null], 1000, null],
+  ['array step', [[]], 1000, null]
+])('Street evidence: %s retains only the normalized optional capability', async (_, steps, distance, expected) => {
+  request.mockResolvedValue({ data: { status: 0, result: { routes: [{ ...validRoute(), steps, distance,
+    streetEvidence: { coverageRatio: 1, ordinaryRoadRatio: 1 } }] } } })
+  const result = await handler(input)
+  expect(result.success).toBe(true)
+  expect(result.route.streetEvidence || null).toEqual(expected)
+  expect(Object.keys(result.route).sort()).toEqual([
+    'distanceMeters', 'durationSeconds', 'polyline', ...(expected ? ['streetEvidence'] : [])
+  ].sort())
+  expect(JSON.stringify(result)).not.toMatch(/steps|road_class|road_name|environmentStats|private/)
+  expect(request).toHaveBeenCalledTimes(1)
+})
 beforeEach(() => {
   request = jest.fn().mockResolvedValue({ data: { status: 0, result: { routes: [validRoute()] } } })
   handler = createWalkingHandler({ apiKey: 'private-key', request })
