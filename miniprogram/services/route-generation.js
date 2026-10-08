@@ -421,6 +421,8 @@ async function loadHistoricalPreferenceProfile() {
   }
 }
 
+const aiDiagnostics = require('./manual-ai-diagnostics')
+
 async function requestWaypointPlan({
   location,
   preferences,
@@ -428,8 +430,24 @@ async function requestWaypointPlan({
   historicalPreferenceProfile,
   replanningContext
 }) {
-  const result =
-    await callCloudFunction(
+  const startTime = Date.now()
+  const manual = replanningContext && replanningContext.mode === 'manual'
+  const summary = {
+    mode: manual ? 'manual' : 'initial',
+    attempt: replanningContext && replanningContext.attempt || 1,
+    nearbyPoiCount: nearbyPois.length,
+    excludedSetCount: replanningContext && replanningContext.excludedWaypointSets
+      ? replanningContext.excludedWaypointSets.length : 0,
+    previousFailureCount: replanningContext && replanningContext.previousFailures
+      ? replanningContext.previousFailures.length : 0,
+    durationMinutes: preferences && preferences.durationMinutes,
+    routeType: preferences && preferences.routeType,
+    historicalProfileIncluded: !!historicalPreferenceProfile
+  }
+  aiDiagnostics.record('client.ai.request', summary)
+  let result
+  try {
+    result = await callCloudFunction(
       'aiRoutePlanner',
       {
         startPoint: {
@@ -453,7 +471,24 @@ async function requestWaypointPlan({
           'Unable to generate waypoint plan.'
       }
     )
-
+  } catch (error) {
+    aiDiagnostics.record('client.ai.error', {
+      ...summary,
+      durationMs: Date.now() - startTime,
+      code: error && error.code || 'UNKNOWN',
+      cloudDiagnostic: error && error.diagnostic || null
+    })
+    throw error
+  }
+  aiDiagnostics.record('client.ai.response', {
+    ...summary,
+    durationMs: Date.now() - startTime,
+    candidateCount: result && result.plan && Array.isArray(result.plan.candidates)
+      ? result.plan.candidates.length : null,
+    // POI identities only (no coordinates), to compare exclusions/repetitions.
+    candidateWaypointSets: result && result.plan && Array.isArray(result.plan.candidates)
+      ? result.plan.candidates.slice(0, 5).map(item => item.waypoints.map(w => w.poiId).sort()) : []
+  })
   return result.plan
 }
 
