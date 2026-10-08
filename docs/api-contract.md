@@ -1006,7 +1006,7 @@ without waiting for alternatives. Each successful background fill reranks the
 currently displayed set, stopping candidate processing at three routes. Once initial
 processing settles, Add inserts one route when fewer than three are displayed;
 Replace requires the user to select one of three routes and retains it until a
-valid replacement is ready. Both rerank and share a three-successful-action budget
+valid replacement is ready. When candidates are exhausted, each manual action can request up to three new AI batches using the same verified POIs and planning session. Both rerank and share a three-successful-action budget
 per session. Exact previously surfaced verified POI sets remain excluded regardless
 of order or route ID. See [manual alternatives](waypoint-order-optimization.md#manual-route-alternatives)
 for availability, runtime state, cache reuse and failure semantics. An edit
