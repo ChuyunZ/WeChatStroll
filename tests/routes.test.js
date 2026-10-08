@@ -604,7 +604,7 @@ describe('bounded manual alternatives', () => {
     page._initialCandidateProcessingComplete = false;
     await page.fillInitialRoutes(page._routeRequestId);
     const entries = cache.getAllCandidates();
-    expect(entries[0].status).toBe('unused');
+    expect(entries[0].status).toBe('failed');
     expect(entries[1].status).toBe('success');
     expect(entries[2].status).toBe('failed');
     expect(entries[3].status).toBe('success');
