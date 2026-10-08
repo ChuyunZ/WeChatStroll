@@ -767,12 +767,12 @@ Page({
         this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
         wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
-      }
         }
       }
       if (isCurrent()) {
         this._manualAlternativeExhausted = true;
-        wx.showToast({ title: "三轮尝试后暂无更多路线", icon: "none" });
+        wx.showToast({ title: this._verifiedWaypointPool?.length
+          ? "三轮尝试后暂无更多路线" : "暂无更多路线", icon: "none" });
       }
     } catch (error) {
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
