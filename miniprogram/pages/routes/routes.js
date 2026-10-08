@@ -133,6 +133,7 @@ Page({
     this._waypointCandidateCache = null;
     this._routeLocation = null;
     this._historicalPreferenceProfile = null;
+    this._verifiedWaypointPool = null;
   },
 
   async loadRoutes() {
@@ -148,6 +149,7 @@ Page({
     this._waypointCandidateCache = null;
     this._routeLocation = null;
     this._historicalPreferenceProfile = null;
+    this._verifiedWaypointPool = null;
 
     // 新请求开始后，
     // 清除上一批原始 Route。
@@ -227,6 +229,7 @@ Page({
       // 保存业务层的原始 Route。
       // Route Detail 会拿这个对象。
       this._historicalPreferenceProfile = routeLoadResult.historicalPreferenceProfile || null;
+      this._verifiedWaypointPool = routeLoadResult.verifiedWaypointPool || null;
       this._rawRoutes = this.rankCurrentRoutes(routes);
       this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
 
@@ -321,7 +324,8 @@ Page({
       waypointCandidateCache:
         result.waypointCandidateCache,
       location: result.location,
-      historicalPreferenceProfile: result.historicalPreferenceProfile || null
+      historicalPreferenceProfile: result.historicalPreferenceProfile || null,
+      verifiedWaypointPool: result.verifiedWaypointPool || null
     }
   },
 
@@ -590,6 +594,8 @@ Page({
     this._initialCandidateProcessingComplete = false;
     this._replacementSelection = false;
     this._manualAlternativePending = null;
+    this._manualAlternativeExhausted = false;
+    this._manualAttemptedKeys = new Set();
   },
 
   rememberSurfacedRoute(route) {
@@ -621,7 +627,8 @@ Page({
     const count = (this._rawRoutes || []).length;
     if (!this._initialCandidateProcessingComplete || this._manualAlternativePending ||
         !this._routePlanningSession || this._manualAlternativeActionCount >= 3 ||
-        count < 1 || count > 3 || !this.getEligibleCandidates().length) return "";
+        count < 1 || count > 3 || this._manualAlternativeExhausted ||
+        (!this.getEligibleCandidates().length && !this._verifiedWaypointPool?.length)) return "";
     return count < 3 ? "add" : "replace";
   },
 
@@ -676,20 +683,63 @@ Page({
     this._replacementSelection = false;
     this.updateManualAlternativeControls();
     try {
-      for (const candidate of unusedCandidates) {
+      // The first pass consumes the remaining original batch. Further passes
+      // request at most three fresh AI batches without replacing the session.
+      const previouslyAttempted = new Set([
+        ...this._manualAttemptedKeys,
+        ...candidateCache.getAllCandidates().map(c => waypointSetKey(c.waypointIds))
+      ]);
+      for (let round = 0; round <= 3; round++) {
+        if (!isCurrent()) return;
+        let batch = unusedCandidates;
+        let batchCache = candidateCache;
+        if (round > 0) {
+          if (!this._verifiedWaypointPool?.length) break;
+          try {
+            batchCache = await routeGenerationService.requestManualWaypointCandidates({
+              location, preferences: this._routePreferences || {},
+              nearbyPois: this._verifiedWaypointPool,
+              historicalPreferenceProfile: this._historicalPreferenceProfile,
+              attempt: round,
+              previousFailures: [...previouslyAttempted].map(key => ({
+                waypointIds: JSON.parse(key), failure: { type: 'NO_COMPLETE_ROUTE' }
+              }))
+            });
+          } catch (error) {
+            if (!isCurrent()) return;
+            if (error && isProviderUnavailableCode(error.code)) {
+              wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+              return;
+            }
+            continue;
+          }
+          if (!isCurrent()) return;
+          batch = batchCache.getUnusedCandidates();
+        }
+        for (const candidate of batch) {
+        const candidateKey = waypointSetKey(candidate.waypointIds);
+        if (round > 0 && previouslyAttempted.has(candidateKey)) {
+          batchCache.markFailed(candidate.candidateId);
+          continue;
+        }
+        previouslyAttempted.add(candidateKey);
+        this._manualAttemptedKeys.add(candidateKey);
         if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
-        if (this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) continue;
+        if (this._seenWaypointSetKeys.has(candidateKey)) {
+          batchCache.markFailed(candidate.candidateId);
+          continue;
+        }
         let result;
         try {
           result = await routeGenerationService.buildOptimizedCandidateRoute({
-            session, candidateCache, candidate, location,
+            session, candidateCache: batchCache, candidate, location,
             candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
             requestedDurationMinutes: (this._routePreferences || {}).durationMinutes
           });
         } catch (error) {
           if (!isCurrent()) return;
           // The shared builder normally settles exceptions itself.
-          candidateCache.markFailed(candidate.candidateId);
+          batchCache.markFailed(candidate.candidateId);
           if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
             wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
@@ -718,7 +768,12 @@ Page({
         wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
       }
-      if (isCurrent()) wx.showToast({ title: "暂无更多路线", icon: "none" });
+        }
+      }
+      if (isCurrent()) {
+        this._manualAlternativeExhausted = true;
+        wx.showToast({ title: "三轮尝试后暂无更多路线", icon: "none" });
+      }
     } catch (error) {
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
     } finally {
