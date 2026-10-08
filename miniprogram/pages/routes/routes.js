@@ -603,8 +603,12 @@ Page({
 
   getEligibleCandidates() {
     if (!this._waypointCandidateCache) return [];
-    return this._waypointCandidateCache.getUnusedCandidates().filter(candidate =>
-      !this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds)));
+    return this._waypointCandidateCache.getUnusedCandidates().filter(candidate => {
+      if (!this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) return true;
+      // A surfaced set is permanently ineligible in this planning session.
+      this._waypointCandidateCache.markFailed(candidate.candidateId);
+      return false;
+    });
   },
 
   isUnseenCandidateRoute(route, candidate) {
