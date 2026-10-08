@@ -33,6 +33,54 @@ function decodePolyline(compressed) {
   return polyline
 }
 
+// TEMPORARY E2E DIAGNOSTIC for PR #105. Remove before merging the feature.
+// Explicit opt-in only; no raw steps, coordinates, URLs or credentials are emitted.
+const DIAGNOSTIC_WALK_TYPES = new Set([0, 1, 2, 3])
+
+function summarizeStreetCoverage(route) {
+  const stepsPresent = Array.isArray(route.steps)
+  const steps = stepsPresent ? route.steps : []
+  let stepDistanceMeters = 0
+  let classifiedDistanceMeters = 0
+  let unclassifiedTypeDistanceMeters = 0
+  let classifiedStepCount = 0
+  let missingTypeStepCount = 0
+  let unknownTypeStepCount = 0
+  let invalidDistanceStepCount = 0
+
+  for (const step of steps) {
+    if (!step || typeof step !== 'object' || Array.isArray(step) ||
+        !Number.isFinite(step.distance) || step.distance < 0) {
+      invalidDistanceStepCount++
+      continue
+    }
+    stepDistanceMeters += step.distance
+    if (DIAGNOSTIC_WALK_TYPES.has(step.type)) {
+      classifiedDistanceMeters += step.distance
+      classifiedStepCount++
+    } else {
+      unclassifiedTypeDistanceMeters += step.distance
+      if (!Object.prototype.hasOwnProperty.call(step, 'type')) missingTypeStepCount++
+      else unknownTypeStepCount++
+    }
+  }
+
+  const finiteOrNull = value => Number.isFinite(value) ? value : null
+  return {
+    routeDistanceMeters: route.distance,
+    stepDistanceMeters: finiteOrNull(stepDistanceMeters),
+    classifiedDistanceMeters: finiteOrNull(classifiedDistanceMeters),
+    unclassifiedTypeDistanceMeters: finiteOrNull(unclassifiedTypeDistanceMeters),
+    routeMinusStepsMeters: finiteOrNull(route.distance - stepDistanceMeters),
+    stepsPresent,
+    stepCount: steps.length,
+    classifiedStepCount,
+    missingTypeStepCount,
+    unknownTypeStepCount,
+    invalidDistanceStepCount
+  }
+}
+
 const failure = (code, message = 'Unable to generate walking route') => ({ success: false, error: { code, message } })
 const notFound = () => failure('ROUTE_NOT_FOUND', 'No walking route was found')
 
@@ -69,12 +117,19 @@ function createWalkingHandler({ apiKey, request }) {
       const durationSeconds = route.duration * 60
       if (!Number.isFinite(durationSeconds)) throw new Error('Invalid walking duration')
       const streetEvidence = normalizeStreetEvidence(route)
-      return { success: true, route: {
-        distanceMeters: route.distance,
-        durationSeconds,
-        polyline: decodePolyline(route.polyline),
-        ...(streetEvidence ? { streetEvidence } : {})
-      } }
+      const decodedPolyline = decodePolyline(route.polyline)
+      return {
+        success: true,
+        route: {
+          distanceMeters: route.distance,
+          durationSeconds,
+          polyline: decodedPolyline,
+          ...(streetEvidence ? { streetEvidence } : {})
+        },
+        ...(event && event.__streetCoverageDiagnostic === true
+          ? { streetCoverageDiagnostic: summarizeStreetCoverage(route) }
+          : {})
+      }
     } catch (_) {
       return failure('PROVIDER_GATEWAY_FAILED')
     }
