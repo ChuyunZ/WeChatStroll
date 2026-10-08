@@ -596,6 +596,7 @@ Page({
     this._manualAlternativePending = null;
     this._manualAlternativeExhausted = false;
     this._manualAttemptedKeys = new Set();
+    this._manualCandidateCache = null;
   },
 
   rememberSurfacedRoute(route) {
@@ -609,12 +610,13 @@ Page({
 
   getEligibleCandidates() {
     if (!this._waypointCandidateCache) return [];
-    return this._waypointCandidateCache.getUnusedCandidates().filter(candidate => {
+    const eligible = cache => cache.getUnusedCandidates().filter(candidate => {
       if (!this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) return true;
-      // A surfaced set is permanently ineligible in this planning session.
-      this._waypointCandidateCache.markFailed(candidate.candidateId);
+      cache.markFailed(candidate.candidateId);
       return false;
     });
+    const initial = eligible(this._waypointCandidateCache);
+    return initial.length ? initial : this._manualCandidateCache ? eligible(this._manualCandidateCache) : [];
   },
 
   isUnseenCandidateRoute(route, candidate) {
@@ -674,6 +676,8 @@ Page({
     const candidateCache = this._waypointCandidateCache;
     const location = this._routeLocation;
     const unusedCandidates = this.getEligibleCandidates();
+    const firstBatchCache = candidateCache.getUnusedCandidates().some(c => unusedCandidates.some(x => x.candidateId === c.candidateId && x.waypointIds.join('|') === c.waypointIds.join('|')))
+      ? candidateCache : this._manualCandidateCache || candidateCache;
     const operation = { routeId: selectedRoute ? selectedRoute.routeId : "" };
 
     const isCurrent = () => requestId === this._routeRequestId &&
@@ -692,7 +696,7 @@ Page({
       for (let round = 0; round <= 3; round++) {
         if (!isCurrent()) return;
         let batch = unusedCandidates;
-        let batchCache = candidateCache;
+        let batchCache = firstBatchCache;
         if (round > 0) {
           if (!this._verifiedWaypointPool?.length) break;
           try {
@@ -714,6 +718,7 @@ Page({
             continue;
           }
           if (!isCurrent()) return;
+          this._manualCandidateCache = batchCache;
           batch = batchCache.getUnusedCandidates();
         }
         for (const candidate of batch) {
