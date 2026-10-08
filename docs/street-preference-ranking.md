@@ -1,9 +1,10 @@
 # Street preference ranking (#84)
 
-Street means ordinary urban road walking exposure supported by walking-route
-classification. It is a route characteristic, not a POI category. Park or Water
-POIs can coexist with Street exposure. It makes no claim about scenery,
-architecture, safety, quietness, comfort or neighborhood attractiveness.
+Street represents **ordinary-road walking exposure identified by the provider's
+walking-step classification**, not a claim about ordinary *urban* roads or
+scenic street quality. It is a route characteristic, not a POI category.
+Park or Water POIs can coexist with Street exposure. It makes no claim about
+scenery, architecture, safety, quietness, comfort or neighborhood attractiveness.
 
 ## Source and limits
 
@@ -23,8 +24,8 @@ the classified step totals were respectively 1209 m and 1247 m. Reverse walking
 of the first route reproduced the same 4 m discrepancy. These observations
 are consistent with integer-step rounding but do not establish its cause or
 guarantee coverage across all routes. Unknown/missing codes remain unclassified,
-including numeric strings. Do not
-parse instructions/road names or use geometry as substitute evidence.
+including numeric strings. Do not parse instructions/road names or use geometry
+as substitute evidence.
 
 ## Optional capability
 
@@ -123,42 +124,57 @@ Weak references allow discarded objects and their evidence to be collected.
 engine segments, generated routes, `activeWalkSession`, `pendingWalkResult`, Walk,
 feedback or persisted snapshots. Existing #94 storage behavior is unchanged.
 There are no extra provider calls, persistent caches, configuration or quota changes.
-Cloud and client updates need a future coordinated release; an older cloud response
-simply supplies unknown. Nothing was deployed as part of this local implementation.
+The feature-branch `mapProvider` and matching Mini Program client were deployed/
+compiled for authorized **development** E2E. This is not a production rollout;
+future releases must coordinate compatible cloud/client versions. An older cloud
+response simply supplies unknown.
 
 ## Verification and remaining checks
 
-Cloud/provider and client tests include the observed 4 m / 8-step and
-5 m / 10-step discrepancies, low 20% and 90% partial classification, unknown
-types, malformed inputs and route-distance overcounts, directed route
-aggregation, scoring, stale-state handling and no persistence. The observed
-values do not prove 0.5 m/step rounding, and the implementation no longer
-assumes any such provider rule.
+The automated suite covers observed 4 m / 8-step and 5 m / 10-step discrepancies,
+20% and 90% partial classification, unknown walking types, malformed inputs and
+step-distance overcounts, directed distance-weighted aggregation, deterministic
+ranking, lifecycle/stale-state handling and serialization. The observed gaps
+do **not** establish a 0.5 m/step rounding rule; none is used.
+GitHub Actions passed **71 suites / 1484 tests** on `679ccebd` and the same
+branch passed the user's local full Jest suite.
 
-Run `npm test -- --runInBand` (`npm.cmd` where appropriate). The
-updated cloud + mini-program behavior still needs a coordinated development
-deployment and a real questionnaire → candidate → ranking → Add/Replace/edit
-E2E check. Verify snapshots/Walk data stay unchanged; avoid unauthorized
-production deployment.
+**Authorized development E2E (2026-10-09 local / 2026-10-08 UTC):**
 
-## Proposed Issue #84 description corrections (not applied remotely)
+1. The deployed CloudBase `walkingRoute` returned normalized
+   `streetEvidence: { coverageRatio: 0.9967023907666942,
+   ordinaryRoadRatio: 1 }` for the known 1213 m route. No temporary
+   `streetCoverageDiagnostic` or `classificationComplete` field appeared.
+2. In the WeChat Developer Tools simulator, a 30-minute questionnaire with
+   Street ranked first generated a usable ~24-minute route. Runtime ranking
+   inspection showed `coverageRatio ≈ 0.99682741`,
+   `ordinaryRoadRatio = 1`, `streetBonus ≈ 0.04984137`,
+   `baseScore = 0.7904`. This verifies the real provider → cloud normalization
+   → client WeakMap → deterministic scoring integration.
+3. An original real route ranked before a JSON-cloned copy without evidence
+   regardless of their input order, without modifying displayed routes.
+   **This is not a two-independent-live-routes UI ordering test.**
+4. The Route object and UI projection contained no Street/raw-provider fields.
+   A real non-GPS test Walk stored an `activeWalkSession` snapshot with no
+   prohibited evidence, transitioned successfully to `ended_early` and
+   produced a clean `pendingWalkResult` snapshot. Skipping feedback cleared
+   both local storage keys. The cloud Walk record remains by normal design.
 
-Replace the original AMap-specific `environmentStats` assumption with
-Tencent walking-route `steps[].type` 0–3 and `distance` as the source. Missing
-or malformed evidence is unknown. Only two ratios pass the cloud contract:
-`coverageRatio` and `ordinaryRoadRatio`; raw steps and provider metadata
-never enter public routes or persisted snapshots.
+**Still unverified:** two independently generated real routes compared in the
+UI; successful Add/Replace and a live confirmed-edit rerank with this evidence.
+During E2E, manual Add returned three duration-invalid candidates in its first
+round, then two empty candidate batches. At least one cloud log confirmed
+`candidates: []` was emitted by AI. This is tracked in **#91** and must not
+be “fixed” by weakening final route validation or changing this Street bonus.
 
-Acceptance criteria should state:
+**Data policy:** the checks above prove field exclusion in the tested runtime
+and local snapshots, **not** Tencent authorization to persist planned routes or
+process provider data through AI. Production permission, provider deployments
+and real-device behavior remain separate release checks.
 
-- Validate route/step distances and types; no invalid/overcounted raw route
-  evidence is accepted, and unknown code/type distances earn no ordinary credit.
-- Use distance-weighted, directed aggregation with unknown edges contributing
-  zero classified meters. No minimum coverage gate or provider-rounding guess.
-- Keep 50/30/20 base ranking and a positive-only Street bonus of
-  `0.05 × currentRankStrength × coverageRatio × ordinaryRoadRatio` using
-  strengths [1, 0.5, 0, 0], with the measured ratio and no extrapolation.
-- Initial/progressive, Add/Replace, fallback and validated edits keep private
-  runtime evidence without attaching it to persisted fields or snapshots.
-- Live provider tests observed short step sums despite all returned types
-  being classified. Final app ranking still requires a post-change E2E check.
+## Issue tracking
+
+Issue [#84](https://github.com/ChuyunZ/WeChatStroll/issues/84) now contains
+the current Tencent source/semantics, conservative partial-credit formula,
+acceptance criteria and bounded E2E record; the former AMap-era description
+and speculative coverage gate have been superseded.
