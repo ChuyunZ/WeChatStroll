@@ -609,6 +609,13 @@ Page({
     if (activeIds && activeIds.length) this._seenWaypointSetKeys.add(waypointSetKey(activeIds));
   },
 
+  // TEMPORARY diagnosis: call from DevTools Console with:
+  // getCurrentPages().slice(-1)[0].exportAiDiagnostics()
+  // Clipboard contains the same JSON as the simulator sandbox file.
+  exportAiDiagnostics() {
+    return require('../../services/manual-ai-diagnostics').exportToClipboard();
+  },
+
   getEligibleCandidates() {
     if (!this._waypointCandidateCache) return [];
     const eligible = cache => cache.getUnusedCandidates().filter(candidate => {
