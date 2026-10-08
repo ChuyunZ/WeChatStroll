@@ -1048,9 +1048,14 @@ performs I/O or validates candidates; callers own the validation boundary.
   `totalScore: null`. Current intent carries more weight than secondary history;
   this is a weighted preference score, not a lexicographic current-intent veto.
 - Total: base score plus a positive-only Street bonus, provisionally at most 0.05.
-  Current Street rank 1/2/3/4 gives strength 1/0.5/0/0. Full classification coverage
-  is required; bonus is `0.05 * strength * coverageRatio * ordinaryRoadRatio`.
-  Unknown/incomplete evidence earns zero bonus. All-missing base remains null.
+  Current Street rank 1/2/3/4 gives strength 1/0.5/0/0. Exact coverage
+  qualifies, or coverage >= 0.995 with explicit cloud-verified
+  `classificationComplete: true`, which requires all step types classified and
+  a tiny integer-meter accounting gap within independent caps (0.5 m per step,
+  0.5% of route distance, and 10 m). This is not a general partial-coverage
+  threshold. Bonus remains `0.05 * strength * coverageRatio * ordinaryRoadRatio`
+  using the actual measured ratio; missing types and unverified gaps earn zero.
+  All-missing base remains null.
   Totals are not clamped to 1; the original base components and weights are unchanged.
 
 Ties resolve by total score descending, current duration fit descending, current
