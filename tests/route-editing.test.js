@@ -234,9 +234,13 @@ test.each([
 })
 
 test('explicit route outside duration tolerance is previewable', async () => {
-  const { detail, session, walkingRoute } = await setup()
+  const { detail, session, walkingRoute, routes } = await setup()
+  routes._routePreferences = { durationMinutes: 30 }
   jest.spyOn(session, 'buildRouteForOrder').mockResolvedValue({ ...walkingRoute,
-    durationSeconds: 9000, durationMinutes: 150, distanceMeters: 10000 })
+    durationSeconds: 9000, durationMinutes: 150, distanceMeters: 10000,
+    segments: walkingRoute.segments.map(segment => ({ ...segment,
+      durationSeconds: 9000 / walkingRoute.segments.length,
+      distanceMeters: 10000 / walkingRoute.segments.length })) })
   detail.enterRouteEdit()
   detail.previewRoute()
   await flush()
@@ -283,6 +287,39 @@ test('preview and restore reuse the same directed segment cache', async () => {
   await flush()
   expect(resolver).toHaveBeenCalledTimes(4)
   expect(detail.data.route.durationMinutes).toBe(30)
+})
+
+test('confirming a validated edit reranks the displayed alternatives using rebuilt duration', async () => {
+  const { detail, routes, route } = await setup()
+  routes._routePreferences = { durationMinutes: 30 }
+  const alternative = { ...route, routeId: 'alternative', durationSeconds: 1740 }
+  routes._rawRoutes = [route, alternative]
+  detail.enterRouteEdit()
+  detail.updateDraft(['A', 'C'])
+  detail.previewRoute()
+  await flush()
+  // Explicit user edits retain their existing freedom to change total duration.
+  expect(detail._previewRoute.durationSeconds).toBe(1200)
+  detail.confirmRouteEdit()
+  expect(routes._rawRoutes[0]).toBe(alternative)
+  expect(routes._rawRoutes[1].durationSeconds).toBe(1200)
+  expect(routes.data.routes.map(item => item.isBestMatch)).toEqual([true, false])
+  expect(routes._rawRoutes[1]).not.toHaveProperty('isBestMatch')
+})
+
+test('an edited route failing completeness validation never reaches ranking or confirmation', async () => {
+  const { detail, routes, route, session, walkingRoute } = await setup()
+  routes._routePreferences = { durationMinutes: 30 }
+  jest.spyOn(session, 'buildRouteForOrder').mockResolvedValue({ ...walkingRoute, polyline: [] })
+  const rank = jest.spyOn(routes, 'rankCurrentRoutes')
+  detail.enterRouteEdit()
+  detail.updateDraft(['A'])
+  detail.previewRoute()
+  await flush()
+  expect(detail._previewRoute).toBeNull()
+  detail.confirmRouteEdit()
+  expect(routes._rawRoutes).toEqual([route])
+  expect(rank).not.toHaveBeenCalled()
 })
 
 test.each(['cancel', 'edit', 'unload', 'session'])('pending preview cannot overwrite state after %s', async action => {

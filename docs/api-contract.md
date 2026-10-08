@@ -992,6 +992,76 @@ None
 
 Generate route recommendations based on current user preferences.
 
+The mini-program service signature is `generateRoutes(preferences)`. Its success
+result contains `status`, `source`, `routes`, `location`, `routePlanningSession`,
+`waypointCandidateCache`, `planningMetadata`, and `historicalPreferenceProfile`.
+The history field is the same compact snapshot used by all AI planning attempts
+in this invocation (or `null` when unavailable), including fallback success. It
+is runtime-only. The Routes page keeps it in `_historicalPreferenceProfile`,
+outside `data`, and clears it on reload/unload; ranking never reloads the profile.
+
+Only complete routes that pass existing route validation reach the pure local
+`route-ranking` service. The first valid route is scored and returned immediately,
+without waiting for alternatives. Each successful background fill reranks the
+currently displayed set, up to the existing three-route limit. Replacement removes
+one displayed route, adds the next successfully built route, then reranks. An edit
+must pass the same completeness validator before its confirmed rebuilt route
+replaces the original and triggers reranking. Explicit user edits retain their
+existing permission to exceed the questionnaire duration, so their validation
+omits the requested-duration constraint; generated recommendations still require
+the existing duration gate. Failed candidates/previews never enter ranking.
+Candidate generation, fallback selection, validation tolerances, provider calls,
+and recommendation reasons are unchanged.
+
+### Runtime ranking API (V1)
+
+`scoreRoute(route, { preferences, historicalPreferenceProfile })` returns
+`{ totalScore, components, effectiveWeights, tieBreak }`.
+`rankRoutes(routes, context)` returns a new sorted array of the original route
+objects, without modifying inputs or attaching score metadata. Neither method
+performs I/O or validates candidates; callers own the validation boundary.
+
+- Duration fit: `max(0, 1 - abs(durationSeconds - 60 * targetMinutes) / (60 * targetMinutes))`.
+  Current target is `preferences.durationMinutes`; historical target is
+  `historicalPreferenceProfile.preferredDurationMinutes`. Missing/nonpositive
+  targets or real durations make the component unavailable (`null`). Display
+  `durationMinutes` is never used as a substitute for real seconds.
+- Environment fit: arithmetic mean over unique verified `pointsOfInterest[].category`
+  values (`park`, `water`, `shoppingStreet`) with available weights. Current weights
+  use the category's position in the Chinese questionnaire environment list:
+  `[1, 0.67, 0.33, 0]`. History uses `environmentWeights` directly. Repeated POIs
+  do not amplify a category; missing category weights are excluded, and a valid
+  zero weight remains a real zero. No usable categories means `null`.
+- History fit: equal mean of the available historical environment and duration
+  components; no usable historical components means `null`.
+- Total: weighted mean of available components, with base weights **0.50 current
+  duration / 0.30 current environment / 0.20 history**. Missing components are
+  excluded and the remaining weights renormalized, never penalized as zero.
+  `effectiveWeights` exposes the actual weights; all components absent gives
+  `totalScore: null`. Current intent carries more weight than secondary history;
+  this is a weighted preference score, not a lexicographic current-intent veto.
+
+Ties resolve by total score descending, current duration fit descending, current
+environment fit descending, history fit descending, absolute current duration
+error ascending, canonical waypoint key ascending, then canonical route-fact key
+ascending. Unavailable values sort last only at the corresponding tie step.
+The waypoint key is a JSON-encoded sorted unique list of `recommendedWaypointIds`,
+falling back to verified POI IDs. The final fact key serializes real seconds,
+distance, route type, endpoint coordinates, active waypoint order, ordered POI
+IDs/categories/coordinates, and polyline coordinates. It handles missing arrays
+and distinguishes legacy/fallback routes sharing a waypoint key. Strings compare
+by code units, without locale dependence. Geometry is an identity tie-break only,
+never a street or quality inference. Routes with identical stable facts remain
+equivalent; their random identities are deliberately not ordered. IDs, timestamps,
+AI prose and optimizer runtime metadata never break ties.
+
+V1 excludes crowd history, liked/disliked tags, street, generic quality scores and
+diversity penalties because there is no verified route-level contract for those
+ranking signals. It does not infer quietness, views or crowding from POI categories.
+The derived UI badge `isBestMatch` marks only index zero when two or more routes
+exist. Scores, keys, history snapshots and badges are never added to persisted
+Route/Walk snapshots. No guarantee is made that history changes the AI output.
+
 The route-planning session supports Route 1, Route 2, ... Route N without a hardcoded recommendation count. Any future Free, VIP, or other product-level recommendation limit belongs to the product or entitlement layer rather than the route engine.
 
 ### Input

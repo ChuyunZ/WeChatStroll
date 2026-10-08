@@ -2,6 +2,8 @@ const routeGenerationService = require(
   "../../services/route-generation"
 );
 const { buildRouteMap } = require("../../utils/route-map");
+const routeRankingService = require("../../services/route-ranking");
+const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 
 const {
@@ -58,6 +60,7 @@ Page({
     this._routePlanningSession = null;
     this._waypointCandidateCache = null;
     this._routeLocation = null;
+    this._historicalPreferenceProfile = null;
 
     // 从 Preferences 页面进入时，
     // 等待 EventChannel 把问卷结果传过来。
@@ -115,6 +118,7 @@ Page({
 
     this._waypointCandidateCache = null;
     this._routeLocation = null;
+    this._historicalPreferenceProfile = null;
   },
 
   async loadRoutes() {
@@ -129,6 +133,7 @@ Page({
     this._routePlanningSession = null;
     this._waypointCandidateCache = null;
     this._routeLocation = null;
+    this._historicalPreferenceProfile = null;
 
     // 新请求开始后，
     // 清除上一批原始 Route。
@@ -171,6 +176,7 @@ Page({
         this._routePlanningSession = null;
         this._waypointCandidateCache = null;
         this._routeLocation = null;
+        this._historicalPreferenceProfile = null;
 
         this.setData({
           routes: [],
@@ -202,7 +208,8 @@ Page({
 
       // 保存业务层的原始 Route。
       // Route Detail 会拿这个对象。
-      this._rawRoutes = routes;
+      this._historicalPreferenceProfile = routeLoadResult.historicalPreferenceProfile || null;
+      this._rawRoutes = this.rankCurrentRoutes(routes);
 
       // Session 是运行时对象，里面包含函数、Map、Promise 和 closure。
       // 因此只保存在 Page 实例的私有字段里，不放进 data。
@@ -215,7 +222,7 @@ Page({
       this._routeLocation = routeLoadResult.location;
 
       const preparedRoutes =
-        this.prepareRoutes(routes);
+        this.prepareRoutes(this._rawRoutes);
 
       this.setData({
         routes: preparedRoutes,
@@ -235,6 +242,7 @@ Page({
       this._routePlanningSession = null;
       this._waypointCandidateCache = null;
       this._routeLocation = null;
+      this._historicalPreferenceProfile = null;
 
       console.error(
         "[Routes] Failed to load routes:",
@@ -293,7 +301,8 @@ Page({
         result.routePlanningSession,
       waypointCandidateCache:
         result.waypointCandidateCache,
-      location: result.location
+      location: result.location,
+      historicalPreferenceProfile: result.historicalPreferenceProfile || null
     }
   },
 
@@ -318,7 +327,7 @@ Page({
           });
           if (!isCurrent()) return;
           if (!result.success) continue;
-          this._rawRoutes = [...this._rawRoutes, result.route];
+          this._rawRoutes = this.rankCurrentRoutes([...this._rawRoutes, result.route]);
           this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
         } catch (error) {
           if (!isCurrent()) return;
@@ -331,8 +340,15 @@ Page({
     }
   },
 
+  rankCurrentRoutes(routes) {
+    return routeRankingService.rankRoutes(routes, {
+      preferences: this._routePreferences || {},
+      historicalPreferenceProfile: this._historicalPreferenceProfile
+    });
+  },
+
   prepareRoutes(routes) {
-    return routes.map((route) => {
+    return routes.map((route, index) => {
       const routeMap = buildRouteMap(route);
       const middleIndex =
         Math.floor(
@@ -369,6 +385,7 @@ Page({
 
       return {
         ...route,
+        isBestMatch: routes.length >= 2 && index === 0,
         displayPois: routeMap.displayPois,
         previewMarkers: routeMap.markers,
         previewPoints: routeMap.mapPoints,
@@ -491,6 +508,11 @@ Page({
             if (latestRequestId !== request.requestId || closed) return;
             if (!isCurrent()) throw new Error('Expired session');
             if (!walkingRoute || !walkingRoute.success) throw walkingRoute;
+            // Explicit user edits may exceed the original recommendation duration.
+            const validation = validateGeneratedWalkingRoute(walkingRoute, {
+              allowedWaypointIds: request.orderedWaypointIds
+            });
+            if (!validation.valid) throw validation;
             preview = routeGenerationService.rebuildGeneratedRouteForOrder({ baseRoute: selectedRoute, walkingRoute });
             respond('routePreviewResult', { ...reply, route: preview });
           } catch (error) {
@@ -507,7 +529,7 @@ Page({
             return;
           }
           // Only promote a route built here; never trust route facts from the UI.
-          this._rawRoutes = this._rawRoutes.map(route => route === selectedRoute ? preview : route);
+          this._rawRoutes = this.rankCurrentRoutes(this._rawRoutes.map(route => route === selectedRoute ? preview : route));
           selectedRoute = preview;
           preview = null;
           this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
@@ -563,8 +585,8 @@ Page({
         const newRawRoutes = [...this._rawRoutes];
         newRawRoutes.shift();
         newRawRoutes.push(result.route);
-        this._rawRoutes = newRawRoutes;
-        this.setData({ routes: this.prepareRoutes(newRawRoutes) });
+        this._rawRoutes = this.rankCurrentRoutes(newRawRoutes);
+        this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
         wx.showToast({ title: "已更换路线", icon: "none" });
         return;
       }
