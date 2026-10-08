@@ -325,7 +325,7 @@ Page({
         result.waypointCandidateCache,
       location: result.location,
       historicalPreferenceProfile: result.historicalPreferenceProfile || null,
-      verifiedWaypointPool: result.verifiedWaypointPool || null
+      ...(result.verifiedWaypointPool ? { verifiedWaypointPool: result.verifiedWaypointPool } : {})
     }
   },
 
