@@ -95,16 +95,15 @@ The adapter calls Tencent walking direction
 The adapter converts duration to seconds and decodes the polyline. There is no
 `environmentStats`, raw Tencent steps, `type` or `road_class` in the response.
 #84 optionally normalizes documented walking types and step meters into
-`streetEvidence`; missing or malformed evidence is omitted. The optional
-`classificationComplete: true` marks only fully typed integer-meter step lists
-with a nonzero total-distance shortfall bounded by 0.5 m/step, 0.5% of route
-distance and 10 m; measured coverage remains unchanged. The client moves the
-allowlisted aggregate into a runtime-only sidecar, not public segments or Route
-snapshots. See [Street source, coverage and limitations](street-preference-ranking.md).
+`streetEvidence`; missing/malformed evidence is omitted, while valid partial
+classification remains proportional to confirmed ordinary road. No unclassified
+step is assumed ordinary and no coverage percentage is a hard gate. The client
+moves the two allowlisted ratios into a runtime WeakMap, not public segments or
+Route snapshots. See [Street source, coverage and limitations](street-preference-ranking.md).
 Live October 8 development checks found 8 classified steps / 4 m accounting
-gap and 10 classified steps / 5 m gap on separate routes. The fixed scoring
-flow still needs a coordinated dev redeployment and E2E verification. No
-configuration changes are needed.
+gap and 10 classified steps / 5 m gap on separate routes. These do not justify
+a rounding rule. This scoring flow still needs coordinated dev redeployment and
+E2E verification. No configuration changes are needed.
 
 ## Error semantics
 
