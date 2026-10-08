@@ -68,7 +68,21 @@ async function generateWaypointPlan(
     )
 
   if (!aiResult.success) {
-    return aiResult
+    // Temporary diagnostics: report the actual prompt size and safe SDK error
+    // metadata, never the prompt, location, tokens or raw server response.
+    return {
+      ...aiResult,
+      diagnostic: {
+        ...(aiResult.diagnostic || {}),
+        model: 'hy3',
+        promptChars: promptResult.data.prompt.length,
+        promptUtf8Bytes: Buffer.byteLength(promptResult.data.prompt, 'utf8'),
+        manual: normalizedEvent.replanningContext &&
+          normalizedEvent.replanningContext.mode === 'manual',
+        attempt: normalizedEvent.replanningContext &&
+          normalizedEvent.replanningContext.attempt || 1
+      }
+    }
   }
   const rawPlanResult =
     parseRoutePlan(
@@ -180,7 +194,8 @@ function normalizeErrorResponse(result) {
       message:
         errorMessages[result.error] ||
         "Unable to generate waypoint plan."
-    }
+    },
+    ...(result.diagnostic ? { diagnostic: result.diagnostic } : {})
   }
 }
 
