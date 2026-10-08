@@ -73,6 +73,36 @@ The page rejects double taps and checks request, session, candidate-cache and op
 
 An exhausted initial pool still allows Add/Replace while a verified POI pool exists and the manual attempt budget is open. Add/Replace reuse that verified pool and history snapshot when requesting up to three AI batches; they never refetch location/POIs or restart the planning session.
 
+Manual AI requests use `replanningContext: { mode: 'manual', attempt: 1..3,
+excludedWaypointSets, previousFailures }`. Initial failure replanning retains its
+existing contract and prompt. Before requesting AI, the page consumes unused
+candidates from both the original cache and the retained manual batch. The first
+manual request already excludes all original candidate sets (including successful,
+failed and unused entries), all earlier manual batches, runtime attempted sets,
+and every previously surfaced set, including replaced routes. Entire manual
+batches are remembered even when processing stops early on success.
+
+Exclusions are not failure observations. They ask for new complete combinations
+from the existing verified pool; partial overlap is allowed, reordered identical
+sets are not new alternatives. Genuine failures from cached candidates use
+observation `attempt: 0`; AI rounds use 1..3, and only earlier observations are
+included. Failed cached entries with no recorded reason remain exclusions; no
+failure reason is inferred from their status. The cloud prompt allowlists failure
+fields and accepts at most 20 manual observations. Initial observation semantics
+remain unchanged.
+
+Both client and independently deployable cloud prompt normalize exclusions to
+sorted, unique, trimmed verified IDs, reject an entire set containing any unknown
+ID, and retain the first 100 distinct valid sets of 1–8 input IDs. Overflow is
+omitted from the wire/prompt only; complete runtime duplicate rejection remains
+authoritative, so an omitted or model-repeated set still cannot reach the builder.
+No history is persisted. Three unsuccessful AI rounds exhaust the manual operation
+without spending any of the separate three-successful-action budget.
+
+Deployment requires releasing the updated `aiRoutePlanner` prompt together with
+the mini-program changes: an older cloud prompt ignores manual attempt-1 history.
+No environment-variable, provider configuration or database changes are required.
+
 No POIs, a legal empty plan, or no successful route without provider unavailability enters the existing empty UI with a neutral suggestion to adjust duration/preferences. Malformed AI responses and AI request errors retain the error path. Provider unavailability enters the service-error/retry UI, not the geographic empty-result UI, and is not repaired by AI replanning.
 
 ## Walking provider pacing and availability failures

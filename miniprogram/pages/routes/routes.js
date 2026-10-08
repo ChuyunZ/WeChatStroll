@@ -596,6 +596,7 @@ Page({
     this._manualAlternativePending = null;
     this._manualAlternativeExhausted = false;
     this._manualAttemptedKeys = new Set();
+    this._manualRequestedKeys = new Set();
     this._manualCandidateCache = null;
   },
 
@@ -675,9 +676,9 @@ Page({
     const session = this._routePlanningSession;
     const candidateCache = this._waypointCandidateCache;
     const location = this._routeLocation;
-    const unusedCandidates = this.getEligibleCandidates();
-    const firstBatchCache = candidateCache.getUnusedCandidates().some(c => unusedCandidates.some(x => x.candidateId === c.candidateId && x.waypointIds.join('|') === c.waypointIds.join('|')))
-      ? candidateCache : this._manualCandidateCache || candidateCache;
+    const cachedBatches = [candidateCache, this._manualCandidateCache].filter(Boolean);
+    const unusedCandidates = cachedBatches.flatMap(cache =>
+      cache.getUnusedCandidates().map(candidate => ({ candidate, cache })));
     const operation = { routeId: selectedRoute ? selectedRoute.routeId : "" };
 
     const isCurrent = () => requestId === this._routeRequestId &&
@@ -691,22 +692,25 @@ Page({
       // request at most three fresh AI batches without replacing the session.
       const previouslyAttempted = new Set([
         ...this._manualAttemptedKeys,
-        ...candidateCache.getAllCandidates().map(c => waypointSetKey(c.waypointIds))
+        ...this._manualRequestedKeys,
+        ...this._seenWaypointSetKeys,
+        ...cachedBatches.flatMap(cache => cache.getAllCandidates().map(c => waypointSetKey(c.waypointIds)))
       ]);
       const observations = [];
       for (let round = 0; round <= 3; round++) {
-        if (!isCurrent()) return;
+        if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
         let batch = unusedCandidates;
-        let batchCache = firstBatchCache;
         if (round > 0) {
           if (!this._verifiedWaypointPool?.length) break;
+          let batchCache;
           try {
             batchCache = await routeGenerationService.requestManualWaypointCandidates({
               location, preferences: this._routePreferences || {},
               nearbyPois: this._verifiedWaypointPool,
               historicalPreferenceProfile: this._historicalPreferenceProfile,
               attempt: round,
-              previousFailures: observations
+              previousFailures: [...observations],
+              excludedWaypointSets: [...new Set([...previouslyAttempted, ...this._seenWaypointSetKeys])].map(key => JSON.parse(key))
             });
           } catch (error) {
             if (!isCurrent()) return;
@@ -715,14 +719,18 @@ Page({
               return;
             }
             observations.push({ attempt: round, waypointIds: [],
-              failure: { type: 'INVALID_AI_PLAN' } });
+              failure: normalizePlanningFailure(error || {}) });
             continue;
           }
           if (!isCurrent()) return;
           this._manualCandidateCache = batchCache;
-          batch = batchCache.getUnusedCandidates();
+          // Retain the entire requested batch, including candidates left unused
+          // when the first success returns early.
+          batchCache.getAllCandidates().forEach(candidate =>
+            this._manualRequestedKeys.add(waypointSetKey(candidate.waypointIds)));
+          batch = batchCache.getUnusedCandidates().map(candidate => ({ candidate, cache: batchCache }));
         }
-        for (const candidate of batch) {
+        for (const { candidate, cache: batchCache } of batch) {
         const candidateKey = waypointSetKey(candidate.waypointIds);
         if (round > 0 && previouslyAttempted.has(candidateKey)) {
           batchCache.markFailed(candidate.candidateId);
@@ -750,6 +758,8 @@ Page({
             wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
+          observations.push({ attempt: round, waypointIds: [...candidate.waypointIds],
+            failure: normalizePlanningFailure(error || {}, candidate.waypointIds) });
           continue;
         }
         if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
@@ -760,7 +770,7 @@ Page({
             wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
-          if (round > 0) observations.push({ attempt: round,
+          observations.push({ attempt: round,
             waypointIds: [...candidate.waypointIds],
             failure: normalizePlanningFailure(result, candidate.waypointIds) });
           continue;

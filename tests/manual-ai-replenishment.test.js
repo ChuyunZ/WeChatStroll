@@ -61,3 +61,24 @@ test('does not accept hallucinated POIs or malformed AI candidates as usable rou
     location, preferences, nearbyPois, attempt: 4
   })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
 })
+
+test('first manual request reaches the real cloud prompt with verified exclusions and no invented failures', async () => {
+  const { buildRoutePlanningPrompt } = require('../cloudfunctions/aiRoutePlanner/routePlanningPrompt')
+  callCloudFunction.mockResolvedValue({ plan: { candidates: [] } })
+  await requestManualWaypointCandidates({ location, nearbyPois, attempt: 1,
+    preferences: { ...preferences, crowdPreference: 'medium',
+      environmentPreferences: ['公园', '水边', '街道', '商街'] },
+    excludedWaypointSets: [[' B ', 'A'], ['A', 'B'], ['UNVERIFIED'], ['A', 'UNVERIFIED'], []]
+  })
+  const event = callCloudFunction.mock.calls[0][1]
+  expect(event.replanningContext).toEqual({ mode: 'manual', attempt: 1,
+    excludedWaypointSets: [['A', 'B']], previousFailures: [] })
+  const result = buildRoutePlanningPrompt(event)
+  expect(result.success).toBe(true)
+  const context = JSON.parse(result.data.prompt.split('MANUAL ALTERNATIVE CONTEXT\n')[1].split('\n')[0])
+  expect(context).toEqual(event.replanningContext)
+  expect(result.data.prompt).toContain('Partial POI overlap')
+  expect(result.data.prompt).not.toContain('UNVERIFIED')
+  expect(refreshProfile).not.toHaveBeenCalled()
+  expect(locationService.getCurrentLocation).not.toHaveBeenCalled()
+})

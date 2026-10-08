@@ -392,6 +392,9 @@ describe("route planning prompt", () => {
 test('replanning prompt uses bounded allowlisted observations and preserves the first prompt', () => {
   const first = buildRoutePlanningPrompt(validInput).data.prompt
   expect(first).not.toContain('PREVIOUS FAILED ATTEMPTS')
+  expect(buildRoutePlanningPrompt({ ...validInput,
+    replanningContext: { attempt: 1, previousFailures: [] }
+  }).data.prompt).toBe(first)
   const observation = { attempt: 1, waypointIds: ['poi-1'],
     failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 2700,
       rawPayload: 'secret-payload', latitude: 12, polyline: [1, 2] }, stack: 'private-stack' }
@@ -406,6 +409,41 @@ test('replanning prompt uses bounded allowlisted observations and preserves the 
   for (const forbidden of ['latitude', 'polyline', 'secret-payload', 'private-stack']) expect(section).not.toContain(forbidden)
   expect(prompt).toContain('Do not repeat previously failed sets')
   expect(buildRoutePlanningPrompt({ ...validInput, replanningContext: { attempt: 999 } }).data.prompt).toBe(first)
+})
+
+test.each([1, 2, 3])('manual round %i separates exclusions from genuine earlier failures', attempt => {
+  const prompt = buildRoutePlanningPrompt({ ...validInput, replanningContext: {
+    mode: 'manual', attempt,
+    excludedWaypointSets: [[' poi-1 ', 'poi-2'], ['poi-2', 'poi-1'], ['unverified'], ['poi-1', 'unverified']],
+    previousFailures: [
+      { attempt: 0, waypointIds: ['poi-2'], failure: { type: 'NO_COMPLETE_ROUTE', rawPayload: 'SECRET' } },
+      { attempt: 1, waypointIds: ['poi-1'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 2700 } },
+      { attempt: 2, waypointIds: ['poi-2'], failure: { type: 'ROUTE_BUILD_FAILED' } },
+      { attempt: 3, waypointIds: ['poi-1'], failure: { type: 'NO_COMPLETE_ROUTE' } }
+    ]
+  } }).data.prompt
+  const section = prompt.split('MANUAL ALTERNATIVE CONTEXT\n')[1].split('\n')[0]
+  const context = JSON.parse(section)
+  expect(context.excludedWaypointSets).toEqual([['poi-1', 'poi-2']])
+  expect(context.previousFailures.map(item => item.attempt)).toEqual(Array.from({ length: attempt }, (_, i) => i))
+  expect(section).not.toContain('SECRET')
+  expect(section).not.toContain('unverified')
+  expect(prompt).toContain('not necessarily failures')
+  expect(prompt).toContain('Different visit orders of the same complete POI set are not new alternatives')
+  expect(prompt).toContain('Never invent POIs, coordinates, routes, distances or durations')
+})
+
+test('manual exclusion payload is capped identically on client and independently deployed cloud', () => {
+  const { normalizeExcludedWaypointSets } = require('../../miniprogram/services/agentic-route-planning')
+  const nearbyPois = Array.from({ length: 120 }, (_, i) => ({ ...validInput.nearbyPois[0], poiId: `p-${i}` }))
+  const sets = nearbyPois.map(poi => [poi.poiId])
+  const prompt = buildRoutePlanningPrompt({ ...validInput, nearbyPois, replanningContext: {
+    mode: 'manual', attempt: 1, excludedWaypointSets: sets, previousFailures: []
+  } }).data.prompt
+  const context = JSON.parse(prompt.split('MANUAL ALTERNATIVE CONTEXT\n')[1].split('\n')[0])
+  expect(context.excludedWaypointSets).toEqual(normalizeExcludedWaypointSets(sets, nearbyPois))
+  expect(context.excludedWaypointSets).toHaveLength(100)
+  expect(context.excludedWaypointSets[99]).toEqual(['p-99'])
 })
 
 test('non-replannable build failures are excluded from model context', () => {

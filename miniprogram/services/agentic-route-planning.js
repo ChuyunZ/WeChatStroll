@@ -4,6 +4,20 @@ function waypointSetKey(ids) {
   return JSON.stringify([...new Set(ids.map(id => typeof id === 'string' ? id.trim() : id))].sort())
 }
 
+// Bounded wire projection only; runtime duplicate history is never truncated.
+function normalizeExcludedWaypointSets(sets, verifiedPois) {
+  const allowed = new Set(verifiedPois.map(poi => poi.poiId.trim()))
+  const unique = new Map()
+  for (const ids of Array.isArray(sets) ? sets : []) {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 8 ||
+        !ids.every(id => typeof id === 'string' && allowed.has(id.trim()))) continue
+    const key = waypointSetKey(ids)
+    unique.set(key, JSON.parse(key))
+    if (unique.size === 100) break
+  }
+  return [...unique.values()]
+}
+
 function normalizePlanningFailure(result = {}, waypointIds = []) {
   const code = result.code || result.error
   if ([code, result.causeCode, result.failedSegment && result.failedSegment.causeCode,
@@ -49,4 +63,4 @@ function buildPlanningMetadata(attemptCount, fallbackUsed, observations) {
   }
 }
 
-module.exports = { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata }
+module.exports = { waypointSetKey, normalizeExcludedWaypointSets, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata }

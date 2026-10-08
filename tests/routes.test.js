@@ -481,6 +481,89 @@ describe('bounded manual alternatives', () => {
     expect(page.data.manualAlternativeAction).toBe('');
   });
 
+  test('manual rounds send accumulated exclusions and genuine failures, then replace only the chosen route', async () => {
+    const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
+    const makeCache = sets => createWaypointCandidateCache(sets.map(ids => ({ waypoints: ids.map(poiId => ({ poiId })) })));
+    const cache = setup(3, [['A', 'B'], ['C'], ['D']]);
+    cache.markSuccess('candidate-1', route(['A', 'B']));
+    cache.markFailed('candidate-2');
+    page._manualCandidateCache = makeCache([['E']]);
+    page._manualRequestedKeys.add('["F"]');
+    page._manualAttemptedKeys.add('["G"]');
+    page._seenWaypointSetKeys.add('["H"]'); // previously replaced route
+    page._verifiedWaypointPool = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(poiId => ({ poiId }));
+    const original = [...page._rawRoutes];
+    const requests = [];
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn(async options => {
+      requests.push(options);
+      return makeCache(options.attempt === 1 ? [[' B ', 'A']] : options.attempt === 2 ? [['A', 'C']] : [['A', 'D']]);
+    });
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate, candidateCache }) => {
+      candidateCache.markBuilding(candidate.candidateId);
+      if (candidate.waypointIds.join() !== 'A,D') {
+        candidateCache.markFailed(candidate.candidateId);
+        return { success: false, reason: 'ROUTE_DURATION_OUT_OF_RANGE', actualDurationSeconds: 100,
+          minDurationSeconds: 1350, maxDurationSeconds: 2250, targetDurationSeconds: 1800 };
+      }
+      const built = route(candidate.waypointIds);
+      candidateCache.markSuccess(candidate.candidateId, built);
+      return { success: true, route: built };
+    });
+    page.showOtherRoutes();
+    await page.selectRouteToReplace(tap(original[1].routeId));
+    expect(requests).toHaveLength(3);
+    expect(requests[0].excludedWaypointSets).toEqual(expect.arrayContaining([
+      ['A', 'B'], ['C'], ['D'], ['E'], ['F'], ['G'], ['H'], ['initial-0'], ['initial-1'], ['initial-2']
+    ]));
+    expect(requests[0].previousFailures.map(item => item.waypointIds)).toEqual([['D'], ['E']]);
+    expect(requests[0].previousFailures.every(item => item.attempt === 0 && item.failure.type === 'DURATION_TOO_SHORT')).toBe(true);
+    expect(requests[1].previousFailures).toEqual(requests[0].previousFailures);
+    expect(requests[2].excludedWaypointSets).toContainEqual(['A', 'C']);
+    expect(requests[2].previousFailures).toContainEqual({ attempt: 2, waypointIds: ['A', 'C'],
+      failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 100, targetDurationSeconds: 1800 } });
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).toHaveBeenCalledTimes(4);
+    expect(page._rawRoutes).toContain(original[0]);
+    expect(page._rawRoutes).toContain(original[2]);
+    expect(page._rawRoutes).not.toContain(original[1]);
+    expect(page._rawRoutes.some(item => item.recommendedWaypointIds.join() === 'A,D')).toBe(true);
+    expect(page._manualAlternativeActionCount).toBe(1);
+  });
+
+  test('three duplicate AI batches never invoke the builder or consume successful budget', async () => {
+    const cache = setup(3, [['A', 'B']]);
+    cache.markSuccess('candidate-1', route(['A', 'B']));
+    page._verifiedWaypointPool = [{ poiId: 'A' }, { poiId: 'B' }];
+    const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn(async () =>
+      createWaypointCandidateCache([{ waypoints: [{ poiId: 'B' }, { poiId: 'A' }] }]));
+    const original = page._rawRoutes;
+    page.showOtherRoutes();
+    await page.selectRouteToReplace(tap(original[1].routeId));
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(3);
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).not.toHaveBeenCalled();
+    expect(page._rawRoutes).toBe(original);
+    expect(page._manualAlternativeActionCount).toBe(0);
+    expect(page._manualAlternativeExhausted).toBe(true);
+  });
+
+  test.each(['unload', 'provider'])('manual AI %s cannot build or change displayed routes', async mode => {
+    setup(3, []);
+    page._verifiedWaypointPool = [{ poiId: 'A' }];
+    const deferred = createDeferred();
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn(() => deferred.promise);
+    page.showOtherRoutes();
+    const original = page._rawRoutes;
+    const pending = page.selectRouteToReplace(tap(original[1].routeId));
+    if (mode === 'unload') page.onUnload();
+    deferred.reject({ code: 'PROVIDER_GATEWAY_FAILED' });
+    await pending;
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(1);
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).not.toHaveBeenCalled();
+    expect(page._rawRoutes).toBe(original);
+    expect(page._manualAlternativeActionCount).toBe(0);
+    expect(page._manualAlternativeExhausted).toBe(false);
+  });
+
   test.each([1, 2])('settled with %i routes adds exactly one and reranks using the same history and session', async count => {
     setup(count);
     const original = [...page._rawRoutes];

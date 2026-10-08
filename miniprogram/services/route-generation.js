@@ -4,7 +4,7 @@ const { rankRoutes } = require('./route-ranking')
 const { refreshProfile } = require('./preference-profile-records')
 const { validateProfile } = require('../utils/preference-profile-schema')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
-const { waypointSetKey, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
+const { waypointSetKey, normalizeExcludedWaypointSets, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 
 const {
@@ -1205,7 +1205,7 @@ async function buildFallbackGenerationResult({
 // existing optimizer/builder; never silently perform a new location/POI search.
 async function requestManualWaypointCandidates({
   location, preferences, nearbyPois, historicalPreferenceProfile,
-  attempt, previousFailures = []
+  attempt, previousFailures = [], excludedWaypointSets = []
 }) {
   if (!isValidPoint(location) || !Array.isArray(nearbyPois) || !nearbyPois.length ||
       !nearbyPois.every(isValidPoi) || !Number.isInteger(attempt) ||
@@ -1214,7 +1214,8 @@ async function requestManualWaypointCandidates({
   }
   const plan = await requestWaypointPlan({
     location, preferences, nearbyPois, historicalPreferenceProfile,
-    replanningContext: { attempt, previousFailures }
+    replanningContext: { mode: 'manual', attempt, previousFailures,
+      excludedWaypointSets: normalizeExcludedWaypointSets(excludedWaypointSets, nearbyPois) }
   })
   if (!hasValidWaypointPlanShape(plan)) {
     throw createRouteGenerationError('INVALID_AI_ROUTE_PLAN', 'Invalid manual AI plan.')
