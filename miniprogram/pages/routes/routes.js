@@ -702,6 +702,7 @@ Page({
         let batch = unusedCandidates;
         if (round > 0) {
           if (!this._verifiedWaypointPool?.length) break;
+          console.log('[Manual AI Planning] Attempt start:', { attempt: round, maxAttempts: 3 });
           let batchCache;
           try {
             batchCache = await routeGenerationService.requestManualWaypointCandidates({
@@ -714,6 +715,7 @@ Page({
             });
           } catch (error) {
             if (!isCurrent()) return;
+            console.warn('[Manual AI Planning] Attempt failed:', { attempt: round, code: typeof (error && error.code) === 'string' ? error.code : 'AI_ROUTE_PLANNING_FAILED' });
             if (error && isProviderUnavailableCode(error.code)) {
               wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
               return;
@@ -723,6 +725,7 @@ Page({
             continue;
           }
           if (!isCurrent()) return;
+          console.log('[Manual AI Planning] Plan received:', { attempt: round, candidateCount: batchCache.getAllCandidates().length });
           this._manualCandidateCache = batchCache;
           // Retain the entire requested batch, including candidates left unused
           // when the first success returns early.
@@ -784,12 +787,14 @@ Page({
         this.rememberSurfacedRoute(result.route);
         this._manualAlternativeActionCount++;
         this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+        console.log('[Manual AI Planning] Route accepted:', { attempt: round, action: selectedRoute ? 'replace' : 'add' });
         wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
         }
       }
       if (isCurrent()) {
         this._manualAlternativeExhausted = true;
+        console.warn('[Manual AI Planning] Exhausted:', { maxAttempts: 3 });
         wx.showToast({ title: this._verifiedWaypointPool?.length
           ? "三轮尝试后暂无更多路线" : "暂无更多路线", icon: "none" });
       }
