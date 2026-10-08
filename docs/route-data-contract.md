@@ -33,6 +33,12 @@ The goal is to make sure every part of the application uses the same field names
 
 ### Runtime recommendation ranking
 
+Manual Add/Replace counters, newly requested candidate batches, previously surfaced waypoint-set keys, selection and
+pending-operation state belong only to the current planning session on the Routes
+page. They are not Route/Walk fields and must never be persisted. Alternative
+identity uses the complete normalized verified/recommended POI set, independent
+of order and `routeId`; see [manual alternatives](waypoint-order-optimization.md#manual-route-alternatives).
+
 Validated complete routes are ranked progressively: the first valid route is
 available immediately, and successful alternatives, replacements and confirmed
 validated edits rerank the displayed set. Ranking is distinct from optimizing

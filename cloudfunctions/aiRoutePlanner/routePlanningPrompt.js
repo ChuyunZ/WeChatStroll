@@ -135,15 +135,17 @@ function isValidNearbyPois(nearbyPois) {
 }
 
 function buildReplanningSection(context, nearbyPois) {
-  if (!context || !Number.isInteger(context.attempt) || context.attempt < 2 ||
+  const manual = context && context.mode === 'manual'
+  if (!context || !Number.isInteger(context.attempt) || context.attempt < (manual ? 1 : 2) ||
       context.attempt > MAX_AI_PLANNING_ATTEMPTS || !Array.isArray(context.previousFailures)) return []
   const allowedIds = new Set(nearbyPois.map(poi => poi.poiId))
   const types = new Set(['INVALID_AI_PLAN', 'UNWALKABLE_SEGMENT', 'NO_COMPLETE_ROUTE',
     'DURATION_TOO_SHORT', 'DURATION_TOO_LONG'])
+  if (manual) types.add('ROUTE_BUILD_FAILED')
   const previousFailures = []
-  const maxPreviousFailures = (MAX_AI_PLANNING_ATTEMPTS - 1) * MAX_ROUTE_CANDIDATES
+  const maxPreviousFailures = (MAX_AI_PLANNING_ATTEMPTS + (manual ? 1 : -1)) * MAX_ROUTE_CANDIDATES
   for (const observation of context.previousFailures.slice(0, maxPreviousFailures)) {
-    if (!observation || !Number.isInteger(observation.attempt) || observation.attempt < 1 ||
+    if (!observation || !Number.isInteger(observation.attempt) || observation.attempt < (manual ? 0 : 1) ||
         observation.attempt >= context.attempt || !Array.isArray(observation.waypointIds) ||
         observation.waypointIds.length > MAX_WAYPOINTS ||
         !observation.waypointIds.every(id => allowedIds.has(id)) ||
@@ -157,6 +159,29 @@ function buildReplanningSection(context, nearbyPois) {
       if (Number.isFinite(value) && value >= 0) failure[key] = value
     }
     previousFailures.push({ attempt: observation.attempt, waypointIds: [...observation.waypointIds], failure })
+  }
+  if (manual) {
+    // Independent deployment: keep this wire projection aligned with the client
+    // helper, without importing mini-program code into the cloud function.
+    const excluded = new Map()
+    for (const ids of Array.isArray(context.excludedWaypointSets) ? context.excludedWaypointSets : []) {
+      if (!Array.isArray(ids) || !ids.length || ids.length > MAX_WAYPOINTS ||
+          !ids.every(id => typeof id === 'string' && allowedIds.has(id.trim()))) continue
+      const normalized = [...new Set(ids.map(id => id.trim()))].sort()
+      excluded.set(JSON.stringify(normalized), normalized)
+      if (excluded.size === 100) break
+    }
+    return [
+      '', 'MANUAL ALTERNATIVE CONTEXT',
+      JSON.stringify({ mode: 'manual', attempt: context.attempt,
+        excludedWaypointSets: [...excluded.values()], previousFailures }),
+      'MANUAL ALTERNATIVE RULES',
+      'The excluded complete POI combinations have already been requested, attempted or displayed; they are not necessarily failures.',
+      'Generate new complete combinations from VERIFIED POI CANDIDATES. Partial POI overlap with excluded combinations is allowed.',
+      'Different visit orders of the same complete POI set are not new alternatives. Do not repeat excluded combinations.',
+      'Only previousFailures describes actual failures. Attempt 0 means cached candidates tried before this manual action requested AI batches.',
+      'Never invent POIs, coordinates, routes, distances or durations. The map provider and route engine determine real route facts.'
+    ]
   }
   return [
     '', 'PREVIOUS FAILED ATTEMPTS',

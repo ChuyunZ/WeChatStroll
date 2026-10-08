@@ -63,6 +63,10 @@
     wx:elif="{{routeState === 'success'}}"
   >
 
+    <view wx:if="{{replacementSelection}}" class="replacement-hint">
+      请选择要替换的路线，新路线生成成功前会保留原路线。
+      <button class="other-routes-button" bindtap="cancelReplacementSelection">取消选择</button>
+    </view>
     <view
       class="route-card"
       wx:for="{{routes}}"
@@ -161,16 +165,21 @@
         查看路线
       </button>
 
+      <button wx:if="{{replacementSelection}}" class="other-routes-button"
+        data-id="{{item.routeId}}" bindtap="selectRouteToReplace">替换这条路线</button>
+      <view wx:if="{{replacingRouteId === item.routeId}}" class="replacement-hint">正在为这条路线寻找替代路线…</view>
+
     </view>
 
 
     <view wx:if="{{isLoadingMoreRoutes}}" class="reason-text">正在继续寻找更多路线…</view>
+    <view wx:if="{{manualAlternativePending}}" class="replacement-hint">正在寻找新路线，请稍候…</view>
     <button
+      wx:if="{{manualAlternativeAction && !replacementSelection}}"
       class="other-routes-button"
-      disabled="{{isLoadingMoreRoutes}}"
       bindtap="showOtherRoutes"
     >
-      换一批路线
+      {{manualAlternativeAction === 'add' ? '增加一个路线' : '换一个路线'}}
     </button>
 
   </view>

@@ -6,7 +6,7 @@ AI selects sets of verified POI IDs. The application chooses their visit order u
 
 - Each nonempty candidate contains 1–8 distinct verified POIs. Eight is a temporary product limit, not a VIP entitlement check.
 - AI can return 0–5 candidates. Only an explicit, correctly shaped `{"candidates":[]}` is a normal no-result response. Invalid candidates are filtered as before; if every supplied candidate is invalid, the response remains an error. Equal or subset candidate sets remain incompatible.
-- Initial generation displays at most three successful routes. Remaining candidates are retained for replacement. This display count is separate from the waypoint limit and the exact-search threshold.
+- Initial generation displays at most three successful routes and stops processing as soon as three are displayed. Remaining candidates are retained for manual alternatives. This display count is separate from the waypoint limit and the exact-search threshold.
 - `miniprogram/config/route-planning.js` holds client limits. `cloudfunctions/aiRoutePlanner/routePlanContract.js` holds the independently deployed cloud contract. A test keeps `MAX_WAYPOINTS` aligned; there is no cross-deployment runtime import. Deploy both updated components together.
 
 ## Shared session and evaluation
@@ -53,13 +53,55 @@ Success includes `recommendedWaypointIds` and `optimization` with `strategy`, `w
 
 ## Generation and lifecycle
 
-`generateRoutes()` returns immediately after the first successful candidate (skipping failed candidates). It returns the same runtime planning session and candidate cache for continuation. The page enters `success` immediately and keeps the first route usable while appending further successes, up to three displayed routes. No second AI request is made. `isLoadingMoreRoutes` shows a lightweight progress message and disables replacement until initial fill settles; the handler also rejects programmatic/duplicate replacement clicks during fill.
+`generateRoutes()` returns immediately after the first successful candidate (skipping failed candidates). It returns the same runtime planning session and candidate cache for continuation. The page enters `success` immediately and keeps the first route usable while appending further unseen successes, up to three displayed routes. No second AI request is made. `isLoadingMoreRoutes` shows a lightweight progress message; manual controls are hidden until initial fill settles (three displayed routes or the captured unused batch exhausted). Handlers also reject programmatic manual actions during fill.
 
 Continuation captures request ID, session, candidate cache, location and duration preference. It checks identities before claiming another candidate and after each await. Reload, unload or changing preferences invalidates ownership, so old work may finish its captured provider calls/cache updates but cannot append to or clear loading state on the current page. Exceptions during background fill leave existing routes visible and allow the next candidate to be tried.
 
 Both `generateRoutes` and the routes page call `buildOptimizedCandidateRoute` to claim an unused candidate, optimize, build once, and settle success/failure. Original IDs stay on the cache entry; the route also retains original IDs, recommended IDs, optimization metadata, `routeOrder`, and POI IDs. The old `generateFirstRoute` single-POI compatibility path remains supported; it has no ordering choice.
 
-The page ignores duplicate replacement clicks and results belonging to an unloaded or replaced session. Service exceptions mark the candidate failed, and page cleanup releases the click guard. A replacement reuses the existing session; a fresh planning request or unload ends its page ownership. In-flight work may finish against its captured old cache, but cannot update the new page or session. This change does not cancel outstanding provider requests.
+### Manual route alternatives
+
+- Settled with one/two displayed routes, remaining budget and an eligible unused candidate or verified POI pool for bounded AI replenishment: show **增加一个路线**. Each click builds through the bounded remaining candidates until exactly one valid unseen route can be added.
+- Settled with three routes under the same conditions: show **换一个路线**. It opens inline card selection with **替换这条路线** and **取消选择**. No route is preselected, including Best Match. The selected original stays visible while building; success replaces only that route and reranks all three using the existing ranker and history snapshot.
+- Successful additions and replacements share a maximum of **three actions per planning session**. Failure, duplicates, exhausted candidates, cancellation and stale results cost nothing. Controls are hidden while building or when budget/candidates are exhausted. No-result attempts retain the displayed routes and show a recoverable toast. When no eligible candidate remains, each manual action may request up to three new AI batches, checking each candidate in sequence and stopping at the first valid unseen route. Three exhausted AI batches disable further manual actions for the session. Failed candidates are not retried.
+
+The page's private `_seenWaypointSetKeys` uses the existing `waypointSetKey()` helper: trim verified POI IDs, deduplicate, sort and JSON-encode the complete set. Order, route IDs, titles, timestamps and geometry do not identify alternatives. Partial overlap is allowed. Initial successes and manual successes are recorded; keys remain after replacement. Confirmed edits retain the complete recommendation's identity and also record their active subset. Duplicate candidates are deterministically excluded without building them or consuming budget. Building/failed/successful cache entries are not unused candidates.
+
+`_manualAlternativeActionCount`, the seen set, selection, initial-completion flag and pending-operation token are runtime-only private page fields. New planning requests reset them; unload clears ownership. Only labels/selection/loading state reach `data`; nothing is persisted to local storage or CloudBase. The existing single session's directed segment Promise cache is reused by initial generation, Add, Replace, optimizer evaluation and `buildRouteForOrder()`. Valid hits bypass the resolver/provider; cache misses use the existing provider path. A→B and B→A remain distinct. Cached malformed/failed segments cannot become successful routes. A new batch-local candidate cache is retained for later manual actions; the original directed segment cache and session remain shared. No provider retry policy is introduced.
+
+The page rejects double taps and checks request, session, candidate-cache and operation identity before building and after awaits. A selected route must still be the same displayed object before replacement commits, so an intervening confirmed edit is not overwritten. Old detail callbacks check displayed object membership and cannot edit a replaced route. Old completions cannot unlock newer operations. In-flight work may finish against its captured old cache, but cannot update the new page or session; outstanding provider requests are not cancelled.
+
+An exhausted initial pool still allows Add/Replace while a verified POI pool exists and the manual attempt budget is open. Add/Replace reuse that verified pool and history snapshot when requesting up to three AI batches; they never refetch location/POIs or restart the planning session.
+
+Manual AI requests use `replanningContext: { mode: 'manual', attempt: 1..3,
+excludedWaypointSets, previousFailures }`. Initial failure replanning retains its
+existing contract and prompt. Before requesting AI, the page consumes unused
+candidates from both the original cache and the retained manual batch. The first
+manual request already excludes all original candidate sets (including successful,
+failed and unused entries), all earlier manual batches, runtime attempted sets,
+and every previously surfaced set, including replaced routes. Entire manual
+batches are remembered even when processing stops early on success.
+
+Exclusions are not failure observations. They ask for new complete combinations
+from the existing verified pool; partial overlap is allowed, reordered identical
+sets are not new alternatives. Genuine failures from cached candidates use
+observation `attempt: 0`; AI rounds use 1..3, and only earlier observations are
+included. Failed cached entries with no recorded reason remain exclusions; no
+failure reason is inferred from their status. The cloud prompt allowlists failure
+fields and accepts at most 20 manual observations. Initial observation semantics
+remain unchanged.
+
+Both client and independently deployable cloud prompt normalize exclusions to
+sorted, unique, trimmed verified IDs, reject an entire set containing any unknown
+ID, and retain the first 100 distinct valid sets of 1–8 input IDs. Overflow is
+omitted from the wire/prompt only; complete runtime duplicate rejection remains
+authoritative, so an omitted or model-repeated set still cannot reach the builder.
+No history is persisted. The model may legally return `candidates: []`; these are successful empty plans, distinct from model request failures (for example HTTP 429). Candidate-diversity and repeated empty-plan optimization are tracked in #91. Three unsuccessful AI rounds exhaust the manual operation
+without spending any of the separate three-successful-action budget.
+
+Deployment requires releasing the updated `aiRoutePlanner` prompt together with
+the mini-program changes: an older cloud prompt ignores manual attempt-1 history.
+No environment-variable, provider configuration or database changes are required.
 
 No POIs, a legal empty plan, or no successful route without provider unavailability enters the existing empty UI with a neutral suggestion to adjust duration/preferences. Malformed AI responses and AI request errors retain the error path. Provider unavailability enters the service-error/retry UI, not the geographic empty-result UI, and is not repaired by AI replanning.
 
