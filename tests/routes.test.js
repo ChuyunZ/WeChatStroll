@@ -571,8 +571,45 @@ describe('bounded manual alternatives', () => {
     expect(cache.getUnusedCandidates()).toHaveLength(1);
     expect(page.data.manualAlternativeAction).toBe('add');
     expect(wx.showToast).toHaveBeenCalledWith({
-      title: '路线服务暂时繁忙，请稍后重试', icon: 'none'
+      title: '路线服务暂时繁忙，请稍后重新规划', icon: 'none'
     });
+  });
+
+  test.each(['thrown', 'returned'])('last candidate provider outage preserves routes and budget with actionable guidance (%s)', async mode => {
+    const cache = setup(1, [['A', 'B']]);
+    const original = page._rawRoutes;
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate }) => {
+      cache.markBuilding(candidate.candidateId);
+      cache.markFailed(candidate.candidateId);
+      if (mode === 'thrown') {
+        const error = new Error('Provider temporarily unavailable');
+        error.code = 'PROVIDER_RATE_LIMITED';
+        throw error;
+      }
+      return { success: false, error: 'PROVIDER_GATEWAY_FAILED' };
+    });
+    await page.showOtherRoutes();
+    expect(page._rawRoutes).toBe(original);
+    expect(page._manualAlternativeActionCount).toBe(0);
+    expect(page._manualAlternativePending).toBeNull();
+    expect(cache.getUnusedCandidates()).toHaveLength(0);
+    expect(page.data.manualAlternativeAction).toBe('');
+    expect(wx.showToast).toHaveBeenCalledWith({
+      title: '路线服务暂时繁忙，请稍后重新规划', icon: 'none'
+    });
+  });
+
+  test('initial fill settles duplicate candidates rather than leaving them unused', async () => {
+    const cache = setup(1, [['initial-0'], ['A', 'B'], [' B ', ' A '], ['A', 'C']]);
+    page._initialCandidateProcessingComplete = false;
+    await page.fillInitialRoutes(page._routeRequestId);
+    const entries = cache.getAllCandidates();
+    expect(entries[0].status).toBe('unused');
+    expect(entries[1].status).toBe('success');
+    expect(entries[2].status).toBe('failed');
+    expect(entries[3].status).toBe('success');
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).toHaveBeenCalledTimes(2);
+    expect(page._rawRoutes).toHaveLength(3);
   });
 
   test('failed candidates are skipped and only the next success consumes budget', async () => {
