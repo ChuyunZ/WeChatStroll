@@ -87,8 +87,7 @@ The adapter calls Tencent walking direction
     distanceMeters,
     durationSeconds,
     polyline: [/* { latitude, longitude }, ... */]
-    // streetEvidence: { coverageRatio, ordinaryRoadRatio, classificationComplete?: true }
-    // optional normalized capability; never persisted in application snapshots
+    // streetEvidence: { coverageRatio, ordinaryRoadRatio } // optional runtime-only
   }
 }
 ```
