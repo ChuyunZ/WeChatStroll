@@ -438,6 +438,49 @@ describe('bounded manual alternatives', () => {
     return cache;
   }
 
+  test('manual Add replenishes exhausted candidates and retains the unused AI batch', async () => {
+    setup(1, []);
+    page._verifiedWaypointPool = [{ poiId: 'A', name: 'A', latitude: 23.13, longitude: 113.26 }];
+    const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn().mockResolvedValue(
+      createWaypointCandidateCache([['A', 'B'], ['A', 'C']].map(ids => ({
+        waypoints: ids.map(poiId => ({ poiId }))
+      })))
+    );
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate, candidateCache }) => {
+      expect(candidateCache.markBuilding(candidate.candidateId)).toBe(true);
+      const built = route(candidate.waypointIds);
+      candidateCache.markSuccess(candidate.candidateId, built);
+      return { success: true, route: built };
+    });
+    page.updateManualAlternativeControls();
+    expect(page.data.manualAlternativeAction).toBe('add');
+    await page.showOtherRoutes();
+    expect(page._rawRoutes).toHaveLength(2);
+    expect(page._manualAlternativeActionCount).toBe(1);
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(1);
+    await page.showOtherRoutes();
+    expect(page._rawRoutes).toHaveLength(3);
+    expect(page._manualAlternativeActionCount).toBe(2);
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(1);
+  });
+
+  test('three exhausted AI rounds keep original route and consume no successful action', async () => {
+    setup(1, []);
+    page._verifiedWaypointPool = [{ poiId: 'A', name: 'A', latitude: 23.13, longitude: 113.26 }];
+    const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn()
+      .mockImplementation(async () => createWaypointCandidateCache([]));
+    const original = page._rawRoutes;
+    page.updateManualAlternativeControls();
+    await page.showOtherRoutes();
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(3);
+    expect(page._rawRoutes).toBe(original);
+    expect(page._manualAlternativeActionCount).toBe(0);
+    expect(page._manualAlternativeExhausted).toBe(true);
+    expect(page.data.manualAlternativeAction).toBe('');
+  });
+
   test.each([1, 2])('settled with %i routes adds exactly one and reranks using the same history and session', async count => {
     setup(count);
     const original = [...page._rawRoutes];
