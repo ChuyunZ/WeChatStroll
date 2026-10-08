@@ -337,7 +337,10 @@ Page({
     try {
       for (const candidate of candidates) {
         if (!isCurrent() || this._rawRoutes.length >= 3) break;
-        if (this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) continue;
+        if (this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) {
+          candidateCache.markFailed(candidate.candidateId);
+          continue;
+        }
         try {
           const result = await routeGenerationService.buildOptimizedCandidateRoute({
             session, candidateCache, candidate, location,
@@ -684,7 +687,7 @@ Page({
           // The shared builder normally settles exceptions itself.
           candidateCache.markFailed(candidate.candidateId);
           if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重试", icon: "none" });
+            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           continue;
@@ -694,7 +697,7 @@ Page({
           if ([result.error, result.code, result.causeCode,
             result.failedSegment && result.failedSegment.causeCode,
             result.failedSegment && result.failedSegment.error].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重试", icon: "none" });
+            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           continue;
