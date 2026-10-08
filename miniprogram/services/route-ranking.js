@@ -1,10 +1,10 @@
 // Callers admit only validated, complete walking routes. This service does no I/O.
 const { getStreetEvidence } = require('./street-evidence')
-// Provisional coefficient and bounded accounting-gap gate, not a general 99.5%
-// partial-classification policy. Tiny gaps qualify only with verified cloud
-// classificationComplete evidence preserved through the runtime sidecar.
-const STREET_BONUS_CONFIG = Object.freeze({ maxBonus: 0.05, minimumCoverage: 1,
-  minimumToleratedCoverage: 0.995, rankStrengths: Object.freeze([1, 0.5, 0, 0]) })
+// Provisional positive-only coefficient. Coverage scales the bonus instead of
+// acting as a threshold: unknown walking distance contributes zero ordinary meters.
+const STREET_BONUS_CONFIG = Object.freeze({
+  maxBonus: 0.05, rankStrengths: Object.freeze([1, 0.5, 0, 0])
+})
 const RANKING_CONFIG = Object.freeze({
   weights: Object.freeze({ durationFit: 0.50, currentEnvironmentFit: 0.30, historyFit: 0.20 }),
   rankScores: Object.freeze([1, 0.67, 0.33, 0]),
@@ -74,12 +74,7 @@ function scoreRoute(route, { preferences = {}, historicalPreferenceProfile = nul
   const streetEvidence = getStreetEvidence(route)
   const streetRank = list(preferences.environmentPreferences).indexOf('街道')
   const strength = STREET_BONUS_CONFIG.rankStrengths[streetRank] || 0
-  const usableStreetCoverage = streetEvidence && (
-    streetEvidence.coverageRatio >= STREET_BONUS_CONFIG.minimumCoverage ||
-    (streetEvidence.classificationComplete === true &&
-      streetEvidence.coverageRatio >= STREET_BONUS_CONFIG.minimumToleratedCoverage)
-  )
-  const streetBonus = baseScore !== null && usableStreetCoverage
+  const streetBonus = baseScore !== null && streetEvidence
     ? STREET_BONUS_CONFIG.maxBonus * strength * streetEvidence.coverageRatio * streetEvidence.ordinaryRoadRatio : 0
   return {
     totalScore: baseScore === null ? null : baseScore + streetBonus,
