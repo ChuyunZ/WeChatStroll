@@ -55,10 +55,9 @@ test('Street cannot invent a base score or consume historical street as a second
 })
 
 test.each([undefined, null, {}, { coverageRatio: 0, ordinaryRoadRatio: 1 },
-  { coverageRatio: 0.999, ordinaryRoadRatio: 1 }, { coverageRatio: 0.1, ordinaryRoadRatio: 1 },
   { coverageRatio: 1, ordinaryRoadRatio: -1 }, { coverageRatio: 2, ordinaryRoadRatio: 1 },
   { coverageRatio: '1', ordinaryRoadRatio: 1 }, { coverageRatio: 1, ordinaryRoadRatio: Infinity }
-])('missing, invalid or incomplete evidence never earns a bonus: %p', evidence => {
+])('missing or invalid evidence never earns a bonus: %p', evidence => {
   const candidate = { ...route('a'), distanceMeters: 1000, streetEvidence: { coverageRatio: 1, ordinaryRoadRatio: 1 } }
   const input = { preferences: { ...preferences, environmentPreferences: ['街道', '公园', '水边', '商街'] } }
   expect(scoreRoute(candidate, input).streetEvidence).toBeNull()
@@ -183,35 +182,43 @@ test('ranking is pure and does not attach runtime metadata to routes', () => {
 })
 
 
-test('verified 4m/1213m and 5m/1252m gaps earn scaled Street bonus without changing base ranking weights', () => {
-  const ctx = { preferences: { ...preferences,
-    environmentPreferences: ['街道', '公园', '水边', '商街'] } }
-  for (const [distance, classified] of [[1213, 1209], [1252, 1247]]) {
-    const candidate = { ...route('gap', 30), distanceMeters: distance }
-    const baseline = scoreRoute(candidate, ctx)
-    rememberStreetEvidence(candidate, {
-      coverageRatio: classified / distance, ordinaryRoadRatio: 1,
-      classificationComplete: true
-    })
-    const scored = scoreRoute(candidate, ctx)
-    expect(scored.baseScore).toEqual(baseline.baseScore)
-    expect(scored.components).toEqual(baseline.components)
-    expect(scored.effectiveWeights).toEqual(baseline.effectiveWeights)
-    expect(scored.streetBonus).toBeCloseTo(0.05 * classified / distance)
-    expect(scored.totalScore).toBeCloseTo(scored.baseScore + scored.streetBonus)
-  }
+test.each([
+  [1, 0.2, 1, 0.01],
+  [1, 0.9, 1, 0.045],
+  [1, 0.9, 0.5, 0.0225],
+  [1, 1209 / 1213, 1, 0.05 * 1209 / 1213],
+  [1, 1247 / 1252, 1, 0.05 * 1247 / 1252],
+  [1, 1, 1, 0.05],
+  [0.5, 0.2, 1, 0.005],
+  [0, 0.2, 1, 0]
+])('partial Street evidence gives proportional positive-only bonus: strength %p, coverage %p, ordinary %p', (strength, coverageRatio, ordinaryRoadRatio, expected) => {
+  const positions = strength === 1 ? ['街道', '公园', '水边', '商街']
+    : strength === 0.5 ? ['公园', '街道', '水边', '商街']
+      : ['公园', '水边', '街道', '商街']
+  const ctx = { preferences: { ...preferences, environmentPreferences: positions } }
+  const candidate = { ...route('partial', 30), distanceMeters: 1000 }
+  const baseline = scoreRoute(candidate, ctx)
+  rememberStreetEvidence(candidate, { coverageRatio, ordinaryRoadRatio })
+  const scored = scoreRoute(candidate, ctx)
+  expect(scored.streetBonus).toBeCloseTo(expected)
+  expect(scored.baseScore).toBe(baseline.baseScore)
+  expect(scored.components).toEqual(baseline.components)
+  expect(scored.effectiveWeights).toEqual(baseline.effectiveWeights)
+  expect(scored.totalScore).toBeCloseTo(scored.baseScore + expected)
+  expect(JSON.stringify(candidate)).not.toMatch(/coverageRatio|ordinaryRoadRatio|streetBonus/)
 })
 
-test('near-complete coverage alone does not earn a Street bonus without explicitly verified classification', () => {
+test('coverage near an old threshold does not create a sudden scoring jump', () => {
   const ctx = { preferences: { ...preferences,
     environmentPreferences: ['街道', '公园', '水边', '商街'] } }
-  for (const evidence of [
-    { coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1 },
-    { coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1, classificationComplete: false },
-    { coverageRatio: 0.994, ordinaryRoadRatio: 1, classificationComplete: true }
-  ]) {
-    const candidate = rememberStreetEvidence({ ...route('not-complete'),
-      distanceMeters: 1213 }, evidence)
-    expect(scoreRoute(candidate, ctx).streetBonus).toBe(0)
-  }
+  const bonuses = [0.198, 0.2, 0.899, 0.9, 0.995, 0.999, 1].map(coverageRatio => {
+    const candidate = rememberStreetEvidence({ ...route('threshold'), distanceMeters: 1000 },
+      { coverageRatio, ordinaryRoadRatio: 1, classificationComplete: true })
+    expect(require('../miniprogram/services/street-evidence').getStreetEvidence(candidate)).toEqual({ coverageRatio, ordinaryRoadRatio: 1 })
+    return scoreRoute(candidate, ctx).streetBonus
+  })
+  expect(bonuses).toEqual([...bonuses].sort((a, b) => a - b))
+  expect(bonuses[1] - bonuses[0]).toBeCloseTo(0.05 * 0.002)
+  expect(bonuses[3] - bonuses[2]).toBeCloseTo(0.05 * 0.001)
 })
+
