@@ -4,6 +4,7 @@ const routeGenerationService = require(
 const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
 const { waypointSetKey } = require("../../services/agentic-route-planning");
+const { isProviderUnavailableCode } = require("../../utils/provider-errors");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 
@@ -682,10 +683,23 @@ Page({
           if (!isCurrent()) return;
           // The shared builder normally settles exceptions itself.
           candidateCache.markFailed(candidate.candidateId);
+          if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
+            wx.showToast({ title: "路线服务暂时繁忙，请稍后重试", icon: "none" });
+            return;
+          }
           continue;
         }
         if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
-        if (!result.success || !this.isUnseenCandidateRoute(result.route, candidate)) continue;
+        if (!result.success) {
+          if ([result.error, result.code, result.causeCode,
+            result.failedSegment && result.failedSegment.causeCode,
+            result.failedSegment && result.failedSegment.error].some(isProviderUnavailableCode)) {
+            wx.showToast({ title: "路线服务暂时繁忙，请稍后重试", icon: "none" });
+            return;
+          }
+          continue;
+        }
+        if (!this.isUnseenCandidateRoute(result.route, candidate)) continue;
 
         const newRawRoutes = selectedRoute
           ? this._rawRoutes.map(route => route === selectedRoute ? result.route : route)
