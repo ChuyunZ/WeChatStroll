@@ -3,6 +3,7 @@ const routeGenerationService = require(
 );
 const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
+const { waypointSetKey } = require("../../services/agentic-route-planning");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 
@@ -21,6 +22,14 @@ const DEV_DEFAULT_PREFERENCES = {
     "商街"
   ]
 };
+
+// Recommendation identity remains the complete verified set after a user edit.
+function routeWaypointSetKey(route) {
+  const ids = route.recommendedWaypointIds ||
+    (route.editableWaypoints || route.pointsOfInterest || []).map(poi => poi.poiId);
+  return ids.length && ids.every(id => typeof id === "string" && id.trim())
+    ? waypointSetKey(ids) : null;
+}
 
 function isValidRoutePlanningSession(session) {
   return (
@@ -49,6 +58,10 @@ function isValidWaypointCandidateCache(cache) {
 
 Page({
   data: {
+    manualAlternativeAction: "",
+    manualAlternativePending: false,
+    replacementSelection: false,
+    replacingRouteId: "",
     isLoadingMoreRoutes: false,
     routes: [],
     routeState: "loading"
@@ -107,7 +120,7 @@ Page({
   },
 
   onUnload() {
-    this._replacementSession = null;
+    this.resetManualAlternatives();
     // 页面关闭后，让仍在运行的旧请求失效。
     this._routeRequestId =
       (this._routeRequestId || 0) + 1;
@@ -122,7 +135,7 @@ Page({
   },
 
   async loadRoutes() {
-    this._replacementSession = null;
+    this.resetManualAlternatives();
     const requestId =
       (this._routeRequestId || 0) + 1;
 
@@ -141,6 +154,10 @@ Page({
 
     this.setData({
       routes: [],
+      manualAlternativeAction: "",
+      manualAlternativePending: false,
+      replacementSelection: false,
+      replacingRouteId: "",
       isLoadingMoreRoutes: false,
       routeState: "loading"
     });
@@ -210,6 +227,7 @@ Page({
       // Route Detail 会拿这个对象。
       this._historicalPreferenceProfile = routeLoadResult.historicalPreferenceProfile || null;
       this._rawRoutes = this.rankCurrentRoutes(routes);
+      this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
 
       // Session 是运行时对象，里面包含函数、Map、Promise 和 closure。
       // 因此只保存在 Page 实例的私有字段里，不放进 data。
@@ -313,12 +331,12 @@ Page({
     const requestedDurationMinutes = (this._routePreferences || {}).durationMinutes;
     const isCurrent = () => requestId === this._routeRequestId &&
       session === this._routePlanningSession && candidateCache === this._waypointCandidateCache;
-    const candidates = candidateCache.getUnusedCandidates();
-    if (this._rawRoutes.length >= 3 || !candidates.length) return;
-    this.setData({ isLoadingMoreRoutes: true });
+    const candidates = this.getEligibleCandidates();
+    this.setData({ isLoadingMoreRoutes: this._rawRoutes.length < 3 && candidates.length > 0 });
     try {
       for (const candidate of candidates) {
         if (!isCurrent() || this._rawRoutes.length >= 3) break;
+        if (this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) continue;
         try {
           const result = await routeGenerationService.buildOptimizedCandidateRoute({
             session, candidateCache, candidate, location,
@@ -326,17 +344,23 @@ Page({
             requestedDurationMinutes
           });
           if (!isCurrent()) return;
-          if (!result.success) continue;
+          if (!result.success || !this.isUnseenCandidateRoute(result.route, candidate)) continue;
           this._rawRoutes = this.rankCurrentRoutes([...this._rawRoutes, result.route]);
+          this.rememberSurfacedRoute(result.route);
           this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
         } catch (error) {
           if (!isCurrent()) return;
+          candidateCache.markFailed(candidate.candidateId);
           console.warn("[Routes] Background candidate failed:", { candidateId: candidate.candidateId, code: error && error.code || "UNEXPECTED_CANDIDATE_ERROR" });
         }
       }
     } finally {
       routeGenerationService.logCandidateSummary(candidateCache);
-      if (isCurrent()) this.setData({ isLoadingMoreRoutes: false });
+      if (isCurrent()) {
+        this._initialCandidateProcessingComplete = true;
+        this.setData({ isLoadingMoreRoutes: false });
+        this.updateManualAlternativeControls();
+      }
     }
   },
 
@@ -532,7 +556,9 @@ Page({
           this._rawRoutes = this.rankCurrentRoutes(this._rawRoutes.map(route => route === selectedRoute ? preview : route));
           selectedRoute = preview;
           preview = null;
+          this.rememberSurfacedRoute(selectedRoute);
           this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+          this.updateManualAlternativeControls();
           respond('routeConfirmResult', { routeId, requestId: request.requestId, route: selectedRoute });
         },
         invalidateRoutePreview: () => { latestRequestId = null; preview = null; },
@@ -554,47 +580,131 @@ Page({
     });
   },
 
-  async showOtherRoutes() {
-    if (this.data.isLoadingMoreRoutes) return;
+  resetManualAlternatives() {
+    this._manualAlternativeActionCount = 0;
+    this._seenWaypointSetKeys = new Set();
+    this._initialCandidateProcessingComplete = false;
+    this._replacementSelection = false;
+    this._manualAlternativePending = null;
+  },
+
+  rememberSurfacedRoute(route) {
+    if (!this._seenWaypointSetKeys) this._seenWaypointSetKeys = new Set();
+    const key = routeWaypointSetKey(route);
+    if (key) this._seenWaypointSetKeys.add(key);
+    // Confirmed edits can surface a subset too; keep both identities excluded.
+    const activeIds = route.routeOrder && route.routeOrder.orderedWaypointIds;
+    if (activeIds && activeIds.length) this._seenWaypointSetKeys.add(waypointSetKey(activeIds));
+  },
+
+  getEligibleCandidates() {
+    if (!this._waypointCandidateCache) return [];
+    return this._waypointCandidateCache.getUnusedCandidates().filter(candidate =>
+      !this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds)));
+  },
+
+  isUnseenCandidateRoute(route, candidate) {
+    if (!route) return false;
+    const key = routeWaypointSetKey(route);
+    return key && key === waypointSetKey(candidate.waypointIds) && !this._seenWaypointSetKeys.has(key);
+  },
+
+  getManualAlternativeAction() {
+    const count = (this._rawRoutes || []).length;
+    if (!this._initialCandidateProcessingComplete || this._manualAlternativePending ||
+        !this._routePlanningSession || this._manualAlternativeActionCount >= 3 ||
+        count < 1 || count > 3 || !this.getEligibleCandidates().length) return "";
+    return count < 3 ? "add" : "replace";
+  },
+
+  updateManualAlternativeControls() {
+    const action = this.getManualAlternativeAction();
+    if (!action && !this._manualAlternativePending) this._replacementSelection = false;
+    this.setData({
+      manualAlternativeAction: action,
+      manualAlternativePending: !!this._manualAlternativePending,
+      replacementSelection: this._replacementSelection,
+      replacingRouteId: this._manualAlternativePending && this._manualAlternativePending.routeId || ""
+    });
+  },
+
+  showOtherRoutes() {
+    const action = this.getManualAlternativeAction();
+    if (action === "add") return this.buildManualAlternative();
+    if (action === "replace") {
+      this._replacementSelection = true;
+      this.updateManualAlternativeControls();
+    }
+  },
+
+  cancelReplacementSelection() {
+    if (this._manualAlternativePending) return;
+    this._replacementSelection = false;
+    this.updateManualAlternativeControls();
+  },
+
+  selectRouteToReplace(event) {
+    if (!this._replacementSelection || this.getManualAlternativeAction() !== "replace") return;
+    const route = this._rawRoutes.find(item => item.routeId === event.currentTarget.dataset.id);
+    if (route) return this.buildManualAlternative(route);
+  },
+
+  async buildManualAlternative(selectedRoute = null) {
+    const action = this.getManualAlternativeAction();
+    if ((!selectedRoute && action !== "add") ||
+        (selectedRoute && (action !== "replace" || !this._replacementSelection ||
+          !this._rawRoutes.includes(selectedRoute)))) return;
     const requestId = this._routeRequestId;
     const session = this._routePlanningSession;
     const candidateCache = this._waypointCandidateCache;
     const location = this._routeLocation;
-    if (this._replacementSession === session && session) return;
-
-    const unusedCandidates = candidateCache ? candidateCache.getUnusedCandidates() : [];
-    if (!session || unusedCandidates.length === 0) {
-      wx.showToast({ title: "暂无更多路线", icon: "none" });
-      return;
-    }
+    const unusedCandidates = this.getEligibleCandidates();
+    const operation = { routeId: selectedRoute ? selectedRoute.routeId : "" };
 
     const isCurrent = () => requestId === this._routeRequestId &&
       session === this._routePlanningSession &&
-      candidateCache === this._waypointCandidateCache;
-    this._replacementSession = session;
+      candidateCache === this._waypointCandidateCache && this._manualAlternativePending === operation;
+    this._manualAlternativePending = operation;
+    this._replacementSelection = false;
+    this.updateManualAlternativeControls();
     try {
       for (const candidate of unusedCandidates) {
-        const result = await routeGenerationService.buildOptimizedCandidateRoute({
-          session, candidateCache, candidate, location,
-          candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
-          requestedDurationMinutes: (this._routePreferences || {}).durationMinutes
-        });
-        if (!isCurrent()) return;
-        if (!result.success) continue;
+        if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
+        if (this._seenWaypointSetKeys.has(waypointSetKey(candidate.waypointIds))) continue;
+        let result;
+        try {
+          result = await routeGenerationService.buildOptimizedCandidateRoute({
+            session, candidateCache, candidate, location,
+            candidateIndex: Number(candidate.candidateId.split("-").pop()) - 1,
+            requestedDurationMinutes: (this._routePreferences || {}).durationMinutes
+          });
+        } catch (error) {
+          if (!isCurrent()) return;
+          // The shared builder normally settles exceptions itself.
+          candidateCache.markFailed(candidate.candidateId);
+          continue;
+        }
+        if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
+        if (!result.success || !this.isUnseenCandidateRoute(result.route, candidate)) continue;
 
-        const newRawRoutes = [...this._rawRoutes];
-        newRawRoutes.shift();
-        newRawRoutes.push(result.route);
+        const newRawRoutes = selectedRoute
+          ? this._rawRoutes.map(route => route === selectedRoute ? result.route : route)
+          : [...this._rawRoutes, result.route];
         this._rawRoutes = this.rankCurrentRoutes(newRawRoutes);
+        this.rememberSurfacedRoute(result.route);
+        this._manualAlternativeActionCount++;
         this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
-        wx.showToast({ title: "已更换路线", icon: "none" });
+        wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
       }
       if (isCurrent()) wx.showToast({ title: "暂无更多路线", icon: "none" });
     } catch (error) {
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
     } finally {
-      if (this._replacementSession === session) this._replacementSession = null;
+      if (isCurrent()) {
+        this._manualAlternativePending = null;
+        this.updateManualAlternativeControls();
+      }
       routeGenerationService.logCandidateSummary(candidateCache);
     }
   }

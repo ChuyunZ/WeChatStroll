@@ -3,6 +3,7 @@ const { waypointSetKey, normalizePlanningFailure, isReplannableFailure } =
 
 test('canonical sets ignore order without delimiter collisions', () => {
   expect(waypointSetKey(['C', 'A', 'B'])).toBe(waypointSetKey(['A', 'B', 'C']))
+  expect(waypointSetKey([' C ', 'A', ' B', 'A '])).toBe(waypointSetKey(['A', 'B', 'C']))
   expect(waypointSetKey(['A|B', 'C'])).not.toBe(waypointSetKey(['A', 'B|C']))
 })
 

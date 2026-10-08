@@ -347,6 +347,13 @@ page {
   border: none;
 }
 
+.replacement-hint {
+  margin: 16rpx 0;
+  color: #4a9b67;
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
 
 /* ========================
    States

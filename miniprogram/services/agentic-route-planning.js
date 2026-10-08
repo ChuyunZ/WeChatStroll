@@ -1,7 +1,7 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
 // Request-local orchestration helpers. Only allowlisted facts reach the model.
 function waypointSetKey(ids) {
-  return JSON.stringify([...new Set(ids)].sort())
+  return JSON.stringify([...new Set(ids.map(id => typeof id === 'string' ? id.trim() : id))].sort())
 }
 
 function normalizePlanningFailure(result = {}, waypointIds = []) {

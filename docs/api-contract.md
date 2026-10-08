@@ -1003,8 +1003,13 @@ outside `data`, and clears it on reload/unload; ranking never reloads the profil
 Only complete routes that pass existing route validation reach the pure local
 `route-ranking` service. The first valid route is scored and returned immediately,
 without waiting for alternatives. Each successful background fill reranks the
-currently displayed set, up to the existing three-route limit. Replacement removes
-one displayed route, adds the next successfully built route, then reranks. An edit
+currently displayed set, stopping candidate processing at three routes. Once initial
+processing settles, Add inserts one route when fewer than three are displayed;
+Replace requires the user to select one of three routes and retains it until a
+valid replacement is ready. Both rerank and share a three-successful-action budget
+per session. Exact previously surfaced verified POI sets remain excluded regardless
+of order or route ID. See [manual alternatives](waypoint-order-optimization.md#manual-route-alternatives)
+for availability, runtime state, cache reuse and failure semantics. An edit
 must pass the same completeness validator before its confirmed rebuilt route
 replaces the original and triggers reranking. Explicit user edits retain their
 existing permission to exceed the questionnaire duration, so their validation
