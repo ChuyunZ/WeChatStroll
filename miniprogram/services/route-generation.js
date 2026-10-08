@@ -1,6 +1,7 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
 const locationService = require('./location')
 const { rankRoutes } = require('./route-ranking')
+const { transferStreetEvidence } = require('./street-evidence')
 const { refreshProfile } = require('./preference-profile-records')
 const { validateProfile } = require('../utils/preference-profile-schema')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
@@ -561,7 +562,7 @@ function buildGeneratedRoute({
           `${selectedPoi.name}的真实路线。`
         )
 
-  return {
+  return transferStreetEvidence(walkingRoute, {
     // Keep the persisted application route identity provider-neutral.
     // Provider POI identifiers stay inside the local route snapshot only.
     routeId:
@@ -630,7 +631,7 @@ function buildGeneratedRoute({
 
     updatedAt:
       new Date().toISOString()
-  }
+  })
 }
 
 function getRequestedRouteType(
@@ -751,7 +752,7 @@ function buildGeneratedRouteFromAiCandidate({
           longitude: lastWaypoint.longitude
         }
 
-  return {
+  return transferStreetEvidence(walkingRoute, {
     routeId:
       createGeneratedRouteId('ai'),
 
@@ -817,7 +818,7 @@ function buildGeneratedRouteFromAiCandidate({
 
     updatedAt:
       new Date().toISOString()
-  }
+  })
 }
 
 // Both initial generation and replacement claim and settle candidates here.
@@ -922,12 +923,12 @@ async function buildOptimizedCandidateRoute({
     }
 
     stage = 'route_format'
-    const route = {
+    const route = transferStreetEvidence(walkingRoute, {
       ...buildGeneratedRouteFromAiCandidate({ location, walkingRoute, candidateIndex }),
       candidateWaypointIds: [...candidate.waypointIds],
       recommendedWaypointIds: [...recommendation.recommendedWaypointIds],
       optimization: recommendation.optimization
-    }
+    })
     candidateCache.markSuccess(candidate.candidateId, route)
 
     console.log(
@@ -1488,8 +1489,8 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
   const formatted = buildGeneratedRouteFromAiCandidate({
     location: baseRoute.startPoint, walkingRoute, candidateIndex: 0
   })
-  const { environmentStats, ...baseRouteFacts } = baseRoute
-  return {
+  const { environmentStats, streetEvidence, ...baseRouteFacts } = baseRoute
+  return transferStreetEvidence(walkingRoute, {
     ...baseRouteFacts,
     title: formatted.title,
     description: formatted.description,
@@ -1503,7 +1504,7 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
     returnsToStart: formatted.returnsToStart,
     routeOrder: { source: 'user', orderedWaypointIds: [...ids] },
     updatedAt: formatted.updatedAt
-  }
+  })
 }
 
 module.exports = {

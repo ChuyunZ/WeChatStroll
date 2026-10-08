@@ -1021,7 +1021,9 @@ and recommendation reasons are unchanged.
 ### Runtime ranking API (V1)
 
 `scoreRoute(route, { preferences, historicalPreferenceProfile })` returns
-`{ totalScore, components, effectiveWeights, tieBreak }`.
+`{ totalScore, baseScore, streetBonus, streetEvidence, components, effectiveWeights, tieBreak }`.
+`streetEvidence` here is inspectable runtime data (`null` when unknown), never a
+property read from or attached to the Route. See [Street ranking](street-preference-ranking.md).
 `rankRoutes(routes, context)` returns a new sorted array of the original route
 objects, without modifying inputs or attaching score metadata. Neither method
 performs I/O or validates candidates; callers own the validation boundary.
@@ -1039,12 +1041,22 @@ performs I/O or validates candidates; callers own the validation boundary.
   zero weight remains a real zero. No usable categories means `null`.
 - History fit: equal mean of the available historical environment and duration
   components; no usable historical components means `null`.
-- Total: weighted mean of available components, with base weights **0.50 current
+- Base score: weighted mean of available components, with base weights **0.50 current
   duration / 0.30 current environment / 0.20 history**. Missing components are
   excluded and the remaining weights renormalized, never penalized as zero.
   `effectiveWeights` exposes the actual weights; all components absent gives
   `totalScore: null`. Current intent carries more weight than secondary history;
   this is a weighted preference score, not a lexicographic current-intent veto.
+- Total: base score plus a positive-only Street bonus, provisionally at most 0.05.
+  Current Street rank 1/2/3/4 gives strength 1/0.5/0/0. **Any valid positive
+  classified coverage** is eligible: `0.05 * strength * coverageRatio *
+  ordinaryRoadRatio` equals `0.05 * strength * confirmedOrdinaryMeters /
+  routeMeters`. Unknown types and uncovered segments never count as confirmed
+  ordinary road; they scale the bonus down instead of triggering a threshold.
+  There is no `classificationComplete` marker or rounding tolerance.
+  Malformed/overcounted provider step distances still invalidate the optional
+  evidence. All-missing base remains null.
+  Totals are not clamped to 1; the original base components and weights are unchanged.
 
 Ties resolve by total score descending, current duration fit descending, current
 environment fit descending, history fit descending, absolute current duration
@@ -1060,9 +1072,11 @@ never a street or quality inference. Routes with identical stable facts remain
 equivalent; their random identities are deliberately not ordered. IDs, timestamps,
 AI prose and optimizer runtime metadata never break ties.
 
-V1 excludes crowd history, liked/disliked tags, street, generic quality scores and
+V1 excludes crowd history, liked/disliked tags, generic quality scores and
 diversity penalties because there is no verified route-level contract for those
-ranking signals. It does not infer quietness, views or crowding from POI categories.
+ranking signals. Street is separate from both current/historical POI environment
+fit and only uses the runtime normalized capability. It does not infer quietness,
+views, safety or crowding from POI categories or ordinary-road classification.
 The derived UI badge `isBestMatch` marks only index zero when two or more routes
 exist. Scores, keys, history snapshots and badges are never added to persisted
 Route/Walk snapshots. No guarantee is made that history changes the AI output.

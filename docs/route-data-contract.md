@@ -47,9 +47,13 @@ waypoint order and never relaxes route validation.
 V1 uses real `durationSeconds` and unique verified `pointsOfInterest[].category`
 values (`park`, `water`, `shoppingStreet`). Current duration/environment weights
 are 0.50/0.30, with 0.20 for secondary history from the same compact snapshot used
-by AI planning. Missing components are excluded and weights renormalized. Street,
-crowd, feedback tags and generic quality are not grounded route-level signals and
-do not contribute; duplicate POI categories do not increase their weight.
+by AI planning. Missing components are excluded and weights renormalized. Crowd,
+feedback tags and generic quality do not contribute; duplicate POI categories do
+not increase their weight. Street remains outside both environment formulas and
+adds only the separate positive bonus described in
+[Street preference ranking](street-preference-ranking.md), using only valid
+confirmed ordinary-road walking distance even with partial type coverage.
+Unknown portions contribute no credit and cause no penalty.
 
 `scoreRoute()` exposes scores, components, normalized weights and deterministic
 tie-break keys as separate runtime data. `rankRoutes()` returns unchanged route
@@ -150,8 +154,10 @@ Legacy/mock `type` labels are not the current provider POI contract.
 Walking facts are `distanceMeters`, `durationSeconds` and decoded `polyline`.
 Route Engine segments additionally identify `from` and `to`; the public route
 aggregates those walking facts. Neither segments nor generated routes expose
-`environmentStats`. Tencent steps, `type` and `road_class` do not define a street
-score or an equivalent environment-statistics contract.
+`environmentStats` or `streetEvidence`. The cloud's optional normalized Street
+capability is consumed into a WeakMap sidecar at the walking boundary. Documented
+Tencent walking `type` and step distance support ordinary-road exposure only;
+`road_class` is unused. No raw steps or evidence enters persisted Route snapshots.
 
 ## 6. Route card
 

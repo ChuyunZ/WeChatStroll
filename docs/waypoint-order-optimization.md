@@ -59,6 +59,13 @@ Continuation captures request ID, session, candidate cache, location and duratio
 
 Both `generateRoutes` and the routes page call `buildOptimizedCandidateRoute` to claim an unused candidate, optimize, build once, and settle success/failure. Original IDs stay on the cache entry; the route also retains original IDs, recommended IDs, optimization metadata, `routeOrder`, and POI IDs. The old `generateFirstRoute` single-POI compatibility path remains supported; it has no ordering choice.
 
+#84's [Street bonus](street-preference-ranking.md) uses a runtime object-identity
+sidecar after validation. Cached directed segments retain their evidence; complete
+route assembly distance-weights the actual traversal, and final formatters transfer
+it to each candidate/fallback object. Confirmed edits use newly aggregated evidence.
+Existing progressive/manual stale-operation guards remain authoritative. No Street
+signal enters waypoint optimization, AI planning, route fields or persistent caches.
+
 ### Manual route alternatives
 
 - Settled with one/two displayed routes, remaining budget and an eligible unused candidate or verified POI pool for bounded AI replenishment: show **增加一个路线**. Each click builds through the bounded remaining candidates until exactly one valid unseen route can be added.

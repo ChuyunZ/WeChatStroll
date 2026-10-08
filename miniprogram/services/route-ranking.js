@@ -1,4 +1,10 @@
 // Callers admit only validated, complete walking routes. This service does no I/O.
+const { getStreetEvidence } = require('./street-evidence')
+// Provisional positive-only coefficient. Coverage scales the bonus instead of
+// acting as a threshold: unknown walking distance contributes zero ordinary meters.
+const STREET_BONUS_CONFIG = Object.freeze({
+  maxBonus: 0.05, rankStrengths: Object.freeze([1, 0.5, 0, 0])
+})
 const RANKING_CONFIG = Object.freeze({
   weights: Object.freeze({ durationFit: 0.50, currentEnvironmentFit: 0.30, historyFit: 0.20 }),
   rankScores: Object.freeze([1, 0.67, 0.33, 0]),
@@ -64,8 +70,17 @@ function scoreRoute(route, { preferences = {}, historicalPreferenceProfile = nul
   const weightSum = available.reduce((sum, key) => sum + RANKING_CONFIG.weights[key], 0)
   const effectiveWeights = {}
   for (const key of available) effectiveWeights[key] = RANKING_CONFIG.weights[key] / weightSum
+  const baseScore = weightSum ? available.reduce((sum, key) => sum + components[key] * effectiveWeights[key], 0) : null
+  const streetEvidence = getStreetEvidence(route)
+  const streetRank = list(preferences.environmentPreferences).indexOf('街道')
+  const strength = STREET_BONUS_CONFIG.rankStrengths[streetRank] || 0
+  const streetBonus = baseScore !== null && streetEvidence
+    ? STREET_BONUS_CONFIG.maxBonus * strength * streetEvidence.coverageRatio * streetEvidence.ordinaryRoadRatio : 0
   return {
-    totalScore: weightSum ? available.reduce((sum, key) => sum + components[key] * effectiveWeights[key], 0) : null,
+    totalScore: baseScore === null ? null : baseScore + streetBonus,
+    baseScore,
+    streetBonus,
+    streetEvidence,
     components,
     effectiveWeights,
     tieBreak: {
@@ -98,4 +113,4 @@ function rankRoutes(routes, context) {
     .sort((a, b) => compareScores(a.score, b.score)).map(entry => entry.route)
 }
 
-module.exports = { RANKING_CONFIG, scoreRoute, rankRoutes }
+module.exports = { RANKING_CONFIG, STREET_BONUS_CONFIG, scoreRoute, rankRoutes }

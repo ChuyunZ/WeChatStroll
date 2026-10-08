@@ -11,6 +11,8 @@ const { getWalkingSegment } = require('../miniprogram/services/walking-segment')
 const { generateRoutes, buildOptimizedCandidateRoute } = require('../miniprogram/services/route-generation')
 const { createRoutePlanningSession } = require('../miniprogram/services/route-engine')
 const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache')
+const { rememberStreetEvidence, getStreetEvidence } = require('../miniprogram/services/street-evidence')
+const { scoreRoute } = require('../miniprogram/services/route-ranking')
 
 const location = { latitude: 30, longitude: 120 }
 const pois = ['A', 'B', 'C', 'D', 'E'].map((poiId, index) => ({
@@ -37,6 +39,38 @@ beforeEach(() => {
     success: true, durationSeconds: 1350, distanceMeters: 200,
     polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
   }))
+})
+
+test.each(['ai', 'fallback'])('%s initial generation carries trusted runtime Street evidence through final formatting', async mode => {
+  if (mode === 'fallback') cloudPlan({ candidates: [] })
+  getWalkingSegment.mockImplementation(async (from, to) => rememberStreetEvidence({
+    success: true, durationSeconds: mode === 'fallback' ? 2700 : 1350, distanceMeters: 200,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }, { coverageRatio: 1, ordinaryRoadRatio: 0.8 }))
+  const selected = { ...preferences, environmentPreferences: ['街道', '公园', '水边', '商街'] }
+  const result = await generateRoutes(selected)
+  expect(result.status).toBe('success')
+  const first = result.routes[0]
+  expect(getStreetEvidence(first)).toEqual({ coverageRatio: 1, ordinaryRoadRatio: 0.8 })
+  expect(scoreRoute(first, { preferences: selected }).streetBonus).toBeCloseTo(0.04)
+  expect(JSON.stringify(result.routes)).not.toMatch(/streetEvidence|coverageRatio|ordinaryRoadRatio/)
+  if (mode === 'ai') {
+    const candidate = result.waypointCandidateCache.getUnusedCandidates()[0]
+    const next = await buildOptimizedCandidateRoute({ session: result.routePlanningSession,
+      candidateCache: result.waypointCandidateCache, candidate, location, candidateIndex: 1, requestedDurationMinutes: 45 })
+    expect(next.success).toBe(true)
+    expect(getStreetEvidence(next.route)).toEqual(getStreetEvidence(first))
+  }
+})
+
+test('maximum Street evidence cannot make an over-duration candidate or fallback eligible', async () => {
+  getWalkingSegment.mockImplementation(async (from, to) => rememberStreetEvidence({
+    success: true, durationSeconds: 100000, distanceMeters: 200,
+    polyline: [from, to].map(({ latitude, longitude }) => ({ latitude, longitude }))
+  }, { coverageRatio: 1, ordinaryRoadRatio: 1 }))
+  const result = await generateRoutes({ ...preferences, environmentPreferences: ['街道', '公园', '水边', '商街'] })
+  expect(result.status).toBe('empty')
+  expect(result.routes || []).toEqual([])
 })
 
 test('initial routes and replacements optimize sets and share all cached segments', async () => {
