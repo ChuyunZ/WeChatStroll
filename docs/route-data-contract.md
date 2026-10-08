@@ -51,8 +51,9 @@ by AI planning. Missing components are excluded and weights renormalized. Crowd,
 feedback tags and generic quality do not contribute; duplicate POI categories do
 not increase their weight. Street remains outside both environment formulas and
 adds only the separate positive bonus described in
-[Street preference ranking](street-preference-ranking.md), when reliable complete
-walking classification exists. Unknown evidence earns no bonus, not a penalty.
+[Street preference ranking](street-preference-ranking.md), using only valid
+confirmed ordinary-road walking distance even with partial type coverage.
+Unknown portions contribute no credit and cause no penalty.
 
 `scoreRoute()` exposes scores, components, normalized weights and deterministic
 tie-break keys as separate runtime data. `rankRoutes()` returns unchanged route
