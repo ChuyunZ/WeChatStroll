@@ -156,7 +156,16 @@ async function generateWaypointPlan(
 
   return {
     success: true,
-    plan: planResult.data
+    plan: planResult.data,
+    diagnostic: {
+      model: 'hy3',
+      promptChars: promptResult.data.prompt.length,
+      promptUtf8Bytes: Buffer.byteLength(promptResult.data.prompt, 'utf8'),
+      manual: normalizedEvent.replanningContext &&
+        normalizedEvent.replanningContext.mode === 'manual',
+      attempt: normalizedEvent.replanningContext &&
+        normalizedEvent.replanningContext.attempt || 1
+    }
   }
 }
 
