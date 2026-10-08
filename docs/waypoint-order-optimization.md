@@ -61,7 +61,7 @@ Both `generateRoutes` and the routes page call `buildOptimizedCandidateRoute` to
 
 ### Manual route alternatives
 
-- Settled with one/two displayed routes, remaining budget and an eligible unused candidate: show **增加一个路线**. Each click builds through the bounded remaining candidates until exactly one valid unseen route can be added.
+- Settled with one/two displayed routes, remaining budget and an eligible unused candidate or verified POI pool for bounded AI replenishment: show **增加一个路线**. Each click builds through the bounded remaining candidates until exactly one valid unseen route can be added.
 - Settled with three routes under the same conditions: show **换一个路线**. It opens inline card selection with **替换这条路线** and **取消选择**. No route is preselected, including Best Match. The selected original stays visible while building; success replaces only that route and reranks all three using the existing ranker and history snapshot.
 - Successful additions and replacements share a maximum of **three actions per planning session**. Failure, duplicates, exhausted candidates, cancellation and stale results cost nothing. Controls are hidden while building or when budget/candidates are exhausted. No-result attempts retain the displayed routes and show a recoverable toast. When no eligible candidate remains, each manual action may request up to three new AI batches, checking each candidate in sequence and stopping at the first valid unseen route. Three exhausted AI batches disable further manual actions for the session. Failed candidates are not retried.
 
@@ -96,7 +96,7 @@ sorted, unique, trimmed verified IDs, reject an entire set containing any unknow
 ID, and retain the first 100 distinct valid sets of 1–8 input IDs. Overflow is
 omitted from the wire/prompt only; complete runtime duplicate rejection remains
 authoritative, so an omitted or model-repeated set still cannot reach the builder.
-No history is persisted. Three unsuccessful AI rounds exhaust the manual operation
+No history is persisted. The model may legally return `candidates: []`; these are successful empty plans, distinct from model request failures (for example HTTP 429). Candidate-diversity and repeated empty-plan optimization are tracked in #91. Three unsuccessful AI rounds exhaust the manual operation
 without spending any of the separate three-successful-action budget.
 
 Deployment requires releasing the updated `aiRoutePlanner` prompt together with
