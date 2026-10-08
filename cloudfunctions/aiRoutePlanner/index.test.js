@@ -44,6 +44,19 @@ const VALID_EVENT = {
   ]
 }
 
+function withoutDiagnostic(result) {
+  if (result && result.diagnostic) {
+    expect(result.diagnostic).toEqual(expect.objectContaining({
+      model: 'hy3', attempt: 1,
+      promptChars: expect.any(Number), promptUtf8Bytes: expect.any(Number)
+    }));
+    expect(result.diagnostic.promptChars).toBeGreaterThan(0);
+    expect(result.diagnostic.promptUtf8Bytes).toBeGreaterThan(0);
+  }
+  const { diagnostic, ...rest } = result;
+  return rest;
+}
+
 describe("AI waypoint planner integration", () => {
   const history = {
     environmentWeights: { park: 1, water: 0, street: 0, shoppingStreet: 0 },
@@ -57,7 +70,7 @@ describe("AI waypoint planner integration", () => {
     const result = await generateWaypointPlan({ ...VALID_EVENT,
       historicalPreferenceProfile: { ...history, ownerKey: 'PRIVATE_SENTINEL', source: 'PRIVATE_SENTINEL' }
     }, client)
-    expect(result).toEqual(poiId === 'park-1'
+    expect(withoutDiagnostic(result)).toEqual(poiId === 'park-1'
       ? { success: true, plan: { candidates: [{ waypoints: [{ poiId }] }] } }
       : { success: false, error: 'INVALID_AI_ROUTE_PLAN' })
     expect(client.request.mock.calls[0][0]).toContain(JSON.stringify(history, null, 2))
@@ -67,7 +80,7 @@ describe("AI waypoint planner integration", () => {
   test('malformed history still requests a normal plan while invalid core inputs remain errors', async () => {
     const client = { request: jest.fn().mockResolvedValue({ success: true, data: { text: '{"candidates":[]}' } }) }
     const event = { ...VALID_EVENT, historicalPreferenceProfile: { ...history, likedTags: ['injected'] } }
-    expect(await generateWaypointPlan(event, client)).toEqual({ success: true, plan: { candidates: [] } })
+    expect(withoutDiagnostic(await generateWaypointPlan(event, client))).toEqual({ success: true, plan: { candidates: [] } })
     expect(client.request.mock.calls[0][0]).not.toContain('HISTORICAL PREFERENCE PROFILE')
     expect(await generateWaypointPlan({ ...event, startPoint: null }, client))
       .toEqual({ success: false, error: 'INVALID_AI_ROUTE_INPUT' })
@@ -77,7 +90,7 @@ describe("AI waypoint planner integration", () => {
     const client = { request: jest.fn().mockResolvedValue({
       success: true, data: { text: '{"candidates":[]}' }
     }) }
-    expect(await generateWaypointPlan(VALID_EVENT, client)).toEqual({
+    expect(withoutDiagnostic(await generateWaypointPlan(VALID_EVENT, client))).toEqual({
       success: true, plan: { candidates: [] }
     })
   })
@@ -106,7 +119,7 @@ describe("AI waypoint planner integration", () => {
         client
       )
 
-    expect(result).toEqual({
+    expect(withoutDiagnostic(result)).toEqual({
       success: true,
       plan: {
         candidates: [
@@ -140,7 +153,7 @@ describe("AI waypoint planner integration", () => {
         client
       )
 
-    expect(result).toEqual({
+    expect(withoutDiagnostic(result)).toEqual({
       success: false,
       error: "AI_REQUEST_FAILED"
     })
