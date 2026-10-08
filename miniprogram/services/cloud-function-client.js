@@ -49,7 +49,7 @@ async function callCloudFunction(
         ? result.error
         : null
 
-    throw createCodedError(
+    const exception = createCodedError(
       providerError &&
       typeof providerError.code === 'string' &&
       providerError.code.trim() !== ''
@@ -62,6 +62,21 @@ async function callCloudFunction(
         ? providerError.message
         : fallbackMessage
     )
+    // Temporary diagnostics, allowlisted numeric/short status metadata only.
+    if (name === 'aiRoutePlanner' && result && result.diagnostic) {
+      const d = result.diagnostic
+      exception.diagnostic = {
+        httpStatus: Number.isInteger(d.httpStatus) ? d.httpStatus : null,
+        sdkErrorCode: typeof d.sdkErrorCode === 'string' ? d.sdkErrorCode.slice(0, 64) : null,
+        retryAfter: typeof d.retryAfter === 'string' ? d.retryAfter.slice(0, 32) : null,
+        model: d.model === 'hy3' ? 'hy3' : 'unknown',
+        promptChars: Number.isInteger(d.promptChars) ? d.promptChars : null,
+        promptUtf8Bytes: Number.isInteger(d.promptUtf8Bytes) ? d.promptUtf8Bytes : null,
+        manual: d.manual === true,
+        attempt: Number.isInteger(d.attempt) ? d.attempt : null
+      }
+    }
+    throw exception
   }
 
   return result
