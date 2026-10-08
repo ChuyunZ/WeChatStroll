@@ -181,3 +181,37 @@ test('ranking is pure and does not attach runtime metadata to routes', () => {
   expect(ranked[0]).not.toHaveProperty('totalScore')
   expect(rankRoutes([], context)).toEqual([])
 })
+
+
+test('verified 4m/1213m and 5m/1252m gaps earn scaled Street bonus without changing base ranking weights', () => {
+  const ctx = { preferences: { ...preferences,
+    environmentPreferences: ['街道', '公园', '水边', '商街'] } }
+  for (const [distance, classified] of [[1213, 1209], [1252, 1247]]) {
+    const candidate = { ...route('gap', 30), distanceMeters: distance }
+    const baseline = scoreRoute(candidate, ctx)
+    rememberStreetEvidence(candidate, {
+      coverageRatio: classified / distance, ordinaryRoadRatio: 1,
+      classificationComplete: true
+    })
+    const scored = scoreRoute(candidate, ctx)
+    expect(scored.baseScore).toEqual(baseline.baseScore)
+    expect(scored.components).toEqual(baseline.components)
+    expect(scored.effectiveWeights).toEqual(baseline.effectiveWeights)
+    expect(scored.streetBonus).toBeCloseTo(0.05 * classified / distance)
+    expect(scored.totalScore).toBeCloseTo(scored.baseScore + scored.streetBonus)
+  }
+})
+
+test('near-complete coverage alone does not earn a Street bonus without explicitly verified classification', () => {
+  const ctx = { preferences: { ...preferences,
+    environmentPreferences: ['街道', '公园', '水边', '商街'] } }
+  for (const evidence of [
+    { coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1 },
+    { coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1, classificationComplete: false },
+    { coverageRatio: 0.994, ordinaryRoadRatio: 1, classificationComplete: true }
+  ]) {
+    const candidate = rememberStreetEvidence({ ...route('not-complete'),
+      distanceMeters: 1213 }, evidence)
+    expect(scoreRoute(candidate, ctx).streetBonus).toBe(0)
+  }
+})
