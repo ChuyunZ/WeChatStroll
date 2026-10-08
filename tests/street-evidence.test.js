@@ -142,13 +142,15 @@ test('high aggregate coverage cannot bypass a single unknown directed segment or
   const unknown = { distanceMeters: 1 }
   const aggregate = aggregateStreetEvidence([known, unknown])
   expect(aggregate).toEqual({ coverageRatio: 0.999, ordinaryRoadRatio: 1 })
-  const route = rememberStreetEvidence({ distanceMeters: 1000 }, aggregate)
+  const validRoute = () => ({ distanceMeters: 1000, durationSeconds: 1800,
+    pointsOfInterest: [{ poiId: 'A', category: 'park' }] })
+  const route = rememberStreetEvidence(validRoute(), aggregate)
   const ctx = { preferences: {
     durationMinutes: 30, environmentPreferences: ['街道', '公园', '水边', '商街']
   } }
   expect(scoreRoute(route, ctx).streetBonus).toBe(0)
 
-  const fabricated = rememberStreetEvidence({ distanceMeters: 1000 }, {
+  const fabricated = rememberStreetEvidence(validRoute(), {
     coverageRatio: 0.99, ordinaryRoadRatio: 1, classificationComplete: true
   })
   expect(getStreetEvidence(fabricated)).toEqual({ coverageRatio: 0.99, ordinaryRoadRatio: 1 })
