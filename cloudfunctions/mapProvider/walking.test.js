@@ -44,11 +44,11 @@ beforeEach(() => {
 })
 
 test.each([
-  ['8 real-world-shaped classified steps with 4m shortfall', 1213,
+  ['8 classified steps with observed 4m discrepancy', 1213,
     [150, 151, 152, 156, 150, 150, 150, 150]],
-  ['10 real-world-shaped classified steps with 5m shortfall', 1252,
+  ['10 classified steps with observed 5m discrepancy', 1252,
     [1200, 39, 1, 1, 1, 1, 1, 1, 1, 1]]
-])('%s grants only the explicit tiny-gap classification marker', async (_, distance, distances) => {
+])('%s keeps true measured coverage with no inferred completeness flag', async (_, distance, distances) => {
   request.mockResolvedValue({ data: { status: 0, result: { routes: [{
     ...validRoute(), distance, steps: distances.map(d => ({ type: 0, distance: d, road_name: 'private' }))
   }] } } })
@@ -56,37 +56,36 @@ test.each([
   expect(response.success).toBe(true)
   expect(response.route.streetEvidence).toEqual({
     coverageRatio: distances.reduce((sum, d) => sum + d, 0) / distance,
-    ordinaryRoadRatio: 1,
-    classificationComplete: true
+    ordinaryRoadRatio: 1
   })
-  expect(JSON.stringify(response)).not.toMatch(/steps|road_name|private|providerMeta|streetCoverageDiagnostic/)
+  expect(JSON.stringify(response)).not.toMatch(/steps|road_name|private|providerMeta|classificationComplete|streetCoverageDiagnostic/)
 })
 
 test.each([
-  ['missing walking type despite identical tiny distance gap', 1213,
-    [...new Array(7).fill({ type: 0, distance: 150 }), { distance: 159 }]],
-  ['unknown walking type with exact accounted distance', 1000,
-    [{ type: 0, distance: 900 }, { type: 99, distance: 100 }]],
-  ['8-step gap beyond the per-step allowance', 1213,
-    [150, 151, 152, 154, 150, 150, 150, 150]],
-  ['10-step short-route gap beyond the relative allowance', 100,
-    [91, 1, 1, 1, 1, 1, 1, 1, 1, 0]],
-  ['fractional provider step distances cannot use assumed integer rounding', 1213,
-    [1208.5, 0.5, 0, 0, 0, 0, 0, 0]]
-])('%s does not earn the tiny-gap marker', async (_, distance, steps) => {
-  // Numeric fixture shorthand must be expanded into real provider step objects.
-  // Otherwise the adapter correctly omits the whole malformed capability,
-  // and the test never exercises the intended distance accounting edge case.
-  const providerSteps = steps.map(step => typeof step === 'number' ? { type: 0, distance: step } : step)
+  ['20% classified, all ordinary', 1000,
+    [{ type: 0, distance: 200 }], { coverageRatio: 0.2, ordinaryRoadRatio: 1 }],
+  ['90% classified, half ordinary', 1000,
+    [{ type: 0, distance: 450 }, { type: 2, distance: 450 }],
+    { coverageRatio: 0.9, ordinaryRoadRatio: 0.5 }],
+  ['unknown type consumes distance without inventing an ordinary road', 1000,
+    [{ type: 0, distance: 200 }, { type: 99, distance: 800 }],
+    { coverageRatio: 0.2, ordinaryRoadRatio: 1 }],
+  ['missing type consumes distance without inventing an ordinary road', 1000,
+    [{ type: 0, distance: 200 }, { distance: 800 }],
+    { coverageRatio: 0.2, ordinaryRoadRatio: 1 }],
+  ['gap larger than a per-step rounding assumption still remains partial', 1213,
+    [{ type: 0, distance: 1000 }], { coverageRatio: 1000 / 1213, ordinaryRoadRatio: 1 }],
+  ['fractional step distances stay valid without rounded classification assumptions', 1213,
+    [{ type: 0, distance: 1208.5 }, { type: 1, distance: 0.5 }],
+    { coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1208.5 / 1209 }]
+])('%s uses only known classified distances', async (_, distance, steps, expected) => {
   request.mockResolvedValue({ data: { status: 0, result: { routes: [{
-    ...validRoute(), distance, steps: providerSteps
+    ...validRoute(), distance, steps, classificationComplete: true
   }] } } })
   const response = await handler(input)
   expect(response.success).toBe(true)
-  expect(response.route.streetEvidence).toEqual(expect.objectContaining({
-    coverageRatio: expect.any(Number), ordinaryRoadRatio: expect.any(Number)
-  }))
-  expect(response.route.streetEvidence).not.toHaveProperty('classificationComplete')
+  expect(response.route.streetEvidence).toEqual(expected)
+  expect(JSON.stringify(response)).not.toContain('classificationComplete')
 })
 
 test('requests only key/from/to with six-decimal latitude,longitude and normalizes the first route', async () => {
