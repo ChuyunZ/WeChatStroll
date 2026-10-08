@@ -43,6 +43,43 @@ beforeEach(() => {
   handler = createWalkingHandler({ apiKey: 'private-key', request })
 })
 
+test.each([
+  ['8 real-world-shaped classified steps with 4m shortfall', 1213,
+    [150, 151, 152, 156, 150, 150, 150, 150]],
+  ['10 real-world-shaped classified steps with 5m shortfall', 1252,
+    [1200, 39, 1, 1, 1, 1, 1, 1, 1, 1]]
+])('%s grants only the explicit tiny-gap classification marker', async (_, distance, distances) => {
+  request.mockResolvedValue({ data: { status: 0, result: { routes: [{
+    ...validRoute(), distance, steps: distances.map(d => ({ type: 0, distance: d, road_name: 'private' }))
+  }] } } })
+  const response = await handler(input)
+  expect(response.success).toBe(true)
+  expect(response.route.streetEvidence).toEqual({
+    coverageRatio: distances.reduce((sum, d) => sum + d, 0) / distance,
+    ordinaryRoadRatio: 1,
+    classificationComplete: true
+  })
+  expect(JSON.stringify(response)).not.toMatch(/steps|road_name|private|providerMeta|streetCoverageDiagnostic/)
+})
+
+test.each([
+  ['missing walking type despite identical tiny distance gap', 1213,
+    [...new Array(7).fill({ type: 0, distance: 150 }), { distance: 159 }]],
+  ['unknown walking type with exact accounted distance', 1000,
+    [{ type: 0, distance: 900 }, { type: 99, distance: 100 }]],
+  ['8-step gap beyond the per-step allowance', 1213,
+    [150, 151, 152, 154, 150, 150, 150, 150]],
+  ['10-step short-route gap beyond the relative allowance', 100,
+    [91, 1, 1, 1, 1, 1, 1, 1, 1, 0]],
+  ['fractional provider step distances cannot use assumed integer rounding', 1213,
+    [1208.5, 0.5, 0, 0, 0, 0, 0, 0]]
+])('%s does not earn the tiny-gap marker', async (_, distance, steps) => {
+  request.mockResolvedValue({ data: { status: 0, result: { routes: [{ ...validRoute(), distance, steps }] } } })
+  const response = await handler(input)
+  expect(response.success).toBe(true)
+  expect(response.route.streetEvidence).not.toHaveProperty('classificationComplete')
+})
+
 test('requests only key/from/to with six-decimal latitude,longitude and normalizes the first route', async () => {
   const route = validRoute()
   const raw = [...route.polyline]
