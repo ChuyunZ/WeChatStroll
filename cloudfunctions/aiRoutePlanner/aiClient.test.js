@@ -63,11 +63,26 @@ describe("aiClient", () => {
   
     expect(result).toEqual({
       success: false,
-      error: "AI_REQUEST_FAILED"
+      error: "AI_REQUEST_FAILED",
+      diagnostic: { httpStatus: null, retryAfter: null, sdkErrorCode: null }
     })
   
     expect(fakeModel.generateText).toHaveBeenCalledTimes(1)
   })
+
+  test("preserves safe HTTP 429 metadata without leaking response bodies", async () => {
+    const failure = new Error("rate limited");
+    failure.response = { status: 429, headers: { "retry-after": "30" },
+      data: { secret: "DO_NOT_EXPORT" } };
+    const client = createAiClient({ generateText: jest.fn().mockRejectedValue(failure) });
+    const result = await client.request("test prompt");
+    expect(result).toEqual({
+      success: false,
+      error: "AI_REQUEST_FAILED",
+      diagnostic: { httpStatus: 429, retryAfter: "30", sdkErrorCode: null }
+    });
+    expect(JSON.stringify(result)).not.toContain("DO_NOT_EXPORT");
+  });
 
   test("returns empty response error when AI returns no text", async () => {
     const fakeModel = {
