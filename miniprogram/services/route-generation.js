@@ -1200,6 +1200,34 @@ async function buildFallbackGenerationResult({
   }
 }
 
+// Manual replenishment keeps the original verified pool, profile and route session.
+// Candidate validation still happens in the cloud planner contract and the
+// existing optimizer/builder; never silently perform a new location/POI search.
+async function requestManualWaypointCandidates({
+  location, preferences, nearbyPois, historicalPreferenceProfile,
+  attempt, previousFailures = []
+}) {
+  if (!isValidPoint(location) || !Array.isArray(nearbyPois) || !nearbyPois.length ||
+      !nearbyPois.every(isValidPoi) || !Number.isInteger(attempt) ||
+      attempt < 1 || attempt > MAX_AI_PLANNING_ATTEMPTS) {
+    throw createRouteGenerationError('INVALID_INPUT', 'Invalid manual planning context.')
+  }
+  const plan = await requestWaypointPlan({
+    location, preferences, nearbyPois, historicalPreferenceProfile,
+    replanningContext: { attempt, previousFailures }
+  })
+  if (!hasValidWaypointPlanShape(plan)) {
+    throw createRouteGenerationError('INVALID_AI_ROUTE_PLAN', 'Invalid manual AI plan.')
+  }
+  const allowed = new Set(nearbyPois.map(poi => poi.poiId))
+  const candidates = plan.candidates.filter(candidate => {
+    const ids = candidate.waypoints.map(waypoint => waypoint.poiId)
+    return ids.length <= 8 && new Set(ids).size === ids.length &&
+      ids.every(id => allowed.has(id))
+  })
+  return createWaypointCandidateCache(candidates)
+}
+
 // AI waypoint candidates -> walking routes
 async function generateRoutes(
   preferences = {}
@@ -1305,6 +1333,7 @@ async function generateRoutes(
           return {
             status: 'success', source, location,
             routes: rankRoutes([result.route], { preferences, historicalPreferenceProfile }),
+            verifiedWaypointPool: nearbyPois.map(copyEditableWaypoint),
             historicalPreferenceProfile,
             routePlanningSession: session, waypointCandidateCache: candidateCache,
             planningMetadata: buildPlanningMetadata(attemptCount, false, [...observations, ...attemptObservations])
@@ -1342,7 +1371,8 @@ async function generateRoutes(
   return { ...result,
     ...(result.status === 'success' ? {
       routes: rankRoutes(result.routes, { preferences, historicalPreferenceProfile }),
-      historicalPreferenceProfile
+      historicalPreferenceProfile,
+      verifiedWaypointPool: nearbyPois.map(copyEditableWaypoint)
     } : {}),
     planningMetadata: buildPlanningMetadata(attemptCount, true, observations) }
 }
@@ -1476,6 +1506,7 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
 }
 
 module.exports = {
+  requestManualWaypointCandidates,
   rebuildGeneratedRouteForOrder,
   logCandidateSummary,
   generateFirstRoute,
