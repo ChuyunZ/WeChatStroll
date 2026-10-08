@@ -107,12 +107,12 @@ test.each([['loop', 3, 1900, 100 / 1900], ['out_and_back', 4, 2000, 0.1]])(
   })
 
 
-test('verified tiny step-accounting gaps survive cloud boundary, directed aggregation and generated route ranking', async () => {
+test('observed partial coverage survives cloud boundary, directed aggregation and generated route ranking', async () => {
   const firstCoverage = 1209 / 1213
   const secondCoverage = 1247 / 1252
   mockCloud([
-    { coverageRatio: firstCoverage, ordinaryRoadRatio: 1, classificationComplete: true },
-    { coverageRatio: secondCoverage, ordinaryRoadRatio: 0.5, classificationComplete: true }
+    { coverageRatio: firstCoverage, ordinaryRoadRatio: 1 },
+    { coverageRatio: secondCoverage, ordinaryRoadRatio: 0.5 }
   ])
   const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool })
   const walking = await session.buildRouteForOrder({
@@ -124,7 +124,10 @@ test('verified tiny step-accounting gaps survive cloud boundary, directed aggreg
     (100 * firstCoverage + 900 * secondCoverage * 0.5) /
     (100 * firstCoverage + 900 * secondCoverage)
   )
-  expect(evidence.classificationComplete).toBe(true)
+  expect(evidence).toEqual({
+    coverageRatio: expect.any(Number),
+    ordinaryRoadRatio: expect.any(Number)
+  })
   const generated = buildGeneratedRouteFromAiCandidate({ location: start, walkingRoute: walking })
   expect(getStreetEvidence(generated)).toEqual(evidence)
   const score = scoreRoute(generated, { preferences: {
@@ -135,24 +138,29 @@ test('verified tiny step-accounting gaps survive cloud boundary, directed aggreg
   expect(JSON.stringify(generated)).not.toMatch(/streetEvidence|classificationComplete|coverageRatio|ordinaryRoadRatio/)
 })
 
-test('high aggregate coverage cannot bypass a single unknown directed segment or an unverified completion flag', () => {
-  const known = rememberStreetEvidence({ distanceMeters: 999 }, {
+test('unknown directed segments contribute zero confirmed meters, not a score cliff', () => {
+  const confirmed = rememberStreetEvidence({ distanceMeters: 200 }, {
     coverageRatio: 1, ordinaryRoadRatio: 1
   })
-  const unknown = { distanceMeters: 1 }
-  const aggregate = aggregateStreetEvidence([known, unknown])
-  expect(aggregate).toEqual({ coverageRatio: 0.999, ordinaryRoadRatio: 1 })
-  const validRoute = () => ({ distanceMeters: 1000, durationSeconds: 1800,
-    pointsOfInterest: [{ poiId: 'A', category: 'park' }] })
-  const route = rememberStreetEvidence(validRoute(), aggregate)
+  const unknown = { distanceMeters: 800 }
+  const aggregate = aggregateStreetEvidence([confirmed, unknown])
+  expect(aggregate).toEqual({ coverageRatio: 0.2, ordinaryRoadRatio: 1 })
+  const baseRoute = { distanceMeters: 1000, durationSeconds: 1800,
+    pointsOfInterest: [{ poiId: 'A', category: 'park' }] }
+  const route = rememberStreetEvidence(baseRoute, aggregate)
   const ctx = { preferences: {
     durationMinutes: 30, environmentPreferences: ['街道', '公园', '水边', '商街']
   } }
-  expect(scoreRoute(route, ctx).streetBonus).toBe(0)
+  expect(scoreRoute(route, ctx).streetBonus).toBeCloseTo(0.01)
+  // All-unknown segments have no evidence, so there is nothing to score.
+  expect(aggregateStreetEvidence([{ distanceMeters: 1000 }])).toBeNull()
+  expect(scoreRoute(baseRoute, ctx).streetBonus).toBeCloseTo(0.01)
 
-  const fabricated = rememberStreetEvidence(validRoute(), {
-    coverageRatio: 0.99, ordinaryRoadRatio: 1, classificationComplete: true
+  // Legacy completion flags are ignored: only the two allowlisted numeric ratios survive.
+  const legacy = rememberStreetEvidence({ ...baseRoute }, {
+    coverageRatio: 0.99, ordinaryRoadRatio: 0.5, classificationComplete: true
   })
-  expect(getStreetEvidence(fabricated)).toEqual({ coverageRatio: 0.99, ordinaryRoadRatio: 1 })
-  expect(scoreRoute(fabricated, ctx).streetBonus).toBe(0)
+  expect(getStreetEvidence(legacy)).toEqual({ coverageRatio: 0.99, ordinaryRoadRatio: 0.5 })
+  expect(scoreRoute(legacy, ctx).streetBonus).toBeCloseTo(0.05 * 0.99 * 0.5)
+  expect(JSON.stringify(legacy)).not.toContain('classificationComplete')
 })
