@@ -550,6 +550,31 @@ describe('bounded manual alternatives', () => {
     expect(routeGenerationServiceMock.generateRoutes).not.toHaveBeenCalled();
   });
 
+  test.each(['thrown', 'returned'])('provider unavailable %s stops manual candidate processing without consuming budget', async mode => {
+    const cache = setup(1, [['A', 'B'], ['A', 'C']]);
+    const original = page._rawRoutes;
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate }) => {
+      cache.markBuilding(candidate.candidateId);
+      cache.markFailed(candidate.candidateId);
+      if (mode === 'thrown') {
+        const error = new Error('Provider unavailable');
+        error.code = 'PROVIDER_RATE_LIMITED';
+        throw error;
+      }
+      return { success: false, error: 'PROVIDER_GATEWAY_FAILED' };
+    });
+    await page.showOtherRoutes();
+    expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).toHaveBeenCalledTimes(1);
+    expect(page._rawRoutes).toBe(original);
+    expect(page._manualAlternativeActionCount).toBe(0);
+    expect(page._manualAlternativePending).toBeNull();
+    expect(cache.getUnusedCandidates()).toHaveLength(1);
+    expect(page.data.manualAlternativeAction).toBe('add');
+    expect(wx.showToast).toHaveBeenCalledWith({
+      title: '路线服务暂时繁忙，请稍后重试', icon: 'none'
+    });
+  });
+
   test('failed candidates are skipped and only the next success consumes budget', async () => {
     const cache = setup();
     const build = routeGenerationServiceMock.buildOptimizedCandidateRoute.getMockImplementation();
