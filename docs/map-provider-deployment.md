@@ -102,8 +102,9 @@ moves the two allowlisted ratios into a runtime WeakMap, not public segments or
 Route snapshots. See [Street source, coverage and limitations](street-preference-ranking.md).
 Live October 8 development checks found 8 classified steps / 4 m accounting
 gap and 10 classified steps / 5 m gap on separate routes. These do not justify
-a rounding rule. This scoring flow still needs coordinated dev redeployment and
-E2E verification. No configuration changes are needed.
+a rounding rule. The final proportional-scoring cloud and matching client were
+subsequently tested in development on October 9 local time; see the #84
+development E2E section below. No configuration changes were needed.
 
 ## Error semantics
 
@@ -224,6 +225,41 @@ Development environment work completed on 2026-10-04:
    selection -> Tencent walking segments -> Route Engine -> deterministic validation
    -> route card/detail. A 30-minute request produced a valid ~24-minute / ~1.6 km route.
 
+### Street preference (#84) development E2E — 2026-10-09 local
+
+The corrected, proportional Street evidence build on
+`feature/street-preference-ranking` was deployed as `mapProvider` to the
+authorized development CloudBase environment. The matching Mini Program client
+was compiled in WeChat Developer Tools. Neither was promoted to production.
+
+- Direct `walkingRoute` returned `success: true`, distance **1213 m**,
+  duration **1080 seconds**, `coverageRatio = 0.9967023907666942`,
+  and `ordinaryRoadRatio = 1`. Only the two normalized ratios appeared under
+  `streetEvidence`; no temporary diagnostic payload, `classificationComplete`
+  marker, provider steps, or raw `environmentStats` were returned.
+- A real 30-minute, Street-first questionnaire generated an approximately
+  **24-minute / 1.6 km** route. Runtime inspection showed
+  `coverageRatio ≈ 0.99682741`, `ordinaryRoadRatio = 1`,
+  `streetBonus ≈ 0.04984137`, `baseScore = 0.7904`.
+- Ranking the real route against a JSON-cloned evidence-free version placed
+  the original first in **both input orders**, without mutating displayed
+  routes. Two *independent* live routes were not successfully compared.
+- Raw route/UI representations had no Street/provider evidence keys. A test
+  Walk with trajectory recording disabled created a clean local
+  `activeWalkSession`, completed as `ended_early`, produced a clean
+  `pendingWalkResult` and cleared both local keys after feedback was skipped.
+  This does not delete the completed cloud Walk record.
+- Manual Add could not yield a second route: three duration-invalid candidates
+  were followed by empty AI batches. The AI-origin empty-plan reproduction
+  is documented under **#91**; Add/Replace success and a real confirmed-edit
+  Street rerank are not claimed as verified.
+
+CI on feature commit `679ccebd` passed **71 suites / 1484 tests**, and the
+local full Jest suite passed. Neither the E2E observation nor normalized
+field omission establishes permission to persist Tencent planned-route data.
+Pending production deployment and Tencent usage/persistence approval remain
+separate release gates.
+
 The later Explore concurrent-admission optimization and the Walking pacing reduction
 are covered by automated tests, but must be redeployed before treating their live
 CloudBase start-spacing checks as revalidated.
@@ -249,7 +285,9 @@ to 200–1000 m and that no raw Tencent fields or `providerMeta` escape.
 
 Invoke `mapProvider` with `action: 'walkingRoute'` and valid `start`/`destination`.
 Check numeric `distanceMeters`, `durationSeconds` and decoded latitude/longitude
-polyline. Ensure no `environmentStats` or raw steps are returned.
+polyline. Optional `streetEvidence` may contain only `coverageRatio` and
+`ordinaryRoadRatio`; verify there are no `environmentStats`, raw steps,
+legacy completion markers or temporary diagnostics in the public response.
 
 ### C. Limiter and logs
 
