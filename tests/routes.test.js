@@ -359,6 +359,49 @@ describe('progressive initial route loading', () => {
     expect(page.data.routes.map(route => route.isBestMatch)).toEqual([true, false, false]);
     expect(page._rawRoutes.every(route => !('isBestMatch' in route) && !('totalScore' in route))).toBe(true);
   });
+
+  test('an open route detail remains current when a better background route reranks ahead of it', async () => {
+    const { pending } = setup();
+    const first = {
+      ...GENERATED_ROUTE,
+      durationSeconds: 2100,
+      editableWaypoints: [{ poiId: 'A' }]
+    };
+    const second = {
+      ...GENERATED_ROUTE,
+      routeId: 'second',
+      durationSeconds: 1800,
+      editableWaypoints: [{ poiId: 'B' }]
+    };
+    const initial = await page.getRoutes();
+    page.getRoutes.mockResolvedValue({ ...initial, routes: [first] });
+    page._routePreferences = { durationMinutes: 30 };
+
+    await page.loadRoutes();
+    const session = page._routePlanningSession;
+    page.viewRoute({ currentTarget: { dataset: { id: first.routeId } } });
+    const navigateOptions = wx.navigateTo.mock.calls[0][0];
+
+    await settle(pending[0], { success: true, route: second });
+    expect(page._rawRoutes).toEqual([second, first]);
+    expect(page._rawRoutes).toContain(first);
+
+    await navigateOptions.events.previewRoute({
+      routeId: first.routeId,
+      orderedWaypointIds: ['A'],
+      requestId: 1
+    });
+    expect(session.buildRouteForOrder).toHaveBeenCalledWith({
+      allowedWaypointIds: ['A'],
+      orderedWaypointIds: ['A'],
+      source: 'user'
+    });
+
+    for (let index = 1; index < 4; index++) {
+      await settle(pending[index], { success: false });
+    }
+    await page._initialFillPromise;
+  });
 });
 
 beforeEach(() => {
