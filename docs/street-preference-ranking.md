@@ -28,96 +28,79 @@ parse instructions/road names or use geometry as substitute evidence.
 
 ## Optional capability
 
-Only the cloud walking response may contain an optional allowlisted aggregate:
-`streetEvidence: { coverageRatio, ordinaryRoadRatio, classificationComplete? }`.
-The optional boolean is present as `true` only for wholly classified integer-
-meter step lists whose small distance-accounting shortfall meets the independent
-caps described below. It is a confidence gate, not a claim that the measured
-coverage is 100%. Unknown is absence on the wire and `null` in the runtime
-reader, never a known zero ordinary-road ratio.
+Only the cloud walking response may return an allowlisted
+`streetEvidence: { coverageRatio, ordinaryRoadRatio }`. Absent or invalid
+evidence is unknown (`null` in the runtime reader), not known zero quality.
 
-For a provider segment, classified meters sum steps with known numeric codes;
-ordinary meters sum only type 0. Coverage is classified meters / actual route
-meters; ordinary-road ratio is ordinary meters / classified meters. Missing steps,
-no classified distance, zero route distance, malformed steps, negative/nonfinite/
-nonnumeric step distances, overflowing sums or summed steps exceeding the route
-distance make the capability unknown. A shorter step list or unknown types reduce
-measured coverage. A positive gap between route and summed-step meters never
-changes the measured coverage value. Cloud marks `classificationComplete: true`
-only if **every** provided step has type 0–3, all route/step distances are
-integers, and the nonzero shortfall is at most all three bounds:
-`0.5 m × stepCount`, `0.005 × routeDistanceMeters`, and `10 m`.
-This is a conservative empirical accommodation, **not** proof that all missing
-distance is rounding; no unclassified type qualifies, and no missing meters are
-filled in. A larger shortfall, missing type, fractional distance or overcount
-gets no completion marker. Invalid optional evidence does not discard otherwise
-valid walking facts.
+Tencent walking `steps[].type` codes 0–3 identify classified walking facilities.
+Only numeric code 0 is ordinary road. The cloud computes:
 
-The client independently validates both finite ratios in [0,1], with positive
-coverage. It recognizes only the explicit `classificationComplete: true` boolean
-and only if coverage is at least 0.995 and below 1. All other extra fields are
-dropped. A missing boolean never qualifies sub-100% coverage for a bonus.
-The allowlisted aggregate enters an internal WeakMap; raw provider metadata and
-caller-supplied route/segment `streetEvidence` or `environmentStats` properties
-are never evidence sources.
+```
+classifiedMeters = sum(step.distance for known type 0..3)
+ordinaryMeters = sum(step.distance for type 0)
+coverageRatio = classifiedMeters / route.distance
+ordinaryRoadRatio = ordinaryMeters / classifiedMeters
+```
 
-For every required directed segment i with real length d_i:
+Unknown, missing and numeric-string types remain unclassified; they never
+become ordinary roads. Missing steps, malformed/negative/nonfinite distances,
+zero route distance, no classified meters, overflow, or summed step distances
+greater than route distance make the optional evidence unknown. Otherwise,
+valid partial lists or steps with unknown codes merely reduce measured coverage.
+No distance is substituted, and **no provider rounding/completeness assumption,
+`classificationComplete` marker, or coverage cutoff is used**.
+
+The client validates both ratios as finite in [0,1] and coverage as positive,
+discards any extra fields, and retains the allowlisted values only in an internal
+WeakMap. Caller-supplied raw steps, route metadata, legacy `environmentStats`
+and UI route objects are not alternate evidence sources.
+
+For an assembled route of directed walking segments `i` with distance `d_i`:
 
 ```
 D = sum(d_i)
-C = sum(d_i * coverage_i)                  // unknown contributes no classified meters
+C = sum(d_i * coverage_i)                  // unknown segment contributes zero
 O = sum(d_i * coverage_i * ordinaryRatio_i)
 coverageRatio = C / D
 ordinaryRoadRatio = O / C                  // C = 0 or D = 0 means unknown
 ```
 
-Return and reverse edges count separately. Ratios are never averaged without
-distance weighting. Missing positive-distance edges reduce coverage and block the
-tiny-gap exception regardless of the aggregate numerical ratio; a zero-length
-edge contributes no distance. A completed route carries the optional marker only
-if **every positive-distance directed segment** is exactly complete or explicitly
-qualified by the cloud, and overall coverage remains at least 0.995. Invalid
-walking segments still fail normal validation.
+These are distance-weighted, including distinct return/reverse edges. Missing
+positive-distance segments contribute zero confirmed meters, not guesses or a
+hard failure. Invalid walking segments still fail normal route validation.
+Combining these values gives confirmed ordinary-road meters / total route meters.
 
 ## Positive bonus
 
-`STREET_BONUS_CONFIG` names the provisional choices:
-
-- `maxBonus = 0.05`
-- `rankStrengths = [1, 0.5, 0, 0]` for current Street rank 1–4
-- `minimumCoverage = 1` for exact measured coverage
-- `minimumToleratedCoverage = 0.995` **only** with explicit trusted
-  `classificationComplete: true` (not a general 99.5% threshold)
+`STREET_BONUS_CONFIG` keeps provisional `maxBonus = 0.05` and
+`rankStrengths = [1, 0.5, 0, 0]` for Street ranks 1–4. There is no
+minimum coverage percentage.
 
 ```
-StreetEvidence = coverageRatio * ordinaryRoadRatio
-StreetBonus = 0.05 * PreferenceStrength * StreetEvidence
+StreetBonus = 0.05 * PreferenceStrength * coverageRatio * ordinaryRoadRatio
+            = 0.05 * PreferenceStrength * confirmedOrdinaryMeters / totalRouteMeters
 FinalScore = BaseScore + StreetBonus
 ```
 
-Unknown, partially classified evidence, uncovered directed edges or absent
-Street preference gives zero bonus. A small bounded accounting gap qualifies
-only with the explicit completion marker; the actual measured coverage ratio
-still scales the bonus.
-A known zero ordinary-road ratio is distinguishable from unknown. All base
-components missing still yields a null total and no bonus. Score can exceed 1;
-clamping would erase differences near the top. Ranking remains downstream of
-validation; Street never makes a failed route eligible.
+For first-ranked Street, 20% confirmed ordinary-road distance earns +0.010,
+90% earns +0.045, and 100% earns +0.050. Unknown road distance earns nothing:
+this is conservative **partial credit**, not an estimate of the unknown portion.
+A route with 20% coverage is not asserted to be only 20% ordinary road overall.
+Even slight observed changes in coverage result in proportional changes in bonus;
+there is no sudden 90%, 95%, or 100% scoring discontinuity.
 
-The completion gate is deliberately conservative and not empirically calibrated
-beyond two observed routes. The 0.5 m/step, 0.5% and 10 m caps are provisional
-heuristics for small integer-meter distance accounting gaps, **not** assumed
-Tencent rounding guarantees. An omitted step could still resemble such a gap;
-more live diversity testing is required before production confidence.
-The coefficient is also provisional: first preference can overcome a base-score
-gap below 0.05, second below 0.025. Larger base gaps dominate. Missing evidence
-is not presented as low Street quality in the UI.
+Unknown evidence, zero ordinary-road ratio, missing Street preference, or no
+available base components means no bonus. This signal never penalizes routes or
+allows invalid routes to pass validation. Totals can exceed 1 (no clamping).
+The +0.05 coefficient is provisional, not empirically tuned for all providers.
+A first-ranked Street preference can overcome base differences below 0.05;
+partial-data comparisons may under-credit routes with unknown road categories.
 
-Duration/current environment/history weights remain 0.50/0.30/0.20, including
-existing missing-component renormalization and tie-breaking. The three verified
-POI categories retain their scoring semantics. Street stays out of both current
-and historical environment formulas; history's `street` weight is not counted
-again. There is no new AI planning/replanning or waypoint optimization signal.
+Existing duration/environment/history weights remain 0.50/0.30/0.20, with
+missing-component renormalization and deterministic ties unchanged. Street does
+not become a POI category and is excluded from current and historical POI
+environment formulas, avoiding double-counting history. No new AI planning,
+waypoint optimization, or provider calls are introduced.
 
 ## Runtime lifecycle and persistence
 
@@ -145,61 +128,37 @@ simply supplies unknown. Nothing was deployed as part of this local implementati
 
 ## Verification and remaining checks
 
-Focused tests cover provider normalization/leakage, distance weighting, unknown
-capability, base-score compatibility, rank strengths, deterministic ordering,
-object identity, mutation invalidation, serialization, initial/fallback generation,
-progressive arrival, Add/Replace and stale completions. Existing validation,
-editing and lifecycle suites remain authoritative too.
+Cloud/provider and client tests include the observed 4 m / 8-step and
+5 m / 10-step discrepancies, low 20% and 90% partial classification, unknown
+types, malformed inputs and route-distance overcounts, directed route
+aggregation, scoring, stale-state handling and no persistence. The observed
+values do not prove 0.5 m/step rounding, and the implementation no longer
+assumes any such provider rule.
 
-Run `npm test -- --runInBand` (`npm.cmd` under restrictive PowerShell policy).
-The first live CloudBase provider tests showed 4 m/8-step and 5 m/10-step
-shortfalls, with zero missing or unknown type codes. The final corrected cloud +
-client ranking path has **not** yet been redeployed or device-E2E verified.
-Before release, verify the optional completion marker on the two measured test
-routes, real ranking changes and unchanged storage snapshots in authorized
-WeChat Developer Tools/device checks. Do not make live provider calls without
-authorization. Official type 0
-is a walking facility classification, not independent proof of urban land use.
+Run `npm test -- --runInBand` (`npm.cmd` where appropriate). The
+updated cloud + mini-program behavior still needs a coordinated development
+deployment and a real questionnaire → candidate → ranking → Add/Replace/edit
+E2E check. Verify snapshots/Walk data stay unchanged; avoid unauthorized
+production deployment.
 
 ## Proposed Issue #84 description corrections (not applied remotely)
 
-Replace **Existing Signal** with:
+Replace the original AMap-specific `environmentStats` assumption with
+Tencent walking-route `steps[].type` 0–3 and `distance` as the source. Missing
+or malformed evidence is unknown. Only two ratios pass the cloud contract:
+`coverageRatio` and `ordinaryRoadRatio`; raw steps and provider metadata
+never enter public routes or persisted snapshots.
 
-> Tencent migration removed the former AMap environmentStats fields. Walking facts
-> are distanceMeters, durationSeconds and polyline. #84 adds an optional normalized
-> streetEvidence aggregate derived only from documented Tencent walking type and
-> step distance fields. Absent or unreliable evidence is unknown. The aggregate
-> is runtime-only and never a Route/Walk persistence field.
+Acceptance criteria should state:
 
-Replace the provider-migration requirement with:
-
-> Consume provider-independent coverageRatio and ordinaryRoadRatio through an
-> object-identity runtime sidecar. Do not restore AMap fields or infer road_class
-> semantics. Validate and distance-weight every required segment; unknown segments
-> reduce coverage. Exact coverage permits a bonus; bounded gaps permit it only
-> with explicit cloud-verified classificationComplete evidence that every step
-> has a known type and the integer-meter distance discrepancy meets all three
-> strict caps (0.5 m/step, 0.5% of route distance, 10 m).
-
-Replace the ranking requirement with:
-
-> Preserve the 0.50/0.30/0.20 base formula and normalization. Add a positive-only
-> bonus of 0.05 × current Street rank strength × coverageRatio × ordinaryRoadRatio
-> for exact or explicitly verified bounded-gap coverage; strengths are
-> 1, 0.5, 0, 0. These constants are provisional.
-> Street is ordinary road walking exposure, with no scenic or safety implication.
-> Keep Street out of current/historical POI environment formulas.
-
-Replace the first acceptance criterion with:
-
-> With trustworthy complete evidence, current Street rank 1/2 affects otherwise
-> tied valid route ranking. Missing/partial evidence earns no bonus and is not
-> labeled poor Street quality. Live data establishes small distance-accounting
-> shortfalls with all step types classified; post-fix end-to-end ranking remains
-> an authorized E2E check.
-
-Add an acceptance criterion:
-
-> Initial/progressive, Add/Replace, fallback and validated edit flows preserve
-> evidence identity without attaching it to snapshots. Reused IDs and late results
-> cannot alter another route/session's scores. No extra provider calls or persistence.
+- Validate route/step distances and types; no invalid/overcounted raw route
+  evidence is accepted, and unknown code/type distances earn no ordinary credit.
+- Use distance-weighted, directed aggregation with unknown edges contributing
+  zero classified meters. No minimum coverage gate or provider-rounding guess.
+- Keep 50/30/20 base ranking and a positive-only Street bonus of
+  `0.05 × currentRankStrength × coverageRatio × ordinaryRoadRatio` using
+  strengths [1, 0.5, 0, 0], with the measured ratio and no extrapolation.
+- Initial/progressive, Add/Replace, fallback and validated edits keep private
+  runtime evidence without attaching it to persisted fields or snapshots.
+- Live provider tests observed short step sums despite all returned types
+  being classified. Final app ranking still requires a post-change E2E check.
