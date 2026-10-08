@@ -141,3 +141,69 @@ test('adapter emits no raw payload, key or coordinate logs on failures', async (
     for (const spy of spies) expect(spy).not.toHaveBeenCalled()
   } finally { spies.forEach(spy => spy.mockRestore()) }
 })
+
+
+test('temporary PR #105 Street diagnostics are opt-in, aggregate-only and preserve the normal route contract', async () => {
+  const providerRoute = {
+    ...validRoute(), distance: 1213,
+    steps: [
+      { type: 0, distance: 600, road_name: 'private road' },
+      { type: 1, distance: 609, road_class: 2 }
+    ]
+  }
+  request.mockResolvedValue({ data: { status: 0, result: { routes: [providerRoute] } } })
+  const normal = await handler(input)
+  const wrongFlagType = await handler({ ...input, __streetCoverageDiagnostic: 1 })
+  const diagnostic = await handler({ ...input, __streetCoverageDiagnostic: true })
+
+  expect(normal.streetCoverageDiagnostic).toBeUndefined()
+  expect(wrongFlagType.streetCoverageDiagnostic).toBeUndefined()
+  expect(diagnostic.route).toEqual(normal.route)
+  expect(diagnostic.streetCoverageDiagnostic).toEqual({
+    routeDistanceMeters: 1213,
+    stepDistanceMeters: 1209,
+    classifiedDistanceMeters: 1209,
+    unclassifiedTypeDistanceMeters: 0,
+    routeMinusStepsMeters: 4,
+    stepsPresent: true,
+    stepCount: 2,
+    classifiedStepCount: 2,
+    missingTypeStepCount: 0,
+    unknownTypeStepCount: 0,
+    invalidDistanceStepCount: 0
+  })
+  expect(JSON.stringify(diagnostic.streetCoverageDiagnostic))
+    .not.toMatch(/road_name|road_class|private|request_id|polyline|latitude|longitude|providerMeta|"steps":/)
+  expect(request).toHaveBeenCalledTimes(3)
+})
+
+test('temporary diagnostics distinguish missing classifications from route-step distance gaps', async () => {
+  request.mockResolvedValueOnce({ data: { status: 0, result: { routes: [{
+    ...validRoute(), distance: 1213,
+    steps: [{ type: 0, distance: 1209 }, { distance: 4 }]
+  }] } } })
+  const result = await handler({ ...input, __streetCoverageDiagnostic: true })
+  expect(result.route.streetEvidence).toEqual({
+    coverageRatio: 1209 / 1213, ordinaryRoadRatio: 1
+  })
+  expect(result.streetCoverageDiagnostic).toMatchObject({
+    routeDistanceMeters: 1213,
+    stepDistanceMeters: 1213,
+    classifiedDistanceMeters: 1209,
+    unclassifiedTypeDistanceMeters: 4,
+    routeMinusStepsMeters: 0,
+    missingTypeStepCount: 1,
+    unknownTypeStepCount: 0,
+    invalidDistanceStepCount: 0
+  })
+  request.mockResolvedValueOnce({ data: { status: 0, result: { routes: [{
+    ...validRoute(), distance: 1213,
+    steps: [{ type: 0, distance: 1209 }, { type: 0, distance: -4 }]
+  }] } } })
+  const malformed = await handler({ ...input, __streetCoverageDiagnostic: true })
+  expect(malformed.success).toBe(true)
+  expect(malformed.route.streetEvidence).toBeUndefined()
+  expect(malformed.streetCoverageDiagnostic).toMatchObject({
+    stepDistanceMeters: 1209, invalidDistanceStepCount: 1, routeMinusStepsMeters: 4
+  })
+})
