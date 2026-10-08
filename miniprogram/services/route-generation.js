@@ -483,6 +483,11 @@ async function requestWaypointPlan({
   aiDiagnostics.record('client.ai.response', {
     ...summary,
     durationMs: Date.now() - startTime,
+    cloudDiagnostic: result && result.diagnostic ? {
+      model: result.diagnostic.model,
+      promptChars: result.diagnostic.promptChars,
+      promptUtf8Bytes: result.diagnostic.promptUtf8Bytes
+    } : null,
     candidateCount: result && result.plan && Array.isArray(result.plan.candidates)
       ? result.plan.candidates.length : null,
     // POI identities only (no coordinates), to compare exclusions/repetitions.
