@@ -74,9 +74,18 @@ test.each([
   ['fractional provider step distances cannot use assumed integer rounding', 1213,
     [1208.5, 0.5, 0, 0, 0, 0, 0, 0]]
 ])('%s does not earn the tiny-gap marker', async (_, distance, steps) => {
-  request.mockResolvedValue({ data: { status: 0, result: { routes: [{ ...validRoute(), distance, steps }] } } })
+  // Numeric fixture shorthand must be expanded into real provider step objects.
+  // Otherwise the adapter correctly omits the whole malformed capability,
+  // and the test never exercises the intended distance accounting edge case.
+  const providerSteps = steps.map(step => typeof step === 'number' ? { type: 0, distance: step } : step)
+  request.mockResolvedValue({ data: { status: 0, result: { routes: [{
+    ...validRoute(), distance, steps: providerSteps
+  }] } } })
   const response = await handler(input)
   expect(response.success).toBe(true)
+  expect(response.route.streetEvidence).toEqual(expect.objectContaining({
+    coverageRatio: expect.any(Number), ordinaryRoadRatio: expect.any(Number)
+  }))
   expect(response.route.streetEvidence).not.toHaveProperty('classificationComplete')
 })
 
