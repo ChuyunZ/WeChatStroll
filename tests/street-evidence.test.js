@@ -2,6 +2,7 @@ const { getWalkingSegment } = require('../miniprogram/services/walking-segment')
 const { createRoutePlanningSession } = require('../miniprogram/services/route-engine')
 const { getStreetEvidence, rememberStreetEvidence, aggregateStreetEvidence } = require('../miniprogram/services/street-evidence')
 const { buildGeneratedRoute, buildGeneratedRouteFromAiCandidate, rebuildGeneratedRouteForOrder } = require('../miniprogram/services/route-generation')
+const { scoreRoute } = require('../miniprogram/services/route-ranking')
 const start = { latitude: 30, longitude: 120 }
 const pool = ['A', 'B'].map((poiId, i) => ({ poiId, name: poiId, category: 'park', latitude: 31 + i, longitude: 120 }))
 const originalWx = global.wx
@@ -104,3 +105,52 @@ test.each([['loop', 3, 1900, 100 / 1900], ['out_and_back', 4, 2000, 0.1]])(
     expect(getStreetEvidence(result).ordinaryRoadRatio).toBeCloseTo(ratio)
     expect(wx.cloud.callFunction).toHaveBeenCalledTimes(calls)
   })
+
+
+test('verified tiny step-accounting gaps survive cloud boundary, directed aggregation and generated route ranking', async () => {
+  const firstCoverage = 1209 / 1213
+  const secondCoverage = 1247 / 1252
+  mockCloud([
+    { coverageRatio: firstCoverage, ordinaryRoadRatio: 1, classificationComplete: true },
+    { coverageRatio: secondCoverage, ordinaryRoadRatio: 0.5, classificationComplete: true }
+  ])
+  const session = createRoutePlanningSession({ start, verifiedWaypointPool: pool })
+  const walking = await session.buildRouteForOrder({
+    allowedWaypointIds: ['A', 'B'], orderedWaypointIds: ['A', 'B']
+  })
+  const evidence = getStreetEvidence(walking)
+  expect(evidence.coverageRatio).toBeCloseTo((100 * firstCoverage + 900 * secondCoverage) / 1000)
+  expect(evidence.ordinaryRoadRatio).toBeCloseTo(
+    (100 * firstCoverage + 900 * secondCoverage * 0.5) /
+    (100 * firstCoverage + 900 * secondCoverage)
+  )
+  expect(evidence.classificationComplete).toBe(true)
+  const generated = buildGeneratedRouteFromAiCandidate({ location: start, walkingRoute: walking })
+  expect(getStreetEvidence(generated)).toEqual(evidence)
+  const score = scoreRoute(generated, { preferences: {
+    durationMinutes: 30, environmentPreferences: ['街道', '公园', '水边', '商街']
+  } })
+  expect(score.streetBonus).toBeCloseTo(0.05 * evidence.coverageRatio * evidence.ordinaryRoadRatio)
+  expect(score.streetBonus).toBeGreaterThan(0)
+  expect(JSON.stringify(generated)).not.toMatch(/streetEvidence|classificationComplete|coverageRatio|ordinaryRoadRatio/)
+})
+
+test('high aggregate coverage cannot bypass a single unknown directed segment or an unverified completion flag', () => {
+  const known = rememberStreetEvidence({ distanceMeters: 999 }, {
+    coverageRatio: 1, ordinaryRoadRatio: 1
+  })
+  const unknown = { distanceMeters: 1 }
+  const aggregate = aggregateStreetEvidence([known, unknown])
+  expect(aggregate).toEqual({ coverageRatio: 0.999, ordinaryRoadRatio: 1 })
+  const route = rememberStreetEvidence({ distanceMeters: 1000 }, aggregate)
+  const ctx = { preferences: {
+    durationMinutes: 30, environmentPreferences: ['街道', '公园', '水边', '商街']
+  } }
+  expect(scoreRoute(route, ctx).streetBonus).toBe(0)
+
+  const fabricated = rememberStreetEvidence({ distanceMeters: 1000 }, {
+    coverageRatio: 0.99, ordinaryRoadRatio: 1, classificationComplete: true
+  })
+  expect(getStreetEvidence(fabricated)).toEqual({ coverageRatio: 0.99, ordinaryRoadRatio: 1 })
+  expect(scoreRoute(fabricated, ctx).streetBonus).toBe(0)
+})
