@@ -1494,6 +1494,7 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
     ...baseRouteFacts,
     title: formatted.title,
     description: formatted.description,
+    recommendationReason: formatted.recommendationReason,
     durationSeconds: formatted.durationSeconds,
     durationMinutes: formatted.durationMinutes,
     distanceMeters: formatted.distanceMeters,

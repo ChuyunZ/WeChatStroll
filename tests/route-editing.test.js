@@ -250,7 +250,7 @@ test('explicit route outside duration tolerance is previewable', async () => {
 
 test('rebuild preserves identity and recommendation metadata while replacing all walking facts', async () => {
   const { route, session } = await setup()
-  const baseRoute = { ...route, candidateWaypointIds: ['C', 'A', 'B'],
+  const baseRoute = { ...route, recommendationReason: '推荐前往即将删除的地点 A', candidateWaypointIds: ['C', 'A', 'B'],
     optimization: { strategy: 'exact' }, planning: { attempts: 1 },
     environmentStats: { old: true } }
   const snapshot = JSON.stringify(baseRoute)
@@ -259,13 +259,15 @@ test('rebuild preserves identity and recommendation metadata while replacing all
   })
   const rebuilt = generation.rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute })
   for (const field of ['routeId', 'startPoint', 'editableWaypoints', 'recommendedWaypointIds',
-    'recommendedDurationMinutes', 'recommendationReason', 'candidateWaypointIds', 'optimization', 'planning']) {
+    'recommendedDurationMinutes', 'candidateWaypointIds', 'optimization', 'planning']) {
     expect(rebuilt[field]).toEqual(baseRoute[field])
   }
   for (const field of ['durationSeconds', 'durationMinutes', 'distanceMeters', 'polyline']) {
     expect(rebuilt[field]).toEqual(walkingRoute[field])
   }
   expect(rebuilt).not.toHaveProperty('environmentStats')
+  expect(rebuilt.recommendationReason).toBe('根据你的散步偏好推荐这条路线。')
+  expect(rebuilt.recommendationReason).not.toContain('地点 A')
   expect(rebuilt.pointsOfInterest).toHaveLength(1)
   expect(rebuilt.pointsOfInterest[0]).toMatchObject(publicPois[1])
   expect(JSON.stringify(baseRoute)).toBe(snapshot)

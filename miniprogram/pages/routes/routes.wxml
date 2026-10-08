@@ -150,6 +150,7 @@
 
       <view class="reason">
         <text class="reason-label">推荐理由</text>
+        <text class="ai-copy-label" wx:if="{{item.copySource === 'ai'}}">AI 生成 · 仅供参考</text>
         <text class="reason-text">
           {{item.recommendationReason}}
         </text>
