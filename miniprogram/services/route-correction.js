@@ -3,7 +3,7 @@
 // facts, replaces provider calls, or weakens final route validation.
 const { waypointSetKey } = require('./agentic-route-planning')
 const { createWaypointCandidateCache } = require('./waypoint-candidate-cache')
-const { createOrderPriorityEstimator } = require('./waypoint-order-priority')
+const { createSessionDurationEstimator } = require('./route-correction-estimator')
 const { createStartNode, createDirectedEdgeKey, buildPrefetchEdgePairs } = require('./route-graph')
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
 const {
@@ -55,47 +55,64 @@ function classifyDuration(targetSeconds, durationSeconds) {
     durationSeconds <= targetSeconds + tolerance
 }
 
-function inspectSet(session, ids, targetSeconds) {
+function durationWindow(targetSeconds) {
+  const tolerance = Math.min(ROUTE_DURATION_MAX_TOLERANCE_SECONDS,
+    Math.max(ROUTE_DURATION_MIN_TOLERANCE_SECONDS,
+      targetSeconds * ROUTE_DURATION_TOLERANCE_RATIO))
+  return { minSeconds: Math.max(0, targetSeconds - tolerance), maxSeconds: targetSeconds + tolerance }
+}
+
+function inspectSet(session, ids, targetSeconds, estimator, cachedCosts) {
   const scope = session.getWaypointSearchData(ids)
   if (!scope || !scope.valid || scope.waypoints.length !== ids.length) return null
-  const cachedCosts = session.getCachedSegmentCosts()
   const costByEdge = new Map(cachedCosts.map(cost => [cost.edgeKey, cost]))
   const start = createStartNode(scope.start)
   const nodes = scope.waypoints.map(poi => ({ ...poi, nodeType: 'waypoint', nodeId: poi.poiId }))
   const prefetchEdges = buildPrefetchEdgePairs(start, nodes, scope.routeType)
   const missing = new Set(prefetchEdges.map(([from, to]) => createDirectedEdgeKey(from, to))
     .filter(key => !costByEdge.has(key)))
-  const estimate = createOrderPriorityEstimator(scope, cachedCosts, targetSeconds)
+  const window = durationWindow(targetSeconds)
   const orders = permutations([...ids].sort())
   let best = null
-  let hasExactFeasible = false
-  let allOrdersResolved = true
   for (const order of orders) {
-    const result = estimate(order)
-    const knownRoute = result.failedEdgeCount === 0 &&
-      // The number of known edges for a full ordering is checked indirectly:
-      // if any prefetch edge is missing, allOrdersResolved becomes false below.
-      missing.size === 0
-    if (knownRoute && classifyDuration(targetSeconds, result.durationSeconds)) {
-      hasExactFeasible = true
-    }
-    if (!best || result.failedEdgeCount < best.failedEdgeCount ||
-        (result.failedEdgeCount === best.failedEdgeCount &&
-          result.targetErrorSeconds < best.targetErrorSeconds)) {
-      best = result
-    }
+    const estimate = estimator.estimate(order, scope.routeType, targetSeconds,
+      window.minSeconds, window.maxSeconds)
+    // A known unwalkable directed segment makes this order impossible. Other
+    // orders are still evaluated; a whole set is removed only if none survives.
+    if (estimate.failedEdges > 0) continue
+    if (!best || estimate.tier < best.tier ||
+        (estimate.tier === best.tier && estimate.quality < best.quality)) best = estimate
   }
-  if (missing.size > 0) allOrdersResolved = false
-  // If every directed edge is cached and no complete traversal could meet the
-  // duration window, there is no reason to rebuild this set again.
-  if (allOrdersResolved && !hasExactFeasible) return null
+  if (!best || (missing.size === 0 && best.tier !== 0)) return null
   return {
     newSegmentUpperBound: missing.size,
-    estimatedTargetErrorSeconds: best.targetErrorSeconds,
-    estimatedFeasible: classifyDuration(targetSeconds, best.durationSeconds),
-    knownFailedEdges: best.failedEdgeCount,
+    estimatedTargetErrorSeconds: Math.abs(best.durationSeconds - targetSeconds),
+    estimatedFeasible: best.feasible,
+    estimatedLowSeconds: best.lowSeconds,
+    estimatedHighSeconds: best.highSeconds,
+    rankTier: best.tier,
+    rankQuality: best.quality,
+    knownFailedEdges: 0,
     fullyCached: missing.size === 0
   }
+}
+
+function createRankingContext(session, poolIds) {
+  const scope = session.getWaypointSearchData(poolIds)
+  if (!scope || !scope.valid || scope.waypoints.length !== poolIds.length) return null
+  const cachedCosts = session.getCachedSegmentCosts()
+  return { cachedCosts, estimator: createSessionDurationEstimator({
+    searchData: scope, cachedCosts
+  }) }
+}
+
+function compareRankedProposals(a, b) {
+  return a.rankTier - b.rankTier ||
+    a.rankQuality - b.rankQuality ||
+    a.newSegmentUpperBound - b.newSegmentUpperBound ||
+    a.estimatedTargetErrorSeconds - b.estimatedTargetErrorSeconds ||
+    a.waypointIds.length - b.waypointIds.length ||
+    a.key.localeCompare(b.key)
 }
 
 function proposeDeterministicWaypointSets({
@@ -150,17 +167,13 @@ function proposeDeterministicWaypointSets({
   }
 
   const targetSeconds = requestedDurationMinutes * 60
+  const context = createRankingContext(session, poolIds)
+  if (!context) return []
   return [...proposals.values()].map(proposal => {
-    const cost = inspectSet(session, proposal.waypointIds, targetSeconds)
+    const cost = inspectSet(session, proposal.waypointIds, targetSeconds,
+      context.estimator, context.cachedCosts)
     return cost ? { ...proposal, ...cost } : null
-  }).filter(Boolean).sort((a, b) =>
-    Number(b.estimatedFeasible) - Number(a.estimatedFeasible) ||
-    a.knownFailedEdges - b.knownFailedEdges ||
-    a.newSegmentUpperBound - b.newSegmentUpperBound ||
-    a.estimatedTargetErrorSeconds - b.estimatedTargetErrorSeconds ||
-    a.waypointIds.length - b.waypointIds.length ||
-    a.key.localeCompare(b.key)
-  )
+  }).filter(Boolean).sort(compareRankedProposals)
 }
 
 function providerErrorCode(result) {
@@ -193,11 +206,26 @@ async function runBoundedRouteCorrections({
     waypoints: proposal.waypointIds.map(poiId => ({ poiId }))
   })))
   const entries = cache.getAllCandidates()
-  for (let index = 0; index < proposals.length && attemptedCandidates < maxCandidates; index++) {
+  const pending = new Set(proposals.map((_, index) => index))
+  const targetSeconds = requestedDurationMinutes * 60
+  const poolIds = [...new Set(verifiedWaypointPool.map(poi => poi.poiId))].sort()
+  while (pending.size > 0 && attemptedCandidates < maxCandidates) {
+    // Re-rank AFTER each builder resolves new directed edges. The initial list
+    // is only a proposal pool; it is not a fixed execution order.
+    const context = createRankingContext(session, poolIds)
+    if (!context) break
+    const next = [...pending].map(index => {
+      const proposal = proposals[index]
+      const latest = inspectSet(session, proposal.waypointIds, targetSeconds,
+        context.estimator, context.cachedCosts)
+      return latest ? { ...proposal, ...latest, index } : null
+    }).filter(candidate => candidate && candidate.newSegmentUpperBound <= remainingSegmentBudget)
+      .sort(compareRankedProposals)[0]
+    if (!next) break
+    const index = next.index
     const proposal = proposals[index]
-    const latest = inspectSet(session, proposal.waypointIds, requestedDurationMinutes * 60)
-    if (!latest || latest.newSegmentUpperBound > remainingSegmentBudget) continue
-    remainingSegmentBudget -= latest.newSegmentUpperBound
+    pending.delete(index)
+    remainingSegmentBudget -= next.newSegmentUpperBound
     attemptedCandidates++
     attemptedWaypointSets.push([...proposal.waypointIds])
     const candidate = entries[index]
