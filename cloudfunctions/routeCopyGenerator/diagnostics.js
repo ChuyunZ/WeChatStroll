@@ -18,10 +18,10 @@ const scrubOutput = (text, payload) => {
   const names = [...new Set(pois.map(p => p && p.name).filter(n => typeof n === 'string' && n.length))]
     .sort((a, b) => b.length - a.length);
   for (const name of names) safe = safe.split(name).join('【已知地点】');
-  safe = safe.replace(/https?:\/\/[^\\s"'<>]+/gi, '【链接】')
+  safe = safe.replace(/https?:\/\/[^\s"'<>]+/gi, '【链接】')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '【邮箱】')
-    .replace(/(?:\+?86[-\\s]?)?1[3-9]\\d{9}/g, '【号码】')
-    .replace(/-?\\d{1,3}\\.\\d{4,}/g, '【坐标或数字】')
+    .replace(/(?:\+?86[-\s]?)?1[3-9]\d{9}/g, '【号码】')
+    .replace(/-?\d{1,3}\.\d{4,}/g, '【坐标或数字】')
     .replace(/[A-Za-z0-9_-]{24,}/g, '【长标识】');
   // Unknown or newly invented place names may still exist in an output. Treat
   // development-only content logs as potentially sensitive, despite scrubbing.
