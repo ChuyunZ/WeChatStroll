@@ -400,15 +400,16 @@ and POI-name abbreviations. This is a correctness fix, not removal of
 factual safeguards.
 
 The devtools Cloud Test panel includes a separate opt-in
-**“验收 100 次（99% 门槛）”** mode. It reuses the same normalized Tencent POI
+**“验收 200 次（最多错 1 次）”** mode. It uses the multi-center Tencent POI
 pool and simulated route facts, serial 15-second post-response cooldown,
-and maximum 60-minute run. It sends **up to 100 model requests without
-retry**. A first `COPY_INVALID_OUTPUT`, client validation failure or
-UI deadline miss is recorded but does not stop; a **second** failure
-immediately marks `audit.verdict=FAIL`. One or zero copy failures among
-exactly 100 checked outputs gives `PASS`, purely for the measured
-automatic **acceptance** rate. Any upstream error/unknown execution or
-incomplete sample produces `INCONCLUSIVE`, and stops without retry.
+and maximum 75-minute run. The audit requires **at least 16 unique POIs**
+before it sends the first model request, then sends **up to 200 requests
+without retries**. One copy rejection or UI-deadline miss is counted;
+the **second** immediately marks `audit.verdict=FAIL`. Exactly 200 checked
+outputs with at most one copy rejection gives `PASS` (at least 199/200,
+99.5%); this is measured automatic **acceptance**, not factual proof.
+Any upstream error/unknown execution or incomplete sample produces
+`INCONCLUSIVE`, and stops without retry.
 Seed and detailed rejected cases are kept in the JSON report.
 This mode never changes the normal fail-fast buttons and never calls
 Tencent map during the benchmark.
@@ -456,7 +457,7 @@ now recognizes **exactly** the two-key, developer-only sanitized shape
 and retains the original requirement for a nonempty `poiId` on raw
 provider records. This preserves ID/coordinate minimization and does
 not broaden accepted raw provider payloads. An end-to-end in-memory
-loader-to-100-case regression covers the previously untested boundary.
+loader-to-200-case regression covers the previously untested boundary.
 No cloud function changes or deployment required.
 
 ## Development-only Tencent POI copy stress-test
@@ -466,10 +467,15 @@ The Cloud Test panel runs explicitly in WeChat DevTools only and is now
 comes directly from Tencent Maps via the existing `mapProvider`
 `nearbyPois` handler. On first button click in a Cloud Test page session,
 the developer's simulated/current `gcj02` location is requested through
-the existing location service. This triggers **one cloud-function
-`nearbyPois` request**, whose server handler makes up to **three Tencent
-Explore calls** (park, water, shoppingStreet), governed by the existing
-provider limiter and Tencent map quota. Names and allowed categories are
+the existing location service. The dev-only loader searches **five centers**:
+the selected location and approximately 700m north/south/east/west. Each
+center still uses the provider's existing **1,000m radius**, category
+filters and **page_size 6**; this permits up to **five mapProvider calls
+(15 Tencent Explore requests)** per page session. Duplicates are removed
+by normalized category and exact name. Satellite searches are best effort
+without retries; center failure aborts before model calls. The provider
+limiter and Tencent quota remain in force. This is a larger synthetic test
+input region, **not proof that every POI is reachable by a walk**. Names and allowed categories are
 extracted into memory; provider IDs, address, coordinates, raw responses
 and geometry are immediately discarded. Subsequent runs on the **same
 Cloud Test page instance** reuse that memory pool; returning to the page
@@ -555,9 +561,8 @@ CloudBase support with the UTC time and Request ID rather than making
 rapid repeat calls.
 
 This test can deplete today's development quota; **never reset database
-counters** to bypass it. One direct `mapProvider.nearbyPois` call (up to
-three Tencent Explore category calls) initializes each Cloud Test page
-session. The sampler itself makes **zero** map calls. This replaces the
+counters** to bypass it. Up to five sequential `mapProvider.nearbyPois` calls (up to 15
+Tencent Explore category calls) initialize each Cloud Test page session. The sampler itself makes **zero** map calls. This replaces the
 former requirement to generate a successful walk first, which could fail
 `ROUTE_DURATION_OUT_OF_RANGE` before exposing a POI pool. No new maps,
 walking routes or AI waypoint planning are requested per copy case.
@@ -595,3 +600,52 @@ Cloud Function, **deploy the updated function deliberately** before
 running a fresh live audit. GitHub commits alone do not deploy it.
 This prompt adjustment is a hypothesis to evaluate, **not a measured
 99% quality improvement**.
+
+
+### Audit100 completed: 99/100 accepted; C057 (2026-10-09 UTC)
+
+The last 100-case run completed with `AUDIT_100_COMPLETE`, 99 accepted
+and one `INVALID_POI` rejection at C057
+(request ID `a8669c28-a4f4-49cd-9486-68f20a2d608c`).
+The recommendation reason abbreviated a supplied 12-character park
+name as “途经口袋公园”; the validator correctly prevented display.
+The new prompt now explicitly prohibits clipped POI names in **all
+three fields** (not only titles), and permits omission of POI names.
+The 99/100 sample was a historical acceptance PASS, not a permanent
+accuracy claim.
+
+### Expanded synthetic POI test and audit200 (2026-10-10)
+
+The current test panel uses up to five `nearbyPois` centers in a
+700-meter cardinal cross around the devtools location. Each call keeps
+`radius=1000` and delegates the same 3 Explore categories to the
+existing production `mapProvider`. The provider's category page size
+remains six and the true number of distinct eligible POIs varies with
+location. The previous one-center run contained just eight unique
+POIs; multi-center sampling can improve coverage without inventing
+names or collecting map data from AI. Each simulation still contains
+only 1–8 POIs per route-copy input, as required by the current copy
+contract.
+
+At least 16 distinct sanitized POIs are required for the 200-case
+quality audit. If fewer are returned, choose another simulated
+location, **leave/re-enter the Cloud Test page**, and retry; do not send
+200 model requests using a tiny repeated pool. This threshold is a
+test-diversity guard rather than a guarantee of quality. Source POI
+names/categories remain in page memory only; no raw map response,
+coordinate, ID or POI name is persisted to the report, database or
+long-term cache. The nearest center query failure aborts; satellite
+errors are tolerated without retry when an existing usable pool is
+available. Map quota is consumed for each Explore request.
+
+Audit200 uses a 75-minute window, sends at most 200 serial model
+requests with 15 seconds between completions, and is PASS only after
+**200 assessed** with **at most one rejection**. Second rejection is
+FAIL; provider uncertainty and incomplete runs are INCONCLUSIVE.
+`schemaVersion: 1` remains unchanged; `testMode` is `audit200` and
+`audit.target` is 200. Fail-fast 30/60-minute modes are unchanged.
+Production route planning, Tencent provider configuration, rate
+limiter and walking-route code are unchanged. The AI prompt update
+requires deliberate deployment of `routeCopyGenerator`; the
+multi-center sampling and audit controls require recompile of the
+mini program. No extra cloud functions need deployment.
