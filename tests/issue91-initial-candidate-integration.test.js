@@ -66,7 +66,11 @@ test('five too-short AI singletons are preserved; bounded correction rescues a v
  expect(new Set(c.map(x=>waypointSetKey(x.waypointIds))).size).toBe(5)
  for(let i=0;i<c.length;i++)for(let j=i+1;j<c.length;j++)
   expect(conflictsBySubset(c[i].waypointIds,c[j].waypointIds)).toBe(false)
- expect(getWalkingSegment.mock.calls.length).toBeLessThanOrEqual(12)
+ // Five original singletons each settle two directed radial segments (10);
+ // correction can resolve up to 12 additional directed segments.
+ expect(getWalkingSegment.mock.calls.length).toBeLessThanOrEqual(10 + 12)
+ expect(result.routePlanningSession.getPlanningDiagnostics().segmentResolverCalls)
+   .toBe(getWalkingSegment.mock.calls.length)
  expect(result.planningMetadata).toMatchObject({attemptCount:1,replanned:false,fallbackUsed:false})
 })
 
