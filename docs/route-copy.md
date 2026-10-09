@@ -268,3 +268,47 @@ Before a separately authorized deployment/E2E, verify:
 - The 20-second UI deadline and conservative paused-queue experience.
 
 This document records local implementation, not deployment or real-device proof.
+
+## Development live-copy benchmark (manual opt-in)
+
+The existing `pages/cloud-test/cloud-test` page contains an explicit developer
+benchmark for the **copy generator only**. No new dependencies, local secrets,
+backend endpoints, Tencent Map API calls or route-planning API calls are added.
+
+1. In WeChat DevTools, open Routes normally and wait for one or more real,
+   validated routes. A previous real route is reused; do not replace it while
+   the benchmark is running.
+2. In the **AppService** Console, navigate without unloading Routes:
+   `wx.navigateTo({ url: '/pages/cloud-test/cloud-test' })`.
+3. On Cloud Test choose **30 minutes** or **60 minutes**, or Stop. Keep DevTools
+   awake with this page open. The runner is guarded by platform `devtools`.
+4. The sampler rotates `durationMinutes` (15/30/45/60/90/120), crowd
+   (low/medium/high), four environment preference orders and up to three
+   validated route fact snapshots. The actual route metrics and ordered POIs
+   are never fabricated or altered. This is an acceptance test, **not a full
+   route-planning E2E**. As with normal app operation, questionnaire target
+   duration need not equal the route's observed duration.
+5. The harness sends sequential requests, never retries, waits at least
+   120 seconds between sends, and caps each run at **16 model sends**. A
+   30-minute/60-minute setting specifies the latest start time for calls,
+   not a guarantee of a fixed number of calls. Server quotas (24/OpenID/day,
+   200 globally/day) still apply. The harness stops if it encounters an
+   auth, quota, network/unknown execution or malformed response problem.
+6. Click **复制 JSON 报告** on completion and paste it into a text file or
+   share it for analysis. An intermediate JSON checkpoint is written after each
+   send to `wx.env.USER_DATA_PATH/route-copy-benchmark.json` when filesystem
+   access works. The report contains only scenario settings, code, status and
+   optional transport Request ID; no raw route/POI, geometry, OpenID or full
+   model response. Stops or page unloads leave the current call to settle
+   without sending another.
+7. To find *why* `COPY_INVALID_OUTPUT` failed, also export/copy the CloudBase
+   `routeCopyGenerator` app logs for the same period (`ROUTE_COPY_REJECTED`,
+   `reason`, `field`, `modelTextRedacted`). Join by Request ID when
+   available, otherwise use start times. Both report and sanitized CloudBase
+   logs are needed for in-depth per-case analysis.
+
+**Do not ship the Cloud Test benchmark panel in public releases.** Disable
+`ROUTE_COPY_DEBUG_TEXT` production-side, and review log retention/access
+before sharing diagnostics. A long run can exhaust today's remaining quota;
+never delete/reset `route_copy_quotas` to extend it. This test uses billed
+`hy3` invocations and should be started only with explicit cost approval.

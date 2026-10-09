@@ -1,1 +1,5 @@
 /* pages/cloud-test/cloud-test.wxss */
+.benchmark { margin: 32rpx; padding: 24rpx; background: #fff; border-radius: 16rpx; }
+.benchmark .title { font-size: 30rpx; font-weight: 600; margin-bottom: 20rpx; }
+.benchmark-note { font-size: 23rpx; color: #667; line-height: 36rpx; margin: 16rpx 0; overflow-wrap: anywhere; }
+.benchmark button { margin: 14rpx 0; }
