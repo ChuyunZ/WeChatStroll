@@ -93,3 +93,86 @@ test('prompt distinguishes ordered visits from unverified starting points and in
   expect(prompt).toContain('routeFacts 不含 GPS 起点');
   expect(prompt).toContain('不得写');
 });
+
+const { scrubOutput, reportCopyRejection, LOG_SNIPPET_LIMIT } = require('./diagnostics');
+
+test('validation failure logs a fixed reason and redacted snippet in opted-in development only', async () => {
+  const p = payload();
+  const place = p.routeFacts.orderedPois[0].name;
+  const response = { ...copy, description: `从${place}出发，沿着园里的小径慢慢走。不妨给自己留点自由空间，保持轻松。` };
+  const modelText = JSON.stringify(response);
+  const warnings = jest.fn();
+  const generateText = jest.fn().mockResolvedValue({ text: modelText });
+  const oldStage = process.env.ROUTE_COPY_DEPLOYMENT_STAGE;
+  const oldFlag = process.env.ROUTE_COPY_DEBUG_TEXT;
+  try {
+    process.env.ROUTE_COPY_DEPLOYMENT_STAGE = 'development';
+    process.env.ROUTE_COPY_DEBUG_TEXT = '1';
+    const result = await generateCopy({ payload: p }, withQuota({
+      openid: 'secret-openid', createModel: () => ({ generateText }),
+      reportRejection: (diagnostic, text, facts) => reportCopyRejection(diagnostic, text, facts, {
+        env: process.env, logger: warnings
+      })
+    }));
+    expect(result.error.code).toBe('COPY_INVALID_OUTPUT');
+    expect(warnings).toHaveBeenCalledTimes(1);
+    const entry = warnings.mock.calls[0][1];
+    expect(entry).toMatchObject({ event: 'ROUTE_COPY_REJECTED',
+      reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description' });
+    expect(entry.modelTextRedacted).toContain('【已知地点】出发');
+    const record = JSON.stringify(warnings.mock.calls);
+    expect(record).not.toContain(place);
+    expect(record).not.toContain('secret-openid');
+    expect(record).not.toContain('latitude');
+    expect(generateText).toHaveBeenCalledTimes(1);
+  } finally {
+    if (oldStage === undefined) delete process.env.ROUTE_COPY_DEPLOYMENT_STAGE;
+    else process.env.ROUTE_COPY_DEPLOYMENT_STAGE = oldStage;
+    if (oldFlag === undefined) delete process.env.ROUTE_COPY_DEBUG_TEXT;
+    else process.env.ROUTE_COPY_DEBUG_TEXT = oldFlag;
+  }
+});
+
+test.each([
+  {}, { ROUTE_COPY_DEPLOYMENT_STAGE: 'production', ROUTE_COPY_DEBUG_TEXT: '1' },
+  { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '0' }
+])('non-development or disabled log only has code and allowed field %#', env => {
+  const mock = jest.fn();
+  reportCopyRejection({ reason: 'INVALID_ORIGIN_OR_INTERIOR',
+    field: 'description', secret: 'NEVER_LOG' },
+    JSON.stringify({ text: 'from 人民公园, email me at alice@example.com' }),
+    payload(), { env, logger: mock });
+  expect(mock.mock.calls[0][1]).toEqual({ event: 'ROUTE_COPY_REJECTED',
+    reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description' });
+  expect(JSON.stringify(mock.mock.calls)).not.toMatch(/人民公园|alice@example|NEVER_LOG/);
+});
+
+test('scrubber bounds output and masks known POI and common identifiers', () => {
+  const p = payload();
+  const place = p.routeFacts.orderedPois[0].name;
+  const original = `从${place}出发 31.231234,121.999999 user@example.com https://example.com/secret ${'很长'.repeat(900)}`;
+  const output = scrubOutput(original, p);
+  expect(output).toContain('【已知地点】');
+  expect(output).not.toContain(place);
+  expect(output).not.toContain('user@example.com');
+  expect(output).not.toContain('31.231234');
+  expect(output).not.toContain('example.com/secret');
+  expect(output.length).toBeLessThanOrEqual(LOG_SNIPPET_LIMIT);
+});
+
+test('upstream provider failure category never logs raw error or response objects', async () => {
+  const logger = jest.fn();
+  const result = await generateCopy({ payload: payload() }, withQuota({
+    openid: 'private-openid',
+    createModel: () => ({ generateText: async () => ({
+      error: { message: 'PRIVATE_POI_SECRET' }, text: 'PRIVATE_AI_OUTPUT'
+    }) }),
+    reportRejection: (reason, raw, p) => reportCopyRejection(reason, raw, p, {
+      env: { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '1' },
+      logger
+    })
+  }));
+  expect(result.error.code).toBe('COPY_INVALID_OUTPUT');
+  expect(logger.mock.calls[0][1].reason).toBe('UPSTREAM_ERROR');
+  expect(JSON.stringify(logger.mock.calls)).not.toMatch(/PRIVATE_POI_SECRET|PRIVATE_AI_OUTPUT|private-openid/);
+});

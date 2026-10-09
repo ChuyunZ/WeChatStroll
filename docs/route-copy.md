@@ -70,7 +70,35 @@ multi-step generation. There is no application retry or repair-model call.
 Success: `{ success: true, copy: { title, description, recommendationReason } }`.
 Failure: `{ success: false, error: { code, message } }`, using fixed messages.
 `COPY_EXECUTION_UNKNOWN` additionally returns `executionState: 'unknown'`.
-Raw model output and upstream error messages are never returned or logged.
+Raw model output and upstream errors are never returned to the client. Normal
+cloud logs include only a fixed rejection category (and one of the three fixed
+field names), never model transport errors, the prompt or identity.
+
+### Development-only rejection diagnostics
+
+`COPY_INVALID_OUTPUT` now emits `ROUTE_COPY_REJECTED` with a fixed `reason`
+and optional `field` (examples: `INVALID_JSON`, `INVALID_LENGTH`,
+`INVALID_ORIGIN_OR_INTERIOR`, `UNSUPPORTED_FACT`, `WRONG_MEASUREMENT`,
+`INVALID_POI`, `WRONG_POI_ORDER`). The user-facing contract and
+one-model-send/no-retry behavior are unchanged. A rejection from the existing
+deployment *before this change* cannot be reconstructed from old logs.
+
+To include a bounded, partly redacted `modelTextRedacted` snippet **only in a
+controlled development Cloud Function**, explicitly set BOTH function env vars:
+`ROUTE_COPY_DEPLOYMENT_STAGE=development` and `ROUTE_COPY_DEBUG_TEXT=1`.
+They default to OFF: deployment without both variables records category only.
+Production must not set the development stage; `production` blocks the snippet
+even if the other flag is accidentally set. No source code changes are needed
+to switch the debug snippet off; remove the debug flag before public release.
+
+The snippet masks all exact known POI names, URLs, emails, phone patterns,
+coordinate-like numbers and long identifiers, then truncates to 1,000 chars.
+This is **best-effort, not complete anonymization**: unknown or generated place
+names, location clues and user-supplied text could survive. Restrict access to
+CloudBase logs, use a short retention policy appropriate to permissions, and
+never enable content snippets where provider storage rights are unclear.
+Prompt, OpenID, route geometry, raw upstream error objects and user input are
+not logged. No changes to actual CloudBase env vars/deployment are made by this PR.
 
 ## Output checks and limits
 

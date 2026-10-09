@@ -158,3 +158,20 @@ test('Detail marks both AI-generated description and recommendation, without a r
   expect(intro).toContain('AI 生成内容可能存在不准确之处');
   expect(reason).not.toContain('ai-copy-disclaimer');
 });
+
+test.each([
+  ['不是JSON', 'INVALID_JSON'],
+  ['{}', 'INVALID_JSON_TOKENS'],
+  [JSON.stringify({ ...copy, title: '太短' }), 'INVALID_LENGTH'],
+  [JSON.stringify({ ...copy, description: '从人民公园出发，沿着园里的小径慢慢走。'.repeat(2) }), 'INVALID_ORIGIN_OR_INTERIOR'],
+  [JSON.stringify({ ...copy, description: '沿途有路灯。'.repeat(4) }), 'UNSUPPORTED_FACT'],
+  [JSON.stringify({ ...copy, description: '步行99分钟，给自己留些闲暇。'.repeat(2) }), 'WRONG_MEASUREMENT']
+])('detailed parsing explains rejection without changing fallback contract: %s', (raw, reason) => {
+  const detailed = contract.parseCopyDetailed(raw, payload());
+  expect(detailed).toMatchObject({ copy: null, reason });
+  expect(contract.parseCopy(raw, payload())).toBeNull();
+});
+test('detailed validation also preserves accepted copy unchanged', () => {
+  expect(contract.validateCopyDetailed(copy, payload())).toEqual({ copy, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(copy), payload())).toEqual({ copy, reason: null, field: null });
+});

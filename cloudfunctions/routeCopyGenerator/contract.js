@@ -117,29 +117,33 @@ function hasUnsupportedOriginOrInterior(text) {
   if (new RegExp(`(?:在|于)${interior.source}(?:散步|漫步|穿行|走走|游览)`).test(text)) return true;
   return false;
 }
-function validateCopy(copy, payload) {
-  if (!exact(copy, COPY_FIELDS)) return null;
+const rejectCopy = (reason, field = null) => ({ copy: null, reason, field });
+function validateCopyDetailed(copy, payload) {
+  if (!exact(copy, COPY_FIELDS)) return rejectCopy('INVALID_FIELDS');
   const result = {};
   for (const key of COPY_FIELDS) {
-    if (typeof copy[key] !== 'string') return null;
+    if (typeof copy[key] !== 'string') return rejectCopy('INVALID_FIELD_TYPE', key);
     const value = copy[key].trim(), [min, max] = LENGTHS[key];
-    if (size(value) < min || size(value) > max || unsafe.test(value) || /[<>]|```|https?:\/\//i.test(value)) return null;
+    if (size(value) < min || size(value) > max) return rejectCopy('INVALID_LENGTH', key);
+    if (unsafe.test(value) || /[<>]|```|https?:\/\//i.test(value)) return rejectCopy('UNSAFE_TEXT', key);
     result[key] = value;
   }
   const r = payload.routeFacts;
   // Longest names first; names can contain numbers, ordinary words or other names.
   const names = [...new Set(r.orderedPois.map(p => p.name))].sort((a, b) => b.length - a.length);
   const masked = COPY_FIELDS.map(key => names.reduce((s, name) => s.split(name).join('【已知地点】'), result[key]));
-  for (const text of masked) {
-    if (hasWrongMeasurements(text, r)) return null;
+  for (let index = 0; index < masked.length; index++) {
+    const text = masked[index], field = COPY_FIELDS[index];
+    if (hasWrongMeasurements(text, r)) return rejectCopy('WRONG_MEASUREMENT', field);
     // Unknown explicit references and recognisable named destinations only.
     // Generic wishes such as “去公园换换心情” are not factual environment claims.
     if (/\bP\d+\b/.test(text) || /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)/.test(text) ||
-        /[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(text)) return null;
-    if (hasUnsupportedClaim(text) || hasUnsupportedOriginOrInterior(text)) return null;
-    if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return null;
-    if (r.returnsToStart && /(?:无需|不必|不会|不再)返回起点|单程路线/.test(text)) return null;
-    if (/(?:向|往)(?:东|西|南|北)(?:走|行|转)|(?:左|右)转/.test(text)) return null;
+        /[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(text)) return rejectCopy('INVALID_POI', field);
+    if (hasUnsupportedClaim(text)) return rejectCopy('UNSUPPORTED_FACT', field);
+    if (hasUnsupportedOriginOrInterior(text)) return rejectCopy('INVALID_ORIGIN_OR_INTERIOR', field);
+    if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);
+    if (r.returnsToStart && /(?:无需|不必|不会|不再)返回起点|单程路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);
+    if (/(?:向|往)(?:东|西|南|北)(?:走|行|转)|(?:左|右)转/.test(text)) return rejectCopy('NAVIGATION_INSTRUCTION', field);
   }
   // Check explicit paired ordering, without treating mere mention order as visit order.
   const joined = COPY_FIELDS.map(k => result[k]).join('。');
@@ -149,7 +153,7 @@ function validateCopy(copy, payload) {
       if (first === later) continue;
       for (const clause of joined.split(/[。！？；]/)) {
         const a = clause.indexOf(later), b = clause.lastIndexOf(first);
-        if (a >= 0 && b > a && /先/.test(clause.slice(0, a)) && /再|然后|随后/.test(clause.slice(a + later.length, b))) return null;
+        if (a >= 0 && b > a && /先/.test(clause.slice(0, a)) && /再|然后|随后/.test(clause.slice(a + later.length, b))) return rejectCopy('WRONG_POI_ORDER');
       }
     }
   }
@@ -157,19 +161,21 @@ function validateCopy(copy, payload) {
   for (let i = 0; i < normalized.length; i++) {
     for (let j = i + 1; j < normalized.length; j++) {
       const a = normalized[i], b = normalized[j];
-      if ((a && a === b) || (Math.min(a.length, b.length) >= 16 && (a.includes(b) || b.includes(a)))) return null;
+      if ((a && a === b) || (Math.min(a.length, b.length) >= 16 && (a.includes(b) || b.includes(a)))) return rejectCopy('DUPLICATE_CONTENT');
     }
   }
-  return result;
+  return { copy: result, reason: null, field: null };
 }
-function parseCopy(text, payload) {
-  if (typeof text !== 'string' || text.length > 4096) return null;
-  try {
-    const parsed = JSON.parse(text);
-    // A flat three-string object has exactly six JSON string tokens. JSON.parse
-    // alone silently overwrites duplicate keys; escaped prose stays one token.
-    if ((text.match(/"(?:\\.|[^"\\])*"/g) || []).length !== 6) return null;
-    return validateCopy(parsed, payload);
-  } catch (_) { return null; }
+function validateCopy(copy, payload) { return validateCopyDetailed(copy, payload).copy; }
+function parseCopyDetailed(text, payload) {
+  if (typeof text !== 'string') return rejectCopy('INVALID_RESPONSE_TYPE');
+  if (text.length > 4096) return rejectCopy('OVERSIZED_RESPONSE');
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (_) { return rejectCopy('INVALID_JSON'); }
+  // This is a structural guard; it is not a replacement for JSON string
+  // parsing or token validation.
+  if ((text.match(/"(?:\\.|[^"\\])*"/g) || []).length !== 6) return rejectCopy('INVALID_JSON_TOKENS');
+  return validateCopyDetailed(parsed, payload);
 }
-module.exports = { MAX_INPUT_BYTES, COPY_FIELDS, LENGTHS, byteLength, normalizeHistory, normalizeInput, validateCopy, parseCopy };
+function parseCopy(text, payload) { return parseCopyDetailed(text, payload).copy; }
+module.exports = { MAX_INPUT_BYTES, COPY_FIELDS, LENGTHS, byteLength, normalizeHistory, normalizeInput, validateCopy, parseCopy, validateCopyDetailed, parseCopyDetailed };

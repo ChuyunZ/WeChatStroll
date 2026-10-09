@@ -1,5 +1,6 @@
 const cloud = require('wx-server-sdk');
-const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopy } = require('./contract');
+const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopyDetailed } = require('./contract');
+const { reportCopyRejection } = require('./diagnostics');
 const { buildPrompt } = require('./prompt');
 const { createStore } = require('./quota-store');
 const { createQuotaGate } = require('./quota');
@@ -18,7 +19,7 @@ const MESSAGES = {
 const failure = code => ({ success: false, error: { code, message: MESSAGES[code] },
   ...(code === 'COPY_EXECUTION_UNKNOWN' ? { executionState: 'unknown' } : {}) });
 
-async function generateCopy(event, { openid, createModel, reserveQuota } = {}) {
+async function generateCopy(event, { openid, createModel, reserveQuota, reportRejection = reportCopyRejection } = {}) {
   if (typeof openid !== 'string' || !openid.trim()) return failure('COPY_UNAUTHORIZED');
   if (byteLength(event) > MAX_INPUT_BYTES * 2) return failure('COPY_INVALID_INPUT');
   // Read only the business envelope; CloudBase may inject other event metadata.
@@ -44,9 +45,16 @@ async function generateCopy(event, { openid, createModel, reserveQuota } = {}) {
     // Never log upstream errors: they may echo input or model output.
     return failure('COPY_EXECUTION_UNKNOWN');
   }
-  if (!result || result.error) return failure('COPY_INVALID_OUTPUT');
-  const copy = parseCopy(result.text, payload);
-  return copy ? { success: true, copy } : failure('COPY_INVALID_OUTPUT');
+  if (!result || result.error) {
+    reportRejection({ reason: 'UPSTREAM_ERROR' }, null, payload);
+    return failure('COPY_INVALID_OUTPUT');
+  }
+  const parsed = parseCopyDetailed(result.text, payload);
+  if (!parsed.copy) {
+    reportRejection(parsed, result.text, payload);
+    return failure('COPY_INVALID_OUTPUT');
+  }
+  return { success: true, copy: parsed.copy };
 }
 exports.main = async event => {
   try {
