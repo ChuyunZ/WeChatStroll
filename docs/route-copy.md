@@ -1,5 +1,7 @@
 # Grounded route copy (Issue #86)
 
+> **Latest development validation (2026-10-09 UTC):** 200/200 hy3 responses accepted, 0 rejected, 0 provider/transport stops, `audit.verdict=PASS`, 21 real Tencent POI candidates; audit seed `1791573368540`. This is a single **simulated-route copy-contract** run, not a real-route factual accuracy claim. See the final audit section and pre-merge checklist below. Prior audit100 failures described later are retained as historical debugging evidence.
+
 Route copy is a presentation-only enhancement after a real route has been
 validated and displayed. Hunyuan `hy3` freely writes `title`, `description` and
 `recommendationReason`; it does not select templates or change route facts.
@@ -652,3 +654,64 @@ limiter and walking-route code are unchanged. The AI prompt update
 requires deliberate deployment of `routeCopyGenerator`; the
 multi-center sampling and audit controls require recompile of the
 mini program. No extra cloud functions need deployment.
+
+
+### Audit200 live run: 200/200 accepted (2026-10-09 UTC)
+
+A controlled WeChat DevTools audit produced the following JSON evidence:
+
+| Field | Result |
+| --- | --- |
+| `testMode` | `audit200` |
+| `startedAt` | `2026-10-09T19:16:08.564Z` |
+| `endedAt` | `2026-10-09T20:16:54.985Z` |
+| `seed` | `1791573368540` |
+| `poolSize` | **21** sanitized Tencent POI names/categories |
+| `summary` | **200 total, 200 accepted, 0 failed, 0 rejected** |
+| `stopReason` | `AUDIT_200_COMPLETE` |
+| `audit` | `assessed=200`, `acceptanceFailures=0`, `verdict=PASS` |
+| Response times | 2.598–7.254 seconds; mean 3.291 seconds |
+| Route types | 72 loop / 64 out-and-back / 64 point-to-point |
+| POI-count coverage | Each count from 1 through 8 occurs exactly 25 times |
+
+All 200 record IDs `C001`–`C200` appear once in order; each record
+is `status=accepted`, `code=OK`. No fallback/validator error or
+rate-limit interruption appears **in this run**. The 21-POI pool is
+from five map-search centers, not 21 independently verified walkable
+waypoints. The recorded `distanceMeters` and `durationSeconds`
+are simulated. The acceptance result verifies structured output,
+contract compliance and model availability for this scenario; successful
+model text is intentionally absent from the redacted report. It **cannot**
+establish nuanced wording quality or 100% true-route factual accuracy.
+
+#### Pre-merge release checklist
+
+- [x] `develop` is an ancestor of the feature branch (GitHub compare
+  reports **behind_by=0**) and GitHub reports the PR as mergeable.
+- [x] CI at `cd08df2`: **79 test suites / 1,810 tests, all passed**.
+- [x] Live simulated-input audit200: **200/200 accepted**, 21-POI pool.
+- [x] No changed production `mapProvider` / walking-route functions;
+  five-center collection is dev-only input for Cloud Test.
+- [ ] **Current-revision mini-program smoke:** with a validated real
+  route, verify fallback appears immediately, AI copy subsequently appears
+  on Routes and Detail with the expected labels/disclaimer; record screenshots
+  or concise outcome.
+- [ ] **Edit/cancel/confirm and stale-response smoke:** preview changes
+  must not show original AI copy; cancel restores prior accepted copy;
+  confirm generates appropriate new copy (within session budget).
+- [ ] **Failure/lifecycle smoke:** force a rejected/unavailable copy in
+  a controlled *development* run, verify deterministic fallback and no
+  stale text after background/resume or route/page change. Do not reset
+  quota counters or retry unknown model execution.
+- [ ] **Operational/privacy gate before public release:** confirm CloudBase
+  `routeCopyGenerator` deployment revision, its 60-second timeout, required
+  `route_copy_quotas` collection access, production quota limits,
+  and platform/provider model-log retention settings. Ensure production
+  does **not** set `ROUTE_COPY_DEPLOYMENT_STAGE=development`
+  or `ROUTE_COPY_DEBUG_TEXT=1`. These checks require console evidence;
+  a passing synthetic audit cannot verify them.
+
+Historical audit100 failure notes above are retained for debugging, not
+present-day release status. PR merge is **not** Cloud Function deployment;
+publish the reviewed revision deliberately and keep any release verification
+separate from this code merge.
