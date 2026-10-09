@@ -32,7 +32,9 @@ function createSessionDurationEstimator({ searchData, cachedCosts }) {
   const nodesByKey = new Map([[JSON.stringify(['start', start.nodeId]), start],
     ...Array.from(nodes.values(), node => [JSON.stringify(['waypoint', node.nodeId]), node])])
   const costs = new Map(cachedCosts.map(cost => [cost.edgeKey, cost]))
-  const ratios = []
+  // Outbound radial walks and inter-POI paths sample different street geometry.
+  // Do not let long start-to-POI detours inflate every unknown POI-to-POI edge.
+  const ratiosByType = { radial: [], betweenPois: [] }
   for (const [key, cost] of costs) {
     if (!cost || cost.success !== true || !Number.isFinite(cost.durationSeconds) || cost.durationSeconds <= 0) continue
     let ends
@@ -45,15 +47,25 @@ function createSessionDurationEstimator({ searchData, cachedCosts }) {
     if (distance < MIN_CALIBRATION_DISTANCE_METERS) continue
     const ratio = cost.durationSeconds / (distance / DEFAULT_SPEED_METERS_PER_SECOND)
     // Extreme detours and anomalous segments must not set the prior for other streets.
-    if (ratio >= 0.6 && ratio <= 4.5) ratios.push(ratio)
+    if (ratio >= 0.6 && ratio <= 4.5) {
+      const keyType = from.nodeType === 'start' || to.nodeType === 'start'
+        ? 'radial' : 'betweenPois'
+      ratiosByType[keyType].push(ratio)
+    }
   }
-  ratios.sort((a, b) => a - b)
-  const typical = median(ratios)
-  const influence = ratios.length / (ratios.length + CALIBRATION_PRIOR_WEIGHT)
-  const correctionRatio = typical === null ? 1 : clamp(0.8, 2.5, 1 + influence * (typical - 1))
-  // Conservative *heuristic* spread, not a calibrated statistical confidence interval.
-  // Avoid narrowing drastically even with many samples because street geometry varies.
-  const relativeSpread = clamp(0.55, 1.1, 1.1 - ratios.length * 0.05)
+  function calibration(samples) {
+    const ratios = [...samples].sort((a, b) => a - b)
+    const typical = median(ratios)
+    const influence = ratios.length / (ratios.length + CALIBRATION_PRIOR_WEIGHT)
+    return {
+      count: ratios.length,
+      correctionRatio: typical === null ? 1 : clamp(0.8, 2.5, 1 + influence * (typical - 1)),
+      // Heuristic uncertainty; NOT a statistical confidence interval.
+      relativeSpread: clamp(0.55, 1.1, 1.1 - ratios.length * 0.05)
+    }
+  }
+  const radial = calibration(ratiosByType.radial)
+  const betweenPois = calibration(ratiosByType.betweenPois)
 
   function estimate(order, routeType, targetSeconds, minSeconds, maxSeconds) {
     const traversal = buildTraversalNodes(start, order.map(id => nodes.get(id)), routeType)
@@ -74,10 +86,12 @@ function createSessionDurationEstimator({ searchData, cachedCosts }) {
         highSeconds += cost.durationSeconds
       } else {
         unresolvedEdges++
-        const seconds = straightLineMeters(from, to) / DEFAULT_SPEED_METERS_PER_SECOND * correctionRatio
+        const prior = from.nodeType === 'start' || to.nodeType === 'start'
+          ? radial : betweenPois
+        const seconds = straightLineMeters(from, to) / DEFAULT_SPEED_METERS_PER_SECOND * prior.correctionRatio
         durationSeconds += seconds
-        lowSeconds += seconds * (1 - relativeSpread * 0.65)
-        highSeconds += seconds * (1 + relativeSpread * 1.4)
+        lowSeconds += seconds * (1 - prior.relativeSpread * 0.65)
+        highSeconds += seconds * (1 + prior.relativeSpread * 1.4)
       }
     }
     const exact = unresolvedEdges === 0 && failedEdges === 0
@@ -98,7 +112,10 @@ function createSessionDurationEstimator({ searchData, cachedCosts }) {
     return { durationSeconds, lowSeconds, highSeconds, failedEdges, unresolvedEdges,
       exact, feasible, tier, quality, intervalGap, overlapFraction }
   }
-  return { estimate, calibrationSampleCount: ratios.length, correctionRatio }
+  return { estimate, calibrationSampleCount: radial.count + betweenPois.count,
+    correctionRatio: betweenPois.correctionRatio,
+    radialCorrectionRatio: radial.correctionRatio,
+    interPoiCalibrationSampleCount: betweenPois.count }
 }
 
 module.exports = { createSessionDurationEstimator, straightLineMeters }

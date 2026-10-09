@@ -137,3 +137,23 @@ test('dynamic ranking changes the next choice when the first candidate resolves 
   assert.equal(outcome.attemptedCandidates,2)
   assert.equal(outcome.remainingSegmentBudget,0)
 })
+
+
+test('radial detours cannot be used as a calibration prior for unknown POI-to-POI segments', () => {
+  const s = session()
+  const a = nodes.get('A'), b = nodes.get('B')
+  const radialA = straightLineMeters(start, a) / 1.4
+  const radialB = straightLineMeters(start, b) / 1.4
+  for (const [id,seconds] of [['A',radialA*2.8],['B',radialB*2.5]]) {
+    s.settle('START',id,seconds)
+    s.settle(id,'START',seconds)
+  }
+  const model = createSessionDurationEstimator({
+    searchData:s.getWaypointSearchData(pois.map(p=>p.poiId)),
+    cachedCosts:s.getCachedSegmentCosts()
+  })
+  expect(model.calibrationSampleCount).toBe(4)
+  expect(model.radialCorrectionRatio).toBeGreaterThan(1)
+  expect(model.interPoiCalibrationSampleCount).toBe(0)
+  expect(model.correctionRatio).toBe(1)
+})
