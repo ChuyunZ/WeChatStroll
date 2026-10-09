@@ -45,13 +45,17 @@ async function generateCopy(event, { openid, createModel, reserveQuota, reportRe
     // Never log upstream errors: they may echo input or model output.
     return failure('COPY_EXECUTION_UNKNOWN');
   }
+  // Diagnostic failures must not change the fail-closed model contract.
+  const safelyReport = (reason, raw) => {
+    try { reportRejection(reason, raw, payload); } catch (_) { /* Logging is best effort. */ }
+  };
   if (!result || result.error) {
-    reportRejection({ reason: 'UPSTREAM_ERROR' }, null, payload);
+    safelyReport({ reason: 'UPSTREAM_ERROR' }, null);
     return failure('COPY_INVALID_OUTPUT');
   }
   const parsed = parseCopyDetailed(result.text, payload);
   if (!parsed.copy) {
-    reportRejection(parsed, result.text, payload);
+    safelyReport(parsed, result.text);
     return failure('COPY_INVALID_OUTPUT');
   }
   return { success: true, copy: parsed.copy };

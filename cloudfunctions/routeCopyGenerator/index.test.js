@@ -176,3 +176,13 @@ test('upstream provider failure category never logs raw error or response object
   expect(logger.mock.calls[0][1].reason).toBe('UPSTREAM_ERROR');
   expect(JSON.stringify(logger.mock.calls)).not.toMatch(/PRIVATE_POI_SECRET|PRIVATE_AI_OUTPUT|private-openid/);
 });
+
+test('diagnostic logger exceptions never alter fallback error or trigger another AI call', async () => {
+  const generateText = jest.fn().mockResolvedValue({ text: 'not json' });
+  const result = await generateCopy({ payload: payload() }, withQuota({
+    openid: 'trusted', createModel: () => ({ generateText }),
+    reportRejection: () => { throw new Error('log transport failed'); }
+  }));
+  expect(result.error.code).toBe('COPY_INVALID_OUTPUT');
+  expect(generateText).toHaveBeenCalledTimes(1);
+});

@@ -164,7 +164,7 @@ test.each([
   ['{}', 'INVALID_JSON_TOKENS'],
   [JSON.stringify({ ...copy, title: '太短' }), 'INVALID_LENGTH'],
   [JSON.stringify({ ...copy, description: '从人民公园出发，沿着园里的小径慢慢走。'.repeat(2) }), 'INVALID_ORIGIN_OR_INTERIOR'],
-  [JSON.stringify({ ...copy, description: '沿途有路灯。'.repeat(4) }), 'UNSUPPORTED_FACT'],
+  [JSON.stringify({ ...copy, description: '沿途有路灯。'.repeat(6) }), 'UNSUPPORTED_FACT'],
   [JSON.stringify({ ...copy, description: '步行99分钟，给自己留些闲暇。'.repeat(2) }), 'WRONG_MEASUREMENT']
 ])('detailed parsing explains rejection without changing fallback contract: %s', (raw, reason) => {
   const detailed = contract.parseCopyDetailed(raw, payload());
