@@ -1355,25 +1355,33 @@ async function generateRoutes(
         attempt, candidateCount: plan.candidates.length,
         emptyBatch: plan.candidates.length === 0
       })
-      const prepared = attempt === 1
-        ? rankInitialCandidates({
+      // Shadow-only initial quality experiment. Real WeChat DevTools E2E
+      // (Guangzhou, 30 min out_and_back) found that geometrically attractive
+      // pairs failed validation and delayed a valid 3rd AI singleton.
+      // Do not reorder/discard ANY of the five AI slots on uncertain estimates.
+      // Learn only anonymized proposal counts; correction still handles true
+      // failures after all available AI candidates have been attempted.
+      if (attempt === 1) {
+        try {
+          const shadow = rankInitialCandidates({
             candidates: plan.candidates, verifiedWaypointPool: nearbyPois,
             location, preferences
           })
-        : { candidates: plan.candidates,
-            origins: plan.candidates.map(() => 'ai'),
-            applied: false, supplementalPairCount: 0 }
-      if (prepared.applied) {
-        console.log('[Initial Candidate Quality] Summary:', {
-          inputCandidates: plan.candidates.length,
-          selectedCandidates: prepared.candidates.length,
-          supplementedPairs: prepared.supplementalPairCount,
-          geometryOnly: true
-        })
+          if (shadow.applied) {
+            console.log('[Initial Candidate Quality] Shadow summary:', {
+              inputCandidates: plan.candidates.length,
+              suggestedPairs: shadow.supplementalPairCount,
+              appliedPairs: 0,
+              preservesOriginalAiOrder: true,
+              geometryOnly: true
+            })
+          }
+        } catch (_) {
+          // Optional geometry estimator must never delay or break generation.
+          console.log('[Initial Candidate Quality] Shadow skipped: ESTIMATOR_UNAVAILABLE')
+        }
       }
-      const candidateCache = createWaypointCandidateCache(prepared.candidates)
-      const sourceBySet = new Map(prepared.candidates.map((item,index) =>
-        [waypointSetKey(item.waypoints.map(poi => poi.poiId)), prepared.origins[index]]))
+      const candidateCache = createWaypointCandidateCache(plan.candidates)
       // Settle repeated entries before execution, including alternatives after a success.
       const unseen = []
       const responseSets = new Set()
@@ -1400,9 +1408,7 @@ async function generateRoutes(
           throw createRouteGenerationError(result.error, 'Route service is temporarily unavailable.')
         }
         if (result.success) {
-          const source = sourceBySet.get(key) === 'deterministic'
-            ? 'deterministic-initial'
-            : (attempt === 1 ? 'ai' : 'ai-replanned')
+          const source = attempt === 1 ? 'ai' : 'ai-replanned'
           logCandidateSummary(candidateCache)
           console.log('[Agent Planning] Success:', { attempt, source })
           console.log('[Agent Planning] First route diagnostics:', {

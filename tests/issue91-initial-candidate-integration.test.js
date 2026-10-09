@@ -46,10 +46,10 @@ beforeEach(()=>{
   polyline:[from,to].map(({latitude,longitude})=>({latitude,longitude}))
  }))
 })
-test('first AI batch of five too-short singletons is supplemented with nonoverlapping two-POI route before unnecessary AI replan',async()=>{
+test('five too-short AI singletons are preserved; bounded correction rescues a valid pair without another AI call',async()=>{
  const result=await generateRoutes(selected)
  expect(result.status).toBe('success')
- expect(result.source).toBe('deterministic-initial')
+ expect(result.source).toBe('deterministic-correction')
  expect(result.routes).toHaveLength(1)
  expect(result.routes[0].recommendedWaypointIds).toHaveLength(2)
  expect(result.routes[0].durationSeconds).toBe(1660)
@@ -61,10 +61,31 @@ test('first AI batch of five too-short singletons is supplemented with nonoverla
  expect(callCloudFunction.mock.calls.filter(([name])=>name==='mapProvider')).toHaveLength(1)
  const c=result.waypointCandidateCache.getAllCandidates()
  expect(c).toHaveLength(5)
- expect(c.filter(x=>x.waypointIds.length===2).length).toBeGreaterThan(0)
+ expect(c.map(x=>x.waypointIds)).toEqual([['A'],['B'],['C'],['D'],['E']])
+ expect(c.map(x=>x.status)).toEqual(['failed','failed','failed','failed','failed'])
  expect(new Set(c.map(x=>waypointSetKey(x.waypointIds))).size).toBe(5)
  for(let i=0;i<c.length;i++)for(let j=i+1;j<c.length;j++)
   expect(conflictsBySubset(c[i].waypointIds,c[j].waypointIds)).toBe(false)
- expect(getWalkingSegment.mock.calls.length).toBeLessThanOrEqual(6)
+ expect(getWalkingSegment.mock.calls.length).toBeLessThanOrEqual(12)
  expect(result.planningMetadata).toMatchObject({attemptCount:1,replanned:false,fallbackUsed:false})
+})
+
+test('a valid third AI singleton is never delayed or discarded by unreliable geometry pair estimates',async()=>{
+ getWalkingSegment.mockImplementation(async (from,to)=>{
+  const touchesC=from.nodeId==='C'||to.nodeId==='C'
+  return {success:true,durationSeconds:touchesC?900:400,distanceMeters:500,
+    polyline:[from,to].map(({latitude,longitude})=>({latitude,longitude}))}
+ })
+ const result=await generateRoutes(selected)
+ expect(result.status).toBe('success')
+ expect(result.source).toBe('ai')
+ expect(result.routes[0].candidateWaypointIds).toEqual(['C'])
+ expect(result.routes[0].durationSeconds).toBe(1800)
+ expect(getWalkingSegment).toHaveBeenCalledTimes(6)
+ expect(result.routePlanningSession.getPlanningDiagnostics().segmentResolverCalls).toBe(6)
+ expect(result.waypointCandidateCache.getAllCandidates().map(x=>x.waypointIds))
+   .toEqual([['A'],['B'],['C'],['D'],['E']])
+ expect(result.waypointCandidateCache.getAllCandidates().map(x=>x.status))
+   .toEqual(['failed','failed','success','unused','unused'])
+ expect(callCloudFunction.mock.calls.filter(([name])=>name==='aiRoutePlanner')).toHaveLength(1)
 })
