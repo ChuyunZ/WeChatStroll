@@ -692,13 +692,15 @@ establish nuanced wording quality or 100% true-route factual accuracy.
 - [x] Live simulated-input audit200: **200/200 accepted**, 21-POI pool.
 - [x] No changed production `mapProvider` / walking-route functions;
   five-center collection is dev-only input for Cloud Test.
-- [ ] **Current-revision mini-program smoke:** with a validated real
-  route, verify fallback appears immediately, AI copy subsequently appears
-  on Routes and Detail with the expected labels/disclaimer; record screenshots
-  or concise outcome.
-- [ ] **Edit/cancel/confirm and stale-response smoke:** preview changes
-  must not show original AI copy; cancel restores prior accepted copy;
-  confirm generates appropriate new copy (within session budget).
+- [x] **Real-route UI smoke (developer-confirmed):** a real validated
+  route initially displays deterministic fallback and then accepted AI text
+  on Routes and Detail, with the expected labels/disclaimer. This behavior
+  has already been manually verified; no duplicate walkthrough required.
+  Confirmation is user-reported, not a screenshot attached to this PR.
+- [x] **Route edit smoke (developer-confirmed):** prior manual E2E covered
+  route preview, cancel and confirm with correct copy restoration/replacement;
+  no repeat needed for that ordinary flow. The separate lifecycle/failure
+  check below still covers uncertain in-flight callbacks/background changes.
 - [ ] **Failure/lifecycle smoke:** force a rejected/unavailable copy in
   a controlled *development* run, verify deterministic fallback and no
   stale text after background/resume or route/page change. Do not reset
