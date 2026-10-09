@@ -22,7 +22,16 @@ function normalizePoiPool(pool) {
   if (!Array.isArray(pool)) return [];
   const ids = new Set(), output = [];
   for (const poi of pool) {
-    if (!poi || typeof poi.poiId !== 'string' || !poi.poiId.trim() ||
+    // Direct Tencent map responses have poiId. The development-only POI
+    // loader intentionally strips IDs/coordinates before caching, yielding
+    // the exact sanitized {name, category} form. Both are valid inputs;
+    // reject incomplete/raw-looking objects with missing IDs.
+    const sanitized = poi && typeof poi === 'object' && !Array.isArray(poi) &&
+      Object.keys(poi).length === 2 &&
+      Object.prototype.hasOwnProperty.call(poi, 'name') &&
+      Object.prototype.hasOwnProperty.call(poi, 'category');
+    if (!poi || (!sanitized &&
+        (typeof poi.poiId !== 'string' || !poi.poiId.trim())) ||
         typeof poi.name !== 'string' || !poi.name || poi.name !== poi.name.trim() ||
         [...poi.name].length > 120 || BAD_TEXT.test(poi.name) ||
         !CATEGORIES.has(poi.category)) continue;

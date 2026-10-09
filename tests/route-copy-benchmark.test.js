@@ -62,6 +62,28 @@ test('filters structurally invalid or duplicated map POIs and never accepts AI r
   expect(generateCases({ poiPool, count: 9, seed: 46 })).not.toEqual(a);
 });
 
+test('normalized sanitized {name,category} POIs are accepted without restoring provider IDs or coords', () => {
+  const sanitized = normalizePoiPool(poiPool);
+  expect(sanitized).toEqual(poiPool.map(({ name, category }) => ({ name, category })));
+  const casesFromSanitized = generateCases({ poiPool: sanitized, count: 100, seed: 8642 });
+  expect(casesFromSanitized).toHaveLength(100);
+  expect(casesFromSanitized[0].scenario.poolSize).toBe(18);
+  expect(casesFromSanitized.every(c => c.payload.routeFacts.orderedPois.length > 0)).toBe(true);
+  expect(JSON.stringify(casesFromSanitized)).not.toContain('map-poi-');
+  expect(JSON.stringify(casesFromSanitized)).not.toContain('latitude');
+  expect(JSON.stringify(casesFromSanitized)).not.toContain('longitude');
+
+  // Missing POI ID is only allowed for the exact sanitized two-field
+  // representation. Raw/incomplete map objects must remain rejected.
+  expect(normalizePoiPool([
+    { name: '应被接受的公园', category: 'park' },
+    { name: '不能接受的公园', category: 'park', latitude: 31.2 },
+    { name: '不能接受的公园', category: 'park', address: 'raw address' },
+    { name: '不能接受的公园', category: 'park', poiId: '' },
+    { name: '不能接受的公园', category: 'park', raw: true }
+  ])).toEqual([{ name: '应被接受的公园', category: 'park' }]);
+});
+
 test('first output validation failure stops immediately, including redacted developer evidence', async () => {
   let t = Date.UTC(2026, 9, 9), sent = 0;
   const seen = [];

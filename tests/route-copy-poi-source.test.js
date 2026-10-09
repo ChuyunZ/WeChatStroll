@@ -83,3 +83,28 @@ test('source never imports planner/Walking APIs and page caches sanitized POI po
   expect(page).toContain('this._benchmarkPoiPool = null;');
   expect(page).not.toContain('getCurrentPages()');
 });
+
+// Integration regression for first-run Cloud Test after compiling:
+// POI loader deliberately strips provider IDs, then generator must still
+// produce 100 usable route-copy requests from those safe in-memory records.
+test('first-click POI loader output feeds the 100-case benchmark without Routes page', async () => {
+  const { generateCases } = require('../miniprogram/services/route-copy-benchmark');
+  const pool = await loadBenchmarkPoiPool({
+    getLocation: async () => point,
+    call: async () => ({ success: true, poisByCategory: group })
+  });
+  expect(pool).toEqual([
+    { name: '人民公园', category: 'park' },
+    { name: '河边绿地', category: 'water' },
+    { name: '商圈步行街', category: 'shoppingStreet' }
+  ]);
+  const inputs = generateCases({ poiPool: pool, seed: 1791500000000, count: 100 });
+  expect(inputs).toHaveLength(100);
+  expect(inputs[0].scenario).toMatchObject({
+    inputMode: 'simulated-from-tencent-poi-pool', poolSize: 3, sampledPoiCount: 1
+  });
+  expect(inputs.every(item => item.payload.routeFacts.orderedPois.length > 0)).toBe(true);
+  expect(inputs.some(item => item.payload.routeFacts.orderedPois.length === 3)).toBe(true);
+  expect(JSON.stringify(inputs)).not.toContain('poiId');
+  expect(JSON.stringify(inputs)).not.toContain('private-address');
+});

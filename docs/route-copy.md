@@ -446,6 +446,19 @@ with Request ID `3bb71232-5223-40c5-83df-fe497643c0f0` and timestamp
 `2026-10-09T03:53:58.834Z` rather than treating 429 as a copy-quality
 failure or increasing the test's request rate.
 
+### Direct Cloud Test POI normalization regression
+
+The first independent Cloud Test implementation reached Tencent POI discovery
+but could not produce benchmark cases. Its POI loader intentionally stored
+only `{name, category}`, while the sampler's legacy `normalizePoiPool()`
+still required `poiId` and dropped the sanitized records. The sampler
+now recognizes **exactly** the two-key, developer-only sanitized shape
+and retains the original requirement for a nonempty `poiId` on raw
+provider records. This preserves ID/coordinate minimization and does
+not broaden accepted raw provider payloads. An end-to-end in-memory
+loader-to-100-case regression covers the previously untested boundary.
+No cloud function changes or deployment required.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only and is now
