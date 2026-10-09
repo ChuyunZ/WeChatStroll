@@ -278,8 +278,8 @@ test('audit200 times out as INCONCLUSIVE rather than declaring a false pass', as
   let clock = Date.UTC(2026, 9, 9), sent = 0;
   const report = await runBenchmark({
     minutes: AUDIT_WINDOW_MINUTES, cases: cases(200), audit200: true,
-    now: () => clock, sleep: async ms => { clock += ms; },
-    call: async () => { sent++; clock += 50000; return copyResult; }
+    now: () => clock, sleep: async () => { clock += 65000; },
+    call: async () => { sent++; clock += 1000; return copyResult; }
   });
   expect(sent).toBeLessThan(200);
   expect(report.stopReason).toBe('TIME_WINDOW_ENDED');
