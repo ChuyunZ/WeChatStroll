@@ -30,8 +30,9 @@
 <view class="benchmark">
   <view class="title">AI 文案自动测试（仅开发工具）</view>
   <view class="benchmark-note">
-    先在 Routes 生成一条路线，让地图 POI 搜索候选池进入内存；再从 Console 运行 wx.navigateTo({url:'/pages/cloud-test/cloud-test'})。
-    从地图原始 POI 候选池随机抽取 1–8 个地点，组合模拟路线及不同偏好。不再请求地图、Walking API 或 AI 路线规划。
+    编译后直接进入 Cloud Test，无需先生成 Routes。点击测试按钮，先使用开发者工具模拟定位，向现有 mapProvider 获取一次真实腾讯 POI 候选池（公园、水边、商街各一类，最多三类 Explore 查询）。
+    本页后续测试复用内存 POI 池；重新编译或离开页面后需重新获取。不调用 Walking API 或 AI 路线规划。
+    每轮随机抽取 1–8 个地图 POI 并组合模拟路线事实及不同问卷偏好；模拟路线不保证实际可走。
     hy3 串行测试、每次结束后等待约 15 秒（降低资源池限流风险），每轮最多 500 次；
     仅开发环境每日单用户上限 1000 次、全局 2000 次（UTC 日期）。
     常规模式遇到首次失败即停；100 次验收模式允许最多一次文案失败，出现第二次即 FAIL。
@@ -48,5 +49,5 @@
   <view class="benchmark-note">{{benchmarkMessage}}</view>
   <view class="benchmark-note" wx:if="{{benchmarkFile}}">报告本地路径：{{benchmarkFile}}</view>
   <button bindtap="copyBenchmarkReport" disabled="{{!benchmarkHasReport}}">复制 JSON 报告</button>
-  <view class="benchmark-note">遇到第一条失败自动停止。报告直接包含原因、字段、脱敏后的模型回复及安全的路线事实摘要；不包含 POI 真实名称、坐标或原始 Prompt。详细诊断需要开发云函数设置已有的两个 Debug 环境变量。生产环境不会返回这些内容。</view>
+  <view class="benchmark-note">首次失败停止模式遇到第一条失败即停；100 次验收模式第二条文案失败判 FAIL，上游异常仍立即停。报告仅包含原因、字段、脱敏文案及安全的路线事实摘要，不保存 POI 真实名称、坐标或原始 Prompt。详细诊断需要开发云函数已有的两个 Debug 环境变量。生产环境禁止运行测试。</view>
 </view>

@@ -140,16 +140,19 @@ test('client validation failure and delayed accepted output both count as failur
   expect(invalid).not.toHaveProperty('copy');
 });
 
-test('devtools-only page uses the map POI candidate pool, never re-fetches from Tencent', () => {
+test('devtools-only page loads a direct Tencent POI pool once, independent of Routes', () => {
   const fs = require('fs'), path = require('path');
   const pg = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/cloud-test/cloud-test.js'), 'utf8');
   const ui = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/cloud-test/cloud-test.wxml'), 'utf8');
   expect(pg).toContain("platform !== 'devtools'");
-  expect(pg).toContain('poiPool: routesPage._verifiedWaypointPool');
-  expect(pg).toContain('count: MAX_SENDS');
+  expect(pg).toContain('this._benchmarkPoiPool || await loadBenchmarkPoiPool()');
+  expect(pg).toContain('this._benchmarkPoiPool = poiPool');
+  expect(pg).not.toContain('getCurrentPages()');
+  expect(pg).not.toContain('_verifiedWaypointPool');
+  expect(pg).toContain('poiPool, seed, count: MAX_SENDS');
   expect(MAX_SENDS).toBe(500);
   expect(pg).toContain("name: 'routeCopyGenerator'");
-  expect(pg).not.toMatch(/nearbyPois\s*\(/);
+  expect(pg).not.toMatch(/(?:walkingRoute|aiRoutePlanner|generateRoutes)\s*\(/);
   expect(ui).toContain('运行 30 分钟');
   expect(ui).toContain('运行 60 分钟');
   expect(ui).toContain('复制 JSON 报告');

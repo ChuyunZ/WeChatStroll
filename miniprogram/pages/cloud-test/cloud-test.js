@@ -1,4 +1,5 @@
 const { generateCases, runBenchmark, MAX_SENDS } = require('../../services/route-copy-benchmark');
+const { loadBenchmarkPoiPool } = require('../../services/route-copy-poi-source');
 
 Page({
   data: {
@@ -28,20 +29,8 @@ Page({
     if (platform !== 'devtools') {
       this.setData({ benchmarkMessage: '仅允许在微信开发者工具运行' }); return;
     }
-    const routesPage = getCurrentPages().find(p => p.route === 'pages/routes/routes');
-    if (!routesPage || !Array.isArray(routesPage._verifiedWaypointPool) ||
-        !routesPage._verifiedWaypointPool.length) {
-      this.setData({ benchmarkMessage: '请先生成真实路线，取得地图搜索的 POI 候选池，然后进入本页' });
-      return;
-    }
-    const seed = Date.now();
-    const cases = generateCases({
-      poiPool: routesPage._verifiedWaypointPool, seed, count: MAX_SENDS
-    });
-    if (!cases.length) {
-      this.setData({ benchmarkMessage: '没有符合文案契约的地图 POI 名称及类别，未发送请求' });
-      return;
-    }
+    // Start immediately from Cloud Test after compiling the mini program.
+    // No Routes Page or route-validation success is required.
     const control = { stopped: false };
     this._benchmarkControl = control;
     this._benchmarkRunning = true;
@@ -58,11 +47,27 @@ Page({
     };
     const begin = Date.now();
     this.setData({ benchmarkRunning: true, benchmarkCompleted: 0,
-      benchmarkFailures: 0, benchmarkMessage: audit100
-        ? '100 次验收：允许至多 1 次文案拒绝，第二次立即不达标；上游异常仍立即停止'
-        : '随机组合地图 POI + 模拟路线事实；首次失败立即停止',
+      benchmarkFailures: 0,
+      benchmarkMessage: this._benchmarkPoiPool
+        ? '复用本页内存中的腾讯 POI 池，准备文案测试…'
+        : '正在获取定位和腾讯地图 POI（仅一次），不生成步行路线…',
       benchmarkFile: path, benchmarkHasReport: false });
     try {
+      const poiPool = this._benchmarkPoiPool || await loadBenchmarkPoiPool();
+      if (control.stopped || this._unloaded) {
+        if (!this._unloaded) this.setData({ benchmarkMessage: '已停止，未发起 AI 文案测试' });
+        return;
+      }
+      this._benchmarkPoiPool = poiPool; // only sanitized {name, category}
+      const seed = Date.now();
+      const cases = generateCases({ poiPool, seed, count: MAX_SENDS });
+      if (!cases.length) {
+        this.setData({ benchmarkMessage: '腾讯 POI 池无符合文案契约的数据；未发送 AI 请求' });
+        return;
+      }
+      this.setData({ benchmarkMessage: audit100
+        ? `已准备 ${poiPool.length} 个真实 POI；100 次验收开始，第二次文案拒绝即 FAIL`
+        : `已准备 ${poiPool.length} 个真实 POI；首次文案失败即停止` });
       const report = await runBenchmark({
         minutes, cases, audit100, seed,
         shouldStop: () => control.stopped || this._unloaded,
@@ -92,8 +97,19 @@ Page({
       console.log('[Route Copy Benchmark] Finished:', {
         summary: report.summary, stopReason: report.stopReason, file: path
       });
-    } catch (_) {
-      if (!this._unloaded) this.setData({ benchmarkMessage: '自动测试未启动或遇到本地错误；请查看 Console' });
+    } catch (error) {
+      // Never display/log raw location, provider responses or exception text.
+      if (!this._unloaded) {
+        const code = error && error.code;
+        const locationIssue = ['PERMISSION_DENIED', 'LOCATION_TIMEOUT',
+          'LOCATION_FAILED', 'BENCHMARK_LOCATION_INVALID'].includes(code);
+        const empty = code === 'BENCHMARK_POI_EMPTY';
+        this.setData({ benchmarkMessage: locationIssue
+          ? '定位不可用：请检查开发者工具的模拟位置和定位权限，未发送 AI 请求'
+          : empty
+            ? '腾讯地图未返回可用 POI：请换一个模拟位置再试，未发送 AI 请求'
+            : '腾讯 POI 获取失败或测试初始化异常；未发送新的 AI 测试请求' });
+      }
     } finally {
       this._benchmarkRunning = false;
       this._benchmarkControl = null;
@@ -114,6 +130,8 @@ Page({
   },
 
   onUnload() {
+    // POI names are only kept within this page instance, not persisted.
+    this._benchmarkPoiPool = null;
     this._unloaded = true;
     if (this._benchmarkControl) this._benchmarkControl.stopped = true;
   },

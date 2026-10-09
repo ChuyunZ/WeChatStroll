@@ -1,6 +1,7 @@
-// DEVTOOLS ONLY. Sample from the normalized Tencent nearbyPois candidate pool
-// captured before AI planning and before any walking-route validation.
-// No map APIs, route planners, or location permissions are used here.
+// DEVTOOLS ONLY. Sample from an already prepared Tencent nearbyPois candidate
+// pool, independently of AI route planning and walking validation.
+// This sampler never calls map APIs or requests location. The separate POI
+// source performs one developer-only nearbyPois call per Cloud Test page.
 const { normalizeInput, validateCopyDetailed } = require('./route-copy-contract');
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 const CROWDS = ['low', 'medium', 'high'];

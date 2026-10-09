@@ -448,19 +448,30 @@ failure or increasing the test's request rate.
 
 ## Development-only Tencent POI copy stress-test
 
-The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source
-is the POI candidate pool from Tencent Maps' `nearbyPois` search**:
-`generateRoutes()` calls `searchNearbyPois()`, flattens category results
-using `buildPoiCandidates()`, and returns `verifiedWaypointPool` to Routes.
-This pool is obtained **before AI waypoint selection or walking validation**.
-The name `verifiedWaypointPool` refers to structurally normalized POIs,
-not confirmed navigable sequences. The benchmark does not call map APIs.
+The Cloud Test panel runs explicitly in WeChat DevTools only and is now
+**independent of Routes and walking-route validation**. The POI input pool
+comes directly from Tencent Maps via the existing `mapProvider`
+`nearbyPois` handler. On first button click in a Cloud Test page session,
+the developer's simulated/current `gcj02` location is requested through
+the existing location service. This triggers **one cloud-function
+`nearbyPois` request**, whose server handler makes up to **three Tencent
+Explore calls** (park, water, shoppingStreet), governed by the existing
+provider limiter and Tencent map quota. Names and allowed categories are
+extracted into memory; provider IDs, address, coordinates, raw responses
+and geometry are immediately discarded. Subsequent runs on the **same
+Cloud Test page instance** reuse that memory pool; returning to the page
+or recompiling fetches a fresh pool. No new database/cache or environment
+variables are required. No Walking API, `aiRoutePlanner` or route
+validation is invoked for the benchmark.
 
-1. Generate one ordinary route in Routes, then enter the existing Cloud Test
-   page in AppService Console:
-   `wx.navigateTo({url:'/pages/cloud-test/cloud-test'})`.
-   The Routes page must remain alive, including its in-memory
-   `_verifiedWaypointPool`. No extra map/AI-planning requests are made.
+1. After compiling, enter Cloud Test directly in the DevTools AppService
+   Console: `wx.navigateTo({url:'/pages/cloud-test/cloud-test'})` or
+   configure a DevTools custom compile mode whose startup page is
+   `pages/cloud-test/cloud-test`. No route generation is needed.
+   Select a test button; the first click obtains a location and then
+   fetches the nearby POI pool. If permission is denied or the map
+   handler returns no POIs, the test fails closed before any hy3 send.
+   Later button clicks reuse the same in-memory pool.
 2. Choose 30 or 60 minutes (maximum time window, not promised run length).
    From **all eligible map-returned POIs**, the harness shuffles and rotates
    through the whole pool, selects random combinations of **1–8 POIs**,
@@ -531,5 +542,9 @@ CloudBase support with the UTC time and Request ID rather than making
 rapid repeat calls.
 
 This test can deplete today's development quota; **never reset database
-counters** to bypass it. The Tencent map usage is limited to the single
-ordinary route setup step; no map provider API is called by the sampler.
+counters** to bypass it. One direct `mapProvider.nearbyPois` call (up to
+three Tencent Explore category calls) initializes each Cloud Test page
+session. The sampler itself makes **zero** map calls. This replaces the
+former requirement to generate a successful walk first, which could fail
+`ROUTE_DURATION_OUT_OF_RANGE` before exposing a POI pool. No new maps,
+walking routes or AI waypoint planning are requested per copy case.
