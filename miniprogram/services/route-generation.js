@@ -8,6 +8,7 @@ const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing'
 const { waypointSetKey, normalizeExcludedWaypointSets, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
 const { runBoundedRouteCorrections } = require('./route-correction')
+const { rankInitialCandidates } = require('./initial-candidate-quality')
 
 const {
   validateGeneratedWalkingRoute
@@ -688,6 +689,17 @@ async function generateWaypointPlan(
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
 
+  // Safe discovery diagnostics: categories/counts only, never coordinates,
+  // names, prompt text or detailed provider records.
+  console.log('[POI Discovery] Summary:', {
+    radiusMeters: radius,
+    categoryCounts: Object.fromEntries(
+      Object.entries(poisByCategory).map(([category, items]) =>
+        [category, Array.isArray(items) ? items.length : 0])
+    ),
+    verifiedPoiCount: nearbyPois.length
+  })
+
   if (nearbyPois.length === 0) {
     return {
       status: 'empty',
@@ -1280,6 +1292,17 @@ async function generateRoutes(
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
 
+  // Safe discovery diagnostics: categories/counts only, never coordinates,
+  // names, prompt text or detailed provider records.
+  console.log('[POI Discovery] Summary:', {
+    radiusMeters: radius,
+    categoryCounts: Object.fromEntries(
+      Object.entries(poisByCategory).map(([category, items]) =>
+        [category, Array.isArray(items) ? items.length : 0])
+    ),
+    verifiedPoiCount: nearbyPois.length
+  })
+
   if (nearbyPois.length === 0) {
     return {
       status: 'empty',
@@ -1332,7 +1355,25 @@ async function generateRoutes(
         attempt, candidateCount: plan.candidates.length,
         emptyBatch: plan.candidates.length === 0
       })
-      const candidateCache = createWaypointCandidateCache(plan.candidates)
+      const prepared = attempt === 1
+        ? rankInitialCandidates({
+            candidates: plan.candidates, verifiedWaypointPool: nearbyPois,
+            location, preferences
+          })
+        : { candidates: plan.candidates,
+            origins: plan.candidates.map(() => 'ai'),
+            applied: false, supplementalPairCount: 0 }
+      if (prepared.applied) {
+        console.log('[Initial Candidate Quality] Summary:', {
+          inputCandidates: plan.candidates.length,
+          selectedCandidates: prepared.candidates.length,
+          supplementedPairs: prepared.supplementalPairCount,
+          geometryOnly: true
+        })
+      }
+      const candidateCache = createWaypointCandidateCache(prepared.candidates)
+      const sourceBySet = new Map(prepared.candidates.map((item,index) =>
+        [waypointSetKey(item.waypoints.map(poi => poi.poiId)), prepared.origins[index]]))
       // Settle repeated entries before execution, including alternatives after a success.
       const unseen = []
       const responseSets = new Set()
@@ -1359,7 +1400,9 @@ async function generateRoutes(
           throw createRouteGenerationError(result.error, 'Route service is temporarily unavailable.')
         }
         if (result.success) {
-          const source = attempt === 1 ? 'ai' : 'ai-replanned'
+          const source = sourceBySet.get(key) === 'deterministic'
+            ? 'deterministic-initial'
+            : (attempt === 1 ? 'ai' : 'ai-replanned')
           logCandidateSummary(candidateCache)
           console.log('[Agent Planning] Success:', { attempt, source })
           console.log('[Agent Planning] First route diagnostics:', {

@@ -458,3 +458,19 @@ test('non-replannable build failures are excluded from model context', () => {
     { attempt: 1, waypointIds: ['poi-2'], failure: { type: 'NO_COMPLETE_ROUTE' } }
   ])
 })
+
+
+test('initial planner asks for duration-aware out-and-back diversity without wasting subset slots', () => {
+ const result = buildRoutePlanningPrompt(validInput)
+ expect(result.success).toBe(true)
+ const text = result.data.prompt
+ expect(text).toContain('Do not use all five candidate slots for nearby single-POI walks')
+ expect(text).toContain('do not include {A} and {A,B} in the same batch')
+ expect(text).toContain('For every pair of route candidates, neither candidate')
+ expect(text).toContain('Straight-line distances provide only rough hints')
+ const {validateRoutePlan} = require('./routePlanContract')
+ expect(validateRoutePlan({ candidates: [
+   { waypoints: [{poiId:'park-1'}] },
+   { waypoints: [{poiId:'park-1'}, {poiId:'water-1'}] }
+ ] }, validInput.nearbyPois).data?.candidates?.length).toBe(1)
+})

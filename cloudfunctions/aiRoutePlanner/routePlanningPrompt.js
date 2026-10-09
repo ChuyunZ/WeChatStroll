@@ -319,6 +319,10 @@ function buildRoutePlanningPrompt(input) {
     "The map provider and the application's route engine are the source of truth for real-world route facts.",
   
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
+    "For out_and_back walks, account for outward AND return walking legs when considering the likely duration; the route engine will decide the exact order and true directed walking times.",
+    "Do not use all five candidate slots for nearby single-POI walks likely to be too short when a distinct multi-POI combination would better fit the requested duration.",
+    "Respect the existing no-subset-conflict rule across complete candidate sets: do not include {A} and {A,B} in the same batch. Use that limited slot for another distinct set.",
+    "Straight-line distances provide only rough hints, never verified walking time. Do not fabricate route durations, path distances or route geometry.",
   
     "Use the supplied START POINT as the user's actual starting location when selecting waypoint candidates.",
   
