@@ -13,7 +13,8 @@ Page({
     benchmarkFailures: 0,
     benchmarkMessage: '',
     benchmarkFile: '',
-    benchmarkHasReport: false
+    benchmarkHasReport: false,
+    benchmarkHelpExpanded: false
   },
 
   // Only run this in WeChat Developer Tools. This page is for development only;
@@ -117,6 +118,10 @@ Page({
       // Record time for manual log correlation even after page exit.
       this._benchmarkFinishedAt = Date.now() - begin;
     }
+  },
+
+  toggleBenchmarkHelp() {
+    this.setData({ benchmarkHelpExpanded: !this.data.benchmarkHelpExpanded });
   },
 
   stopCopyBenchmark() {
