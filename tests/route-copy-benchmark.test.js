@@ -1,6 +1,6 @@
 const { generateCases, normalizePoiPool, runBenchmark, publicRecord, MAX_SENDS } =
   require('../miniprogram/services/route-copy-benchmark');
-const { copy } = require('./helpers/route-copy');
+
 const { normalizeInput } = require('../miniprogram/services/route-copy-contract');
 
 // Simulates only the field-normalized POI candidates from Tencent nearbyPois,
@@ -13,7 +13,13 @@ const poiPool = Array.from({ length: 18 }, (_, i) => ({
   distanceInMeters: i * 200
 }));
 const cases = n => generateCases({ poiPool, count: n, seed: 777 });
-const copyResult = { result: { success: true, copy } };
+// Valid for every simulated POI set: no unverified landmark assertions.
+const acceptedCopy = {
+  title: '给心情留一段散步时光',
+  description: '从当前位置出发，走一段轻松自在的路，按自己喜欢的节奏看看周围，让日常多一点舒展和松弛感。',
+  recommendationReason: '这段行程适合给忙碌的日常留点空白，慢慢调整心情，享受自己决定节奏的感觉。'
+};
+const copyResult = { result: { success: true, copy: acceptedCopy } };
 
 test('uses all direct map candidates as a random sampling source, not validated routes', () => {
   const generated = cases(MAX_SENDS);
@@ -45,7 +51,7 @@ test('filters structurally invalid or duplicated map POIs and never accepts AI r
   const pool = [...poiPool, { ...poiPool[0], poiId: 'new-id' },
     { poiId: 'bad1', name: '  space ', category: 'park' },
     { poiId: 'bad2', name: '安全', category: 'badcategory' },
-    { poiId: 'bad3', name: 'A\\nB', category: 'park' }];
+    { poiId: 'bad3', name: 'A' + String.fromCharCode(10) + 'B', category: 'park' }];
   expect(normalizePoiPool(pool)).toHaveLength(poiPool.length);
   expect(generateCases({ poiPool: [], seed: 1 })).toEqual([]);
   expect(generateCases({ routes: [{ pointsOfInterest: poiPool }], seed: 1 })).toEqual([]);
