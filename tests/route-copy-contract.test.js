@@ -632,3 +632,22 @@ test('audit100 C029: entering two masked POIs is not supported by waypoint-only 
   expect(contract.validateCopyDetailed(neutral, p))
     .toEqual({ copy: neutral, reason: null, field: null });
 });
+
+test('audit100 C041: a truncated POI label in a title remains invalid', () => {
+  const p = payload();
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '示例区防护林小公园', category: 'park' }
+  ];
+  const c = { ...copy, title: '午后慢行途经防护林小公园' };
+  expect(contract.validateCopyDetailed(c, p)).toMatchObject({
+    copy: null, reason: 'INVALID_POI', field: 'title'
+  });
+});
+
+test('audit100 C052: route must not imply park-entry avoidance without route evidence', () => {
+  const c = { ...copy, recommendationReason:
+    '这条路线串起商街和几座公园，途经点多而不重复。想轻松走走、自由探索时，很适合放慢脚步，看看周围而不必走进园里。' };
+  expect(contract.validateCopyDetailed(c, payload())).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'recommendationReason'
+  });
+});
