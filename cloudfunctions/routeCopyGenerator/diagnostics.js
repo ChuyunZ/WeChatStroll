@@ -27,9 +27,7 @@ const scrubOutput = (text, payload) => {
   // development-only content logs as potentially sensitive, despite scrubbing.
   return safe.slice(0, LOG_SNIPPET_LIMIT);
 };
-function reportCopyRejection({ reason, field }, modelText, payload, {
-  env = process.env, logger = console.warn
-} = {}) {
+function buildRejectionDiagnostic({ reason, field }, modelText, payload, env = process.env) {
   const diagnostic = { event: 'ROUTE_COPY_REJECTED',
     reason: ALLOWED_REASONS.has(reason) ? reason : 'INVALID_FIELDS' };
   if (ALLOWED_FIELDS.has(field)) diagnostic.field = field;
@@ -40,6 +38,13 @@ function reportCopyRejection({ reason, field }, modelText, payload, {
     const snippet = scrubOutput(modelText, payload);
     if (snippet !== null) diagnostic.modelTextRedacted = snippet;
   }
-  logger('[Route Copy] Validation:', diagnostic);
+  return diagnostic;
 }
-module.exports = { LOG_SNIPPET_LIMIT, scrubOutput, reportCopyRejection };
+function reportCopyRejection(reason, modelText, payload, {
+  env = process.env, logger = console.warn
+} = {}) {
+  const diagnostic = buildRejectionDiagnostic(reason, modelText, payload, env);
+  logger('[Route Copy] Validation:', diagnostic);
+  return diagnostic;
+}
+module.exports = { LOG_SNIPPET_LIMIT, scrubOutput, buildRejectionDiagnostic, reportCopyRejection };

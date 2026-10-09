@@ -22,22 +22,28 @@ test('requires actual route facts and refuses fake/oversized runs', () => {
   expect(generateCases({ routes: [], preferences, history })).toEqual([]);
   expect(generateCases({ routes: [route()], preferences, history, count: MAX_SENDS + 1 })).toEqual([]);
 });
-test('captures rejection/acceptance with bounded interval and no exposed model text', async () => {
+test('stops on first invalid model response, collects redacted diagnostic and safe route facts', async () => {
   let t = Date.UTC(2026, 9, 9), calls = 0;
   const seen = [];
   const report = await runBenchmark({ minutes: 30, cases: cases(3),
     now: () => t, sleep: async ms => { t += ms; },
     call: async () => { calls++; return calls === 1 ?
-      { result: { success: false, error: { code: 'COPY_INVALID_OUTPUT', message: 'PRIVATE_AI' } } } :
+      { result: { success: false, error: { code: 'COPY_INVALID_OUTPUT', message: 'PRIVATE_AI' },
+        debug: { event: 'ROUTE_COPY_REJECTED', reason: 'INVALID_POI',
+          field: 'recommendationReason', modelTextRedacted: '途经【已知地点】到公园外的路线' } } } :
       { ...copyResult, requestID: `safe-${calls}` }; },
     onRecord: r => seen.push(r)
   });
-  expect(report.records).toHaveLength(3); // all three scheduled before cutoff.
-  expect(report.summary).toMatchObject({ total: 3, failed: 1, accepted: 2, rejected: 1 });
-  expect(report.records.map(r => r.code)).toEqual(['COPY_INVALID_OUTPUT', 'OK', 'OK']);
+  expect(calls).toBe(1);
+  expect(report.records).toHaveLength(1);
+  expect(report.stopReason).toBe('FIRST_FAILURE');
+  expect(report.summary).toMatchObject({ total: 1, failed: 1, accepted: 0, rejected: 1 });
+  expect(report.failures[0].validation).toMatchObject({ reason: 'INVALID_POI',
+    field: 'recommendationReason', modelTextRedacted: '途经【已知地点】到公园外的路线' });
+  expect(report.failures[0].routeFacts.orderedPois[0]).toMatchObject({ ref: 'P1', category: 'park' });
   expect(report.intervalMs).toBeGreaterThanOrEqual(120000);
-  expect(JSON.stringify(report)).not.toMatch(/PRIVATE_AI|人民公园|latitude|poi-0/);
-  expect(seen).toHaveLength(3);
+  expect(JSON.stringify(report)).not.toMatch(/PRIVATE_AI|人民公园|滨河广场|latitude|poi-0/);
+  expect(seen).toHaveLength(1);
 });
 test.each(['COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE', 'COPY_EXECUTION_UNKNOWN',
   'COPY_UNAUTHORIZED'])('stops when server refuses %s; never retries', async code => {
@@ -86,4 +92,30 @@ test('successful model output arriving beyond 20-second UI deadline is reported 
   const sample = cases(1)[0], now = Date.UTC(2026, 9, 9);
   const r = publicRecord(sample, now, 23000, copyResult, null);
   expect(r).toMatchObject({ status: 'rejected', code: 'COPY_UI_DEADLINE_EXCEEDED' });
+});
+
+// Every accepted sample may continue until the scheduled cap, with no auto retry.
+test('continues only while all previous calls pass', async () => {
+  let t = Date.UTC(2026, 9, 9), sent = 0;
+  const report = await runBenchmark({ minutes: 30, cases: cases(3),
+    now: () => t, sleep: async ms => { t += ms; },
+    call: async () => { sent++; return copyResult; }
+  });
+  expect(sent).toBe(3);
+  expect(report.summary).toMatchObject({ total: 3, failed: 0, accepted: 3 });
+  expect(report.stopReason).toBe('CASE_LIMIT_REACHED');
+});
+
+test('client-side validation and UI deadline also stop at the first problem', async () => {
+  for (const response of [{ result: { success: true, copy: { title: 'x' } } },
+    { ...copyResult }]) {
+    let sent = 0;
+    const report = await runBenchmark({ minutes: 30, cases: cases(3),
+      call: async () => { sent++; return response; },
+      now: (() => { let t = Date.UTC(2026, 9, 9); return () => { t += 21000; return t; }; })()
+    });
+    expect(sent).toBe(1);
+    expect(report.summary.failed).toBe(1);
+    expect(report.stopReason).toBe('FIRST_FAILURE');
+  }
 });

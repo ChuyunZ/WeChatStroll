@@ -60,7 +60,8 @@ Page({
       const report = await runBenchmark({
         minutes, cases,
         shouldStop: () => control.stopped || this._unloaded,
-        call: payload => wx.cloud.callFunction({ name: 'routeCopyGenerator', data: { payload } }),
+        call: payload => wx.cloud.callFunction({ name: 'routeCopyGenerator',
+          data: { payload, benchmarkDebug: true } }),
         // Wake at most every 2 seconds so pressing Stop works promptly.
         sleep: async ms => {
           const until = Date.now() + ms;
@@ -77,7 +78,9 @@ Page({
       });
       save(report);
       if (!this._unloaded) this.setData({ benchmarkHasReport: true,
-        benchmarkMessage: `结束: ${report.stopReason}；成功 ${report.summary.accepted} / 失败 ${report.summary.failed}` });
+        benchmarkMessage: report.stopReason === 'FIRST_FAILURE'
+          ? `已自动停止：第 ${report.summary.total} 次发现问题（${report.failures[0].code}）。请复制 JSON 报告发给我。`
+          : `结束: ${report.stopReason}；成功 ${report.summary.accepted} / 失败 ${report.summary.failed}` });
       console.log('[Route Copy Benchmark] Finished:', {
         summary: report.summary, stopReason: report.stopReason, file: path
       });

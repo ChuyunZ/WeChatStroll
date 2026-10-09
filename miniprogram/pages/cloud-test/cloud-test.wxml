@@ -32,7 +32,7 @@
   <view class="benchmark-note">
     先在 Routes 完成真实路线生成，再从 Console 运行 wx.navigateTo({url:'/pages/cloud-test/cloud-test'})。
     本测试只调用 routeCopyGenerator，不重复调用腾讯地图。最多 16 次调用，串行、间隔至少 120 秒；
-    每用户每天 24 次的服务端额度仍然生效，额度用完就停止。
+    遇到第一条失败（含验收不通过或超时）立即停止并保存报告；每用户每天 24 次的服务端额度仍然生效。
     问卷时长与已经验证的路线时长独立变化，用来测试 AI 文案是否遵守路线事实，不代表重新规划了路线。
   </view>
   <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
@@ -42,5 +42,5 @@
   <view class="benchmark-note">{{benchmarkMessage}}</view>
   <view class="benchmark-note" wx:if="{{benchmarkFile}}">报告本地路径：{{benchmarkFile}}</view>
   <button bindtap="copyBenchmarkReport" disabled="{{!benchmarkHasReport}}">复制 JSON 报告</button>
-  <view class="benchmark-note">报告包含每次的偏好、错误码、时间及可用的 Request ID；不包含 POI/坐标/原始模型文案。失败的脱敏模型文案与具体规则请另外从 CloudBase 函数日志导出。</view>
+  <view class="benchmark-note">遇到第一条失败自动停止。报告直接包含原因、字段、脱敏后的模型回复及安全的路线事实摘要；不包含 POI 真实名称、坐标或原始 Prompt。详细诊断需要开发云函数设置已有的两个 Debug 环境变量。生产环境不会返回这些内容。</view>
 </view>

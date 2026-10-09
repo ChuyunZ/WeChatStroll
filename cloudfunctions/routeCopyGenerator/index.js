@@ -1,6 +1,6 @@
 const cloud = require('wx-server-sdk');
 const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopyDetailed } = require('./contract');
-const { reportCopyRejection } = require('./diagnostics');
+const { reportCopyRejection, buildRejectionDiagnostic } = require('./diagnostics');
 const { buildPrompt } = require('./prompt');
 const { createStore } = require('./quota-store');
 const { createQuotaGate } = require('./quota');
@@ -19,7 +19,8 @@ const MESSAGES = {
 const failure = code => ({ success: false, error: { code, message: MESSAGES[code] },
   ...(code === 'COPY_EXECUTION_UNKNOWN' ? { executionState: 'unknown' } : {}) });
 
-async function generateCopy(event, { openid, createModel, reserveQuota, reportRejection = reportCopyRejection } = {}) {
+async function generateCopy(event, { openid, createModel, reserveQuota, reportRejection = reportCopyRejection,
+  diagnosticsEnv = process.env } = {}) {
   if (typeof openid !== 'string' || !openid.trim()) return failure('COPY_UNAUTHORIZED');
   if (byteLength(event) > MAX_INPUT_BYTES * 2) return failure('COPY_INVALID_INPUT');
   // Read only the business envelope; CloudBase may inject other event metadata.
@@ -45,19 +46,24 @@ async function generateCopy(event, { openid, createModel, reserveQuota, reportRe
     // Never log upstream errors: they may echo input or model output.
     return failure('COPY_EXECUTION_UNKNOWN');
   }
-  // Diagnostic failures must not change the fail-closed model contract.
-  const safelyReport = (reason, raw) => {
+  // Only an explicitly requested benchmark in a configured development Cloud
+  // Function may receive a redacted rejection diagnostic. Normal app callers,
+  // and every production deployment, receive the original fixed error shape.
+  const rejectModelOutput = (reason, raw) => {
+    let diagnostic = null;
+    try { diagnostic = buildRejectionDiagnostic(reason, raw, payload, diagnosticsEnv); } catch (_) { /* safe fallback */ }
     try { reportRejection(reason, raw, payload); } catch (_) { /* Logging is best effort. */ }
+    const response = failure('COPY_INVALID_OUTPUT');
+    if (event && event.benchmarkDebug === true &&
+        diagnosticsEnv && diagnosticsEnv.ROUTE_COPY_DEPLOYMENT_STAGE === 'development' &&
+        diagnosticsEnv.ROUTE_COPY_DEBUG_TEXT === '1' && diagnostic) {
+      response.debug = diagnostic;
+    }
+    return response;
   };
-  if (!result || result.error) {
-    safelyReport({ reason: 'UPSTREAM_ERROR' }, null);
-    return failure('COPY_INVALID_OUTPUT');
-  }
+  if (!result || result.error) return rejectModelOutput({ reason: 'UPSTREAM_ERROR' }, null);
   const parsed = parseCopyDetailed(result.text, payload);
-  if (!parsed.copy) {
-    safelyReport(parsed, result.text);
-    return failure('COPY_INVALID_OUTPUT');
-  }
+  if (!parsed.copy) return rejectModelOutput(parsed, result.text);
   return { success: true, copy: parsed.copy };
 }
 exports.main = async event => {

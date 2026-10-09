@@ -294,18 +294,29 @@ backend endpoints, Tencent Map API calls or route-planning API calls are added.
    not a guarantee of a fixed number of calls. Server quotas (24/OpenID/day,
    200 globally/day) still apply. The harness stops if it encounters an
    auth, quota, network/unknown execution or malformed response problem.
-6. Click **复制 JSON 报告** on completion and paste it into a text file or
-   share it for analysis. An intermediate JSON checkpoint is written after each
-   send to `wx.env.USER_DATA_PATH/route-copy-benchmark.json` when filesystem
-   access works. The report contains only scenario settings, code, status and
-   optional transport Request ID; no raw route/POI, geometry, OpenID or full
-   model response. Stops or page unloads leave the current call to settle
-   without sending another.
-7. To find *why* `COPY_INVALID_OUTPUT` failed, also export/copy the CloudBase
-   `routeCopyGenerator` app logs for the same period (`ROUTE_COPY_REJECTED`,
-   `reason`, `field`, `modelTextRedacted`). Join by Request ID when
-   available, otherwise use start times. Both report and sanitized CloudBase
-   logs are needed for in-depth per-case analysis. A response that exceeds the
+6. **Fail fast:** a single server rejection, failed client validation, soft
+   UI deadline, transport uncertainty or quota error stops the run immediately.
+   No automatic retry and no further model sends after the first problem.
+7. The benchmark sends `benchmarkDebug: true`. **Only when BOTH**
+   `ROUTE_COPY_DEPLOYMENT_STAGE=development` and `ROUTE_COPY_DEBUG_TEXT=1`
+   are configured does the development cloud function include
+   `debug: { event, reason, field?, modelTextRedacted? }` in an
+   `COPY_INVALID_OUTPUT` response. The ordinary UI never sends this opt-in
+   and public/production deployments never return debug data even when the
+   opt-in flag is provided. The secure development diagnostics still appear in
+   CloudBase app logs. No new collection or provider log API is needed.
+8. The first failed case automatically saves the complete sanitized diagnostic
+   into the JSON checkpoint at `wx.env.USER_DATA_PATH/route-copy-benchmark.json`
+   (if filesystem access works), alongside the selected questionnaire preferences,
+   real route timing/distance/type and waypoint category/length metadata, error
+   category, field, masked model output, start time and request ID when supplied.
+   Actual POI names, identity, coordinates, raw full responses and prompts are
+   excluded. Click **复制 JSON 报告** and share the content in one message/file.
+   Sanitization is best-effort and may leave indirect location clues, so treat the
+   report as development-only. If the `debug` field is missing on a rejected
+   case, verify the cloud code and environment variables; the report marks it.
+   Stops or page unloads leave the in-flight call to settle without sending
+   another request. Supplementary CloudBase logs can still be consulted if needed. A response that exceeds the
    existing 20-second UI acceptance deadline is recorded as
    `COPY_UI_DEADLINE_EXCEEDED` even if the eventual model response is valid.
 

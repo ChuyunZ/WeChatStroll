@@ -186,3 +186,32 @@ test('diagnostic logger exceptions never alter fallback error or trigger another
   expect(result.error.code).toBe('COPY_INVALID_OUTPUT');
   expect(generateText).toHaveBeenCalledTimes(1);
 });
+
+test('explicit benchmark diagnostic is included only for opted-in development output failures', async () => {
+  const p = payload();
+  const place = p.routeFacts.orderedPois[0].name;
+  const generatedText = JSON.stringify({ ...copy, description:
+    `从${place}出发，沿着园里的小径慢慢走。不妨给自己留点自由空间，保持轻松。` });
+  const call = async (event, env) => generateCopy(event, withQuota({
+    openid: 'private-openid', diagnosticsEnv: env,
+    reportRejection: () => { throw new Error('logger failed'); },
+    createModel: () => ({ generateText: async () => ({ text: generatedText }) })
+  }));
+  const envDev = { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '1' };
+  const debug = await call({ payload: p, benchmarkDebug: true }, envDev);
+  expect(debug.error.code).toBe('COPY_INVALID_OUTPUT');
+  expect(debug.debug).toMatchObject({
+    event: 'ROUTE_COPY_REJECTED', reason: 'INVALID_ORIGIN_OR_INTERIOR',
+    field: 'description'
+  });
+  expect(debug.debug.modelTextRedacted).toContain('【已知地点】出发');
+  expect(JSON.stringify(debug)).not.toMatch(/private-openid|人民公园|滨河广场|latitude|polyline/);
+  const normal = await call({ payload: p }, envDev);
+  expect(normal).not.toHaveProperty('debug');
+  const prod = await call({ payload: p, benchmarkDebug: true },
+    { ROUTE_COPY_DEPLOYMENT_STAGE: 'production', ROUTE_COPY_DEBUG_TEXT: '1' });
+  expect(prod).not.toHaveProperty('debug');
+  const disabled = await call({ payload: p, benchmarkDebug: true },
+    { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '0' });
+  expect(disabled).not.toHaveProperty('debug');
+});

@@ -1,7 +1,7 @@
 // Explicit, developer-only live acceptance sampler. Never calls mapProvider,
 // route planner, or any other cloud function besides routeCopyGenerator.
 const { projectRoute } = require('./route-copy');
-const { normalizeInput, validateCopy } = require('./route-copy-contract');
+const { normalizeInput, validateCopyDetailed } = require('./route-copy-contract');
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 const CROWDS = ['low', 'medium', 'high'];
 const ENVIRONMENTS = ['公园', '水边', '街道', '商街'];
@@ -41,9 +41,12 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
   const result = envelope && envelope.result && typeof envelope.result === 'object' ? envelope.result : null;
   const requestId = envelope && (envelope.requestID || envelope.requestId);
   let code = 'COPY_TRANSPORT_UNKNOWN', status = 'stop';
+  let clientReason = null;
   if (!error && result && result.success === true) {
-    if (!validateCopy(result.copy, payload)) {
+    const checked = validateCopyDetailed(result.copy, payload);
+    if (!checked.copy) {
       code = 'CLIENT_VALIDATION_FAILED'; status = 'rejected';
+      clientReason = { reason: checked.reason, field: checked.field };
     } else if (elapsedMs >= 20000) {
       // The actual UI will stop accepting copy after its 20-second deadline.
       code = 'COPY_UI_DEADLINE_EXCEEDED'; status = 'rejected';
@@ -55,11 +58,44 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
     code = allowed.includes(result.error.code) ? result.error.code : 'COPY_UNKNOWN_RESPONSE';
     status = code === 'COPY_INVALID_OUTPUT' ? 'rejected' : 'stop';
   }
-  // No raw copy, POI names, OPENID, coordinates, prompt, token or provider keys
-  // are collected. Use the CloudBase app logs for redacted rejection content.
-  return { id, ...scenario, startedAt: new Date(startedAtMs).toISOString(),
+  const record = { id, ...scenario, startedAt: new Date(startedAtMs).toISOString(),
     elapsedMs, status, code,
     ...(typeof requestId === 'string' && requestId.length < 100 ? { requestId } : {}) };
+  if (status === 'accepted') return record;
+  // Preserve the non-sensitive, grounded inputs needed to reproduce a rule
+  // failure, while excluding real names, IDs, geometry and exact position.
+  record.routeFacts = {
+    routeType: payload.routeFacts.routeType,
+    returnsToStart: payload.routeFacts.returnsToStart,
+    distanceMeters: payload.routeFacts.distanceMeters,
+    durationSeconds: payload.routeFacts.durationSeconds,
+    durationMinutes: payload.routeFacts.durationMinutes,
+    orderedPois: payload.routeFacts.orderedPois.map(p => ({
+      ref: p.ref, category: p.category, nameLength: [...p.name].length
+    }))
+  };
+  if (clientReason) record.validation = clientReason;
+  if (code === 'COPY_INVALID_OUTPUT' && result && result.debug &&
+      result.debug.event === 'ROUTE_COPY_REJECTED') {
+    const d = result.debug;
+    const acceptedReasons = new Set([
+      'UPSTREAM_ERROR', 'INVALID_RESPONSE_TYPE', 'OVERSIZED_RESPONSE',
+      'INVALID_JSON', 'INVALID_JSON_TOKENS', 'INVALID_FIELDS',
+      'INVALID_FIELD_TYPE', 'INVALID_LENGTH', 'UNSAFE_TEXT', 'WRONG_MEASUREMENT',
+      'INVALID_POI', 'UNSUPPORTED_FACT', 'INVALID_ORIGIN_OR_INTERIOR',
+      'WRONG_ROUTE_TYPE', 'NAVIGATION_INSTRUCTION', 'WRONG_POI_ORDER',
+      'DUPLICATE_CONTENT'
+    ]);
+    record.validation = {
+      reason: acceptedReasons.has(d.reason) ? d.reason : 'UNKNOWN',
+      ...(['title', 'description', 'recommendationReason'].includes(d.field)
+        ? { field: d.field } : {}),
+      ...(typeof d.modelTextRedacted === 'string' && d.modelTextRedacted.length <= 1000
+        ? { modelTextRedacted: d.modelTextRedacted } : {})
+    };
+  }
+  if (code === 'COPY_INVALID_OUTPUT' && !record.validation) record.diagnosticsMissing = true;
+  return record;
 }
 
 async function runBenchmark({ minutes, cases, call, now = Date.now,
@@ -86,8 +122,12 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
     const record = publicRecord(cases[i], startedAt, Math.max(0, now() - startedAt), response, error);
     report.records.push(record);
     try { onRecord(record, report); } catch (_) { /* Reporting must not trigger a retry. */ }
-    if (record.status === 'stop') {
-      report.stopReason = record.code; break;
+    // Fail fast on ANY non-accepted outcome, including server validation,
+    // client revalidation, UI deadline, exhausted quota or uncertain transport.
+    // Never send a second AI request after the first problem.
+    if (record.status !== 'accepted') {
+      report.stopReason = record.status === 'rejected' ? 'FIRST_FAILURE' : record.code;
+      break;
     }
   }
   if (!report.stopReason) report.stopReason = shouldStop() ? 'USER_STOPPED' :
