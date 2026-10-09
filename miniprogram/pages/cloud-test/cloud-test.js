@@ -1,4 +1,5 @@
-const { generateCases, runBenchmark, MAX_SENDS } = require('../../services/route-copy-benchmark');
+const { generateCases, runBenchmark, MAX_SENDS, AUDIT_COUNT, AUDIT_WINDOW_MINUTES,
+  MIN_AUDIT_POOL } = require('../../services/route-copy-benchmark');
 const { loadBenchmarkPoiPool } = require('../../services/route-copy-poi-source');
 
 Page({
@@ -22,9 +23,10 @@ Page({
   async startCopyBenchmark(event) {
     if (this._benchmarkRunning) return;
     const dataset = event && event.currentTarget && event.currentTarget.dataset;
-    const audit100 = dataset && dataset.audit === '100';
-    const minutes = audit100 ? 60 : Number(dataset && dataset.minutes);
-    if (![30, 60].includes(minutes)) return;
+    const audit200 = dataset && dataset.audit === '200';
+    const minutes = audit200 ? AUDIT_WINDOW_MINUTES : Number(dataset && dataset.minutes);
+    if (![30, 60, AUDIT_WINDOW_MINUTES].includes(minutes) ||
+        (minutes === AUDIT_WINDOW_MINUTES && !audit200)) return;
     let platform = '';
     try { platform = wx.getSystemInfoSync().platform; } catch (_) { /* fail closed */ }
     if (platform !== 'devtools') {
@@ -51,26 +53,33 @@ Page({
       benchmarkFailures: 0,
       benchmarkMessage: this._benchmarkPoiPool
         ? '复用本页内存中的腾讯 POI 池，准备文案测试…'
-        : '正在获取定位和腾讯地图 POI（仅一次），不生成步行路线…',
+        : '正在从周边 5 个搜索中心获取腾讯 POI（每处半径 1 公里），不生成步行路线…',
       benchmarkFile: path, benchmarkHasReport: false });
     try {
-      const poiPool = this._benchmarkPoiPool || await loadBenchmarkPoiPool();
+      const poiPool = this._benchmarkPoiPool || await loadBenchmarkPoiPool({
+        shouldStop: () => control.stopped || this._unloaded
+      });
       if (control.stopped || this._unloaded) {
         if (!this._unloaded) this.setData({ benchmarkMessage: '已停止，未发起 AI 文案测试' });
         return;
       }
       this._benchmarkPoiPool = poiPool; // only sanitized {name, category}
+      if (audit200 && poiPool.length < MIN_AUDIT_POOL) {
+        this.setData({ benchmarkMessage:
+          `仅找到 ${poiPool.length} 个去重后的真实 POI（验收至少需 ${MIN_AUDIT_POOL} 个）；请换一个开发者工具模拟位置，离开本页后重新进入再试。未发送 AI 请求。` });
+        return;
+      }
       const seed = Date.now();
       const cases = generateCases({ poiPool, seed, count: MAX_SENDS });
       if (!cases.length) {
         this.setData({ benchmarkMessage: '腾讯 POI 池无符合文案契约的数据；未发送 AI 请求' });
         return;
       }
-      this.setData({ benchmarkMessage: audit100
-        ? `已准备 ${poiPool.length} 个真实 POI；100 次验收开始，第二次文案拒绝即 FAIL`
+      this.setData({ benchmarkMessage: audit200
+        ? `已准备 ${poiPool.length} 个真实 POI；${AUDIT_COUNT} 次验收开始，第二次文案拒绝即 FAIL`
         : `已准备 ${poiPool.length} 个真实 POI；首次文案失败即停止` });
       const report = await runBenchmark({
-        minutes, cases, audit100, seed,
+        minutes, cases, audit200, seed,
         shouldStop: () => control.stopped || this._unloaded,
         call: payload => wx.cloud.callFunction({ name: 'routeCopyGenerator',
           data: { payload, benchmarkDebug: true } }),
@@ -91,7 +100,7 @@ Page({
       save(report);
       if (!this._unloaded) this.setData({ benchmarkHasReport: true,
         benchmarkMessage: report.audit
-          ? `100 次验收：${report.audit.verdict}，已测 ${report.audit.assessed}/100，文案拒绝 ${report.audit.acceptanceFailures}，停止原因 ${report.stopReason}`
+          ? `${report.audit.target} 次验收：${report.audit.verdict}，已测 ${report.audit.assessed}/${report.audit.target}，文案拒绝 ${report.audit.acceptanceFailures}，停止原因 ${report.stopReason}`
           : report.stopReason === 'FIRST_FAILURE'
           ? `已自动停止：第 ${report.summary.total} 次发现问题（${report.failures[0].code}）。请复制 JSON 报告发给我。`
           : `结束: ${report.stopReason}；成功 ${report.summary.accepted} / 失败 ${report.summary.failed}` });
