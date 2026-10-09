@@ -290,3 +290,23 @@ test.each([
   const verdict = contract.validateCopyDetailed(c, payload());
   expect(verdict).toMatchObject({ copy: null, reason: 'INVALID_POI', field: 'description' });
 });
+
+test.each([
+  ['途经几处公园，给散步留点乐趣', 1, false],
+  ['途经几处公园，给散步留点乐趣', 2, true],
+  ['途经四处公园，给散步留点乐趣', 3, false],
+  ['途经四处公园，给散步留点乐趣', 4, true],
+  ['途经一处公园，给散步留点乐趣', 1, true]
+])('only accepts generic park counts grounded in ordered park POIs: %s with %i parks',
+  (phrase, parkCount, accepted) => {
+    const p = payload();
+    p.routeFacts.orderedPois = Array.from({ length: parkCount }, (_, i) => ({
+      ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
+    }));
+    const result = contract.validateCopyDetailed({
+      ...copy,
+      recommendationReason: `${phrase}。你可以慢慢欣赏周围，在这段时间里按自己的节奏探索。`
+    }, p);
+    if (accepted) expect(result.reason).not.toBe('UNSUPPORTED_FACT');
+    else expect(result).toMatchObject({ reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null });
+  });

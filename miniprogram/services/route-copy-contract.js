@@ -137,6 +137,19 @@ function hasUnknownPoiName(maskedText) {
     return false;
   });
 }
+function hasUnsupportedParkCount(text, r) {
+  // Quantified generic place nouns are allowed only when the ordered
+  // waypoints support at least that many POIs in the claimed category.
+  const parks = r.orderedPois.filter(p => p.category === 'park').length;
+  const mentions = /(?:途经|经过|前往|抵达|到达)\s*((?:(?:几|数|多|几十|若干|[一二两三四五六七八九十]+)(?:个|处|座|条|片))|一些|不少|许多|好几个|好几处|若干个)公园/g;
+  for (const match of text.matchAll(mentions)) {
+    const numeral = match[1].replace(/(?:个|处|座|条|片)$/, '');
+    const min = numeral === '几十' ? 10 : /^(?:几|数|多|若干|一些|不少|许多|好几)$/.test(numeral)
+      ? 2 : numberValue(numeral);
+    if (Number.isFinite(min) && parks < min) return true;
+  }
+  return false;
+}
 function hasUnsupportedOriginOrInterior(text) {
   if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
   // A POI category/name is not verified evidence of a traversed park footpath,
@@ -168,7 +181,7 @@ function validateCopyDetailed(copy, payload) {
     // Unknown explicit references and recognisable named destinations only.
     // Generic wishes such as “去公园换换心情” are not factual environment claims.
     if (hasUnknownPoiName(text)) return rejectCopy('INVALID_POI', field);
-    if (hasUnsupportedClaim(text)) return rejectCopy('UNSUPPORTED_FACT', field);
+    if (hasUnsupportedClaim(text) || hasUnsupportedParkCount(text, r)) return rejectCopy('UNSUPPORTED_FACT', field);
     if (hasUnsupportedOriginOrInterior(text)) return rejectCopy('INVALID_ORIGIN_OR_INTERIOR', field);
     if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);
     if (r.returnsToStart && /(?:无需|不必|不会|不再)返回起点|单程路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);

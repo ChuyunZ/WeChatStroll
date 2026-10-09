@@ -288,6 +288,10 @@ four park POIs. The landmark detector now distinguishes quantified generic
 category phrases (e.g. `几处公园`, `两座公园`) from a new proper name.
 It still rejects clear invented names, including after a generic mention,
 and does not silently permit “走进几个公园” without venue-entry facts.
+A small quantitative grounding check additionally rejects `几处公园`
+when fewer than two ordered POIs are parks, or `四处公园` when there
+are fewer than four. This avoids turning the false-positive fix into a
+false-negative for quantity claims.
 Matched evidence was preserved as an exact C004 regression and paired
 positive/negative tests; mirrored cloud/client contracts stay identical.
 
