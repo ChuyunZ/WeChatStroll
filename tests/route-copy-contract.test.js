@@ -121,3 +121,40 @@ test.each([
   const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
   expect(contract.validateCopy(c, payload())).toEqual(c);
 });
+
+test.each([
+  '从人民公园出发，慢慢走向下个地点',
+  '由滨河广场出发，悠闲散步',
+  '从人民公园附近启程，放慢脚步',
+  '以人民公园为起点，探索周围',
+  '起点位于人民公园，可以悠闲散步',
+  '沿着园里的小径慢慢走',
+  '沿着人民公园的步道慢慢走',
+  '走进人民公园，享受一段悠闲的时光',
+  '穿过滨河广场，继续悠闲散步',
+  '园中的安静角落等你探索',
+  '在园内散步，放慢脚步'
+])('rejects ungrounded POI-as-origin or inferred venue interior: %s', claim => {
+  const c = { ...copy, description: `${claim}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test.each([
+  '从当前位置出发，途经人民公园',
+  '沿着这条路线慢慢走，途经人民公园',
+  '先到人民公园，然后再到滨河广场',
+  '去人民公园走走，给自己留一段悠闲时光'
+])('still accepts grounded visits and generic creative narration: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
+  expect(contract.validateCopy(c, payload())).toEqual(c);
+});
+test('Detail marks both AI-generated description and recommendation, without a repeated disclaimer', () => {
+  const wxml = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8');
+  const intro = wxml.split('<!-- Recommendation -->')[0].split('<!-- Description -->')[1];
+  const reason = wxml.split('<!-- Recommendation -->')[1].split('<!-- Actions -->')[0];
+  const badge = `<text class="ai-copy-label" wx:if="{{route.copySource === 'ai'}}">AI 生成 · 仅供参考</text>`;
+  expect(intro).toContain(badge);
+  expect(reason).toContain(badge);
+  expect(reason).toContain('{{route.recommendationReason}}');
+  expect(intro).toContain('AI 生成内容可能存在不准确之处');
+  expect(reason).not.toContain('ai-copy-disclaimer');
+});

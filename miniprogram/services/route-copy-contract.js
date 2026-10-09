@@ -104,6 +104,19 @@ function hasUnsupportedClaim(text) {
   }
   return false;
 }
+// The POI list has ordered stops, not the user's original GPS starting point
+// or proof that the walking polyline enters a venue or follows an inner path.
+// Apply this check to location-masked prose so actual POI names are irrelevant.
+function hasUnsupportedOriginOrInterior(text) {
+  if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
+  // A POI category/name is not verified evidence of a traversed park footpath,
+  // a quiet inner corner or even entering the venue.
+  const interior = /(?:【已知地点】(?:里|内|中|里面|内部)|(?:园子?|公园|景区|商场|广场)(?:里|内|中|里面|内部))/;
+  if (/(?:【已知地点】(?:里|内|中|里面|内部)|(?:园子?|公园|景区|商场|广场)(?:里|内|中|里面|内部))(?:的)?(?:小径|小路|步道|栈道|林荫道|石板路|绿道|园路|安静(?:的)?角落|宁静(?:的)?角落)/.test(text)) return true;
+  if (/(?:走进|步入|进入|穿过|穿行于|沿着|顺着|漫步于|漫步在|走在)(?:【已知地点】(?:里|内|中|里面|内部)?|(?:园子?|公园|景区|商场|广场)(?:里|内|中|里面|内部))/.test(text)) return true;
+  if (new RegExp(`(?:在|于)${interior.source}(?:散步|漫步|穿行|走走|游览)`).test(text)) return true;
+  return false;
+}
 function validateCopy(copy, payload) {
   if (!exact(copy, COPY_FIELDS)) return null;
   const result = {};
@@ -123,7 +136,7 @@ function validateCopy(copy, payload) {
     // Generic wishes such as “去公园换换心情” are not factual environment claims.
     if (/\bP\d+\b/.test(text) || /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)/.test(text) ||
         /[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(text)) return null;
-    if (hasUnsupportedClaim(text)) return null;
+    if (hasUnsupportedClaim(text) || hasUnsupportedOriginOrInterior(text)) return null;
     if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return null;
     if (r.returnsToStart && /(?:无需|不必|不会|不再)返回起点|单程路线/.test(text)) return null;
     if (/(?:向|往)(?:东|西|南|北)(?:走|行|转)|(?:左|右)转/.test(text)) return null;

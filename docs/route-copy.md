@@ -22,7 +22,9 @@ subscribes to the same session and reads the current copy immediately, closing
 the response-before-subscription race. A reply patches only the three strings
 and `copySource`, never the map, ranking or business Route reference.
 
-The AI badge is shown only for `copySource === 'ai'`. Detail also shows:
+The AI badge is shown only for `copySource === 'ai'`. Detail displays a badge beneath both
+its route introduction and recommendation reason; the full disclaimer appears
+once, beneath the introduction. Detail also shows:
 
 > AI 生成内容可能存在不准确之处。路线距离、时长以地图计算结果为准，实际环境请以现场为准。
 
@@ -85,6 +87,11 @@ The parser caps raw output at 4,096 UTF-16 code units. Long POI names need not
 appear in the title; the existing ordered POI list still displays full names.
 Card titles retain their existing single-line ellipsis, while Detail shows the
 full title.
+
+Validation also rejects assertions that a named waypoint is the GPS starting
+point or that the walking path entered a venue/traversed an inferred inner path
+or quiet corner. Ordered POIs alone do not prove these geographic details.
+A sentence such as “从当前位置出发，途经人民公园” remains allowed; “从人民公园出发，沿着园里的小径” is rejected unless future verified route facts explicitly support it.
 
 Validation rejects identifiable unknown destination references, temporary P
 references in prose, conflicting numbers with common Chinese/metric units,

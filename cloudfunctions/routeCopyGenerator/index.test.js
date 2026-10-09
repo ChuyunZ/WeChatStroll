@@ -81,3 +81,15 @@ test('one quota reservation is consumed for an upstream failure, without a refun
   expect(reserveQuota).toHaveBeenCalledTimes(1);
   expect(generateText).toHaveBeenCalledTimes(1);
 });
+
+test('prompt distinguishes ordered visits from unverified starting points and interior paths', async () => {
+  const model = { generateText: jest.fn().mockResolvedValue({ text: JSON.stringify(copy) }) };
+  const result = await generateCopy({ payload: payload() }, withQuota({
+    openid: 'trusted', createModel: () => model
+  }));
+  expect(result.success).toBe(true);
+  const prompt = model.generateText.mock.calls[0][0].messages[0].content;
+  expect(prompt).toContain('这些地点只是途经点');
+  expect(prompt).toContain('routeFacts 不含 GPS 起点');
+  expect(prompt).toContain('不得写');
+});

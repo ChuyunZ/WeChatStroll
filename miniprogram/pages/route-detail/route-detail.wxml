@@ -276,6 +276,8 @@
       {{route.recommendationReason}}
     </text>
 
+    <text class="ai-copy-label" wx:if="{{route.copySource === 'ai'}}">AI 生成 · 仅供参考</text>
+
   </view>
 
 
