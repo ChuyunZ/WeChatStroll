@@ -196,3 +196,47 @@ test.each([
   const c = { ...copy, description: `${phrase}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
   expect(contract.validateCopyDetailed(c, payload()).reason).toBe('INVALID_POI');
 });
+
+test.each([
+  { name: 'Chinese half hour rounded from 29m16s', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '半小时放松心情慢慢走', accepted: true },
+  { name: 'decimal half hour rounded from 29m16s', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '0.5小时放松心情慢慢走', accepted: true },
+  { name: 'one hour rounded from 59m59s', seconds: 3599, expectedMinutes: 60,
+    requestedMinutes: 30, title: '一小时放松心情慢慢走', accepted: true },
+  { name: 'one and a half hours rounded from 89m59s', seconds: 5399, expectedMinutes: 90,
+    requestedMinutes: 45, title: '1.5小时放松心情慢慢走', accepted: true },
+  { name: 'mismatched full hour against a 30-minute route', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '一小时放松心情慢慢走', accepted: false },
+  { name: 'mismatched half hour against a 31-minute route', seconds: 1801, expectedMinutes: 31,
+    requestedMinutes: 30, title: '半小时放松心情慢慢走', accepted: false },
+  { name: 'requested half hour must not override actual 60-minute route', seconds: 3599, expectedMinutes: 60,
+    requestedMinutes: 30, title: '半小时放松心情慢慢走', accepted: false }
+])('hour-based claims follow routeFacts display duration, not exact-second drift or requested time: $name',
+  ({ seconds, expectedMinutes, requestedMinutes, title, accepted }) => {
+    const p = payload();
+    p.routeFacts.durationSeconds = seconds;
+    p.routeFacts.durationMinutes = expectedMinutes;
+    p.preferences.durationMinutes = requestedMinutes;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (accepted) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({ copy: null, reason: 'WRONG_MEASUREMENT', field: 'title' });
+  });
+
+test('live C001 rejection is a rounded half-hour false positive, not a 15-minute preference claim', () => {
+  const p = payload();
+  p.routeFacts.distanceMeters = 1920;
+  p.routeFacts.durationSeconds = 1756;
+  p.routeFacts.durationMinutes = 30;
+  p.preferences.durationMinutes = 15;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '人民公园', category: 'park' }];
+  const proposed = {
+    title: '人民公园慢环：半小时换换心情',
+    description: '从起点出发，途经人民公园，沿环线走回原处。不用赶时间，就当随意溜达一圈，看看路边的绿意，让身体和呼吸都松下来。',
+    recommendationReason: '想抽空透口气时，这条短环线刚好。途经人民公园，回路轻松，适合慢走放空，自己留意沿途的小变化就好。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});

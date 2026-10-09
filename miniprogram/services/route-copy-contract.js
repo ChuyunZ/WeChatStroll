@@ -83,7 +83,13 @@ function hasWrongMeasurements(text, r) {
     if (['公里', '千米', 'km'].includes(unit)) allowed = [r.distanceMeters / 1000, Number((r.distanceMeters / 1000).toFixed(1))];
     else if (unit === '米') allowed = [r.distanceMeters, Math.round(r.distanceMeters)];
     else if (unit === '秒') allowed = [r.durationSeconds];
-    else if (unit === '小时') allowed = [r.durationSeconds / 3600];
+    else if (unit === '小时') {
+      // Text can naturally say “半小时” for an observed 29m16s walk whose
+      // published durationMinutes is ceil(1756 / 60) = 30. Check both the
+      // precise seconds and the route's display-minute representation.
+      // Never compare against preferences.durationMinutes (user's wish).
+      allowed = [r.durationSeconds / 3600, r.durationMinutes / 60];
+    }
     else allowed = [r.durationSeconds / 60, r.durationMinutes];
     if (!allowed.some(n => Math.abs(n - value) < 0.000001)) return true;
   }

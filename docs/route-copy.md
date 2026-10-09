@@ -270,6 +270,18 @@ Before a separately authorized deployment/E2E, verify:
 
 This document records local implementation, not deployment or real-device proof.
 
+### Time-expression validation precision
+
+A live development benchmark case (`C001`, 2026-10-09) exposed a
+`WRONG_MEASUREMENT` false positive: route duration was 1,756 seconds
+(29m16s, displayed as 30 minutes) and the model said “半小时”.
+Hour-based time claims now compare against both precise seconds and
+`routeFacts.durationMinutes` (the UI/display minutes), **not**
+`preferences.durationMinutes` (the user's requested length).
+Contradictory hour claims still fail validation. Mirrored cloud and client
+contracts, and negative tests, remain in sync. The fix requires redeploying
+`routeCopyGenerator` and recompiling the mini program.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source
