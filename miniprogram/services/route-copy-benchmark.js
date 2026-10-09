@@ -8,7 +8,7 @@ const ENVIRONMENTS = ['公园', '水边', '街道', '商街'];
 const CATEGORIES = new Set(['park', 'water', 'street', 'shoppingStreet']);
 const TYPES = ['loop', 'out_and_back', 'point_to_point'];
 const MAX_SENDS = 500;
-const MIN_INTERVAL_MS = 5000;
+const MIN_INTERVAL_MS = 15000;
 const BAD_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff<>]/;
 function rng(seed) {
   let x = seed >>> 0;
@@ -163,7 +163,10 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
   if (![30, 60].includes(minutes) || !Array.isArray(cases) || cases.length < 1 ||
       cases.length > MAX_SENDS || typeof call !== 'function') throw new Error('Invalid benchmark setup');
   const begin = now(), deadline = begin + minutes * 60000;
-  // Five-second cooldown after the previous request completes, never parallel.
+  // Add a 15-second cooldown after each settled request, never parallel.
+  // Tencent CloudBase notes that 429 can stem from shared model pool
+  // contention even when the caller stays below its own concurrency cap.
+  // This reduces our burst rate; it is NOT a guarantee of availability.
   const intervalMs = MIN_INTERVAL_MS;
   const report = { schemaVersion: 1, tool: 'route-copy-development-benchmark',
     mode: 'simulated-from-tencent-poi-pool', plannedMinutes: minutes, intervalMs,

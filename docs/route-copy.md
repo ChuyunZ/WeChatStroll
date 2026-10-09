@@ -358,7 +358,7 @@ not confirmed navigable sequences. The benchmark does not call map APIs.
    calculations or evidence that this route can be walked**. Do not present
    model outputs as factual public-route recommendations. This tests grounding,
    JSON formats and validator false positives, **not genuine route E2E**.
-4. Requests are **serial**, with **5 seconds between settled requests**;
+4. Requests are **serial**, with **15 seconds between settled requests**;
    no auto retries; max **500 sends per run**, stopping at first rejection,
    invalid client copy, unknown execution, soft UI deadline or quota issue.
    The original **production** quota remains **24 sends/OpenID/day and
@@ -380,6 +380,19 @@ not confirmed navigable sequences. The benchmark does not call map APIs.
    field and redacted model reply. Treat reports as potentially sensitive:
    generated prose might contain indirect location clues. Production should
    disable and remove this developer-only panel and debug flags.
+
+A 2026-10-09 fail-fast run accepted 26 consecutive `hy3` outputs and stopped
+at C027 with `COPY_EXECUTION_UNKNOWN` and the development SDK diagnostic
+`RATE_LIMIT` (no HTTP status was exposed). This is **not** a grounded-copy
+validation failure, and not proof of a specific HTTP 429 status. Tencent's
+CloudBase documentation says even serial / below-environment-concurrency
+clients may be throttled when the **shared model resource pool** is busy.
+The benchmark therefore reduces its self-generated request pressure from
+a 5-second to a **15-second post-response cooldown**. This is a conservative
+engineering choice, **not a published `hy3` RPM requirement or a guarantee**
+against future `RATE_LIMIT` failures. The runner still stops at first
+provider uncertainty with no retry or quota refund. More generous daily dev
+quotas do not change provider rate limits.
 
 This test can deplete today's development quota; **never reset database
 counters** to bypass it. The Tencent map usage is limited to the single

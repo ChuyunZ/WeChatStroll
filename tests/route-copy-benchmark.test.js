@@ -75,7 +75,7 @@ test('first output validation failure stops immediately, including redacted deve
     onRecord: record => seen.push(record)
   });
   expect(sent).toBe(1);
-  expect(report.intervalMs).toBe(5000);
+  expect(report.intervalMs).toBe(15000);
   expect(report.stopReason).toBe('FIRST_FAILURE');
   expect(report.summary).toMatchObject({ total: 1, failed: 1, accepted: 0, rejected: 1 });
   expect(report.failures[0].validation).toMatchObject({ reason: 'INVALID_POI',
@@ -85,7 +85,7 @@ test('first output validation failure stops immediately, including redacted deve
   expect(seen).toHaveLength(1);
 });
 
-test('successful cases are sent serially with five-second cooldown, not two minutes', async () => {
+test('successful cases are sent serially with 15-second cooldown to reduce shared AI rate-limit pressure', async () => {
   let now = Date.UTC(2026, 9, 9), sent = 0;
   const times = [];
   // The server has already accepted this valid copy as a fixture.
@@ -96,8 +96,8 @@ test('successful cases are sent serially with five-second cooldown, not two minu
   // The fixed fixture uses different POI names and would be rejected by the
   // client only if it makes an explicit ungrounded claim; all are generic.
   expect(sent).toBeGreaterThanOrEqual(1);
-  expect(times.every((v, i) => !i || v - times[i - 1] === 5000)).toBe(true);
-  expect(report.intervalMs).toBe(5000);
+  expect(times.every((v, i) => !i || v - times[i - 1] === 15000)).toBe(true);
+  expect(report.intervalMs).toBe(15000);
 });
 
 test.each(['COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE', 'COPY_EXECUTION_UNKNOWN',
