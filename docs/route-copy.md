@@ -561,3 +561,37 @@ session. The sampler itself makes **zero** map calls. This replaces the
 former requirement to generate a successful walk first, which could fail
 `ROUTE_DURATION_OUT_OF_RANGE` before exposing a POI pool. No new maps,
 walking routes or AI waypoint planning are requested per copy case.
+
+
+### Audit100 run: 52 assessed, two grounded-copy rejections (2026-10-09 UTC)
+
+A development-only Cloud Test audit started at `2026-10-09T18:06:13Z`
+and evaluated **52 hy3 responses**, with **50 accepted** and **2 rejected**.
+It stopped at C052 with `ACCEPTANCE_TARGET_MISSED` and `audit.verdict=FAIL`
+because the 99% target allows at most one rejection out of 100.
+The observed 50/52 rate (96.15%) **is not** a completed 100-case pass
+rate. This run showed **no provider 429 or execution-unknown stop**.
+
+- **C041** (request `06a16abd-43d5-4d67-8493-6a3f0d8f7159`):
+  `INVALID_POI` in `title`, from a name-like
+  “途经防护林小公园”. The input contains one park POI with a 12-character
+  name; the anonymized report cannot establish the original name, but
+  the phrase was not recognized as an exact, supplied POI name.
+  **Do not** loosen exact-name safeguards.
+- **C052** (request `fd60c8c2-01c5-454e-9d57-cf3ebb38bcf7`):
+  `INVALID_ORIGIN_OR_INTERIOR` in `recommendationReason`.
+  “不必走进园里” suggests an unverified option/route relationship
+  concerning entering a park. The POI list alone cannot substantiate
+  entry or avoidance of interiors. Continue conservatively rejecting
+  such statements rather than assuming a route geometry.
+
+The cloud prompt now explicitly says to **omit long POI names from
+short titles rather than truncate them**, and to avoid **affirmative
+and negative claims about entering/avoiding POI interiors**.
+Regression tests preserve the existing validator checks. This
+change does not relax the client/cloud contract or add model retries.
+Because the prompt is hosted in the independent `routeCopyGenerator`
+Cloud Function, **deploy the updated function deliberately** before
+running a fresh live audit. GitHub commits alone do not deploy it.
+This prompt adjustment is a hypothesis to evaluate, **not a measured
+99% quality improvement**.
