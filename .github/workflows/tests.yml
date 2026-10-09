@@ -26,3 +26,6 @@ jobs:
 
       - name: Issue 91 correction benchmark (synthetic map provider)
         run: node tests/benchmarks/issue91-route-correction.cjs
+
+      - name: Issue 91 initial-candidate benchmark (synthetic map provider)
+        run: node tests/benchmarks/issue91-initial-candidates.cjs
