@@ -1,4 +1,5 @@
-const { generateCases, normalizePoiPool, runBenchmark, publicRecord, MAX_SENDS } =
+const { generateCases, normalizePoiPool, runBenchmark, publicRecord,
+  MAX_SENDS, AUDIT_COUNT, AUDIT_WINDOW_MINUTES, MIN_AUDIT_POOL } =
   require('../miniprogram/services/route-copy-benchmark');
 
 const { normalizeInput } = require('../miniprogram/services/route-copy-contract');
@@ -215,10 +216,10 @@ test('preserves allowlisted provider error codes but never arbitrary transport s
   expect(unknown.upstream).toEqual({ category: 'RATE_LIMIT' });
 });
 
-test('100-case audit PASS is 100 checked with at most one copy rejection', async () => {
-  const generated = cases(100);
+test('200-case audit PASS is 200 checked with at most one copy rejection', async () => {
+  const generated = cases(200);
   let clock = Date.UTC(2026, 9, 9), sent = 0;
-  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true, seed: 7,
+  const report = await runBenchmark({ minutes: AUDIT_WINDOW_MINUTES, cases: generated, audit200: true, seed: 7,
     now: () => clock, sleep: async ms => { clock += ms; },
     call: async () => { sent++;
       if (sent === 21) return { result: { success: false,
@@ -226,19 +227,19 @@ test('100-case audit PASS is 100 checked with at most one copy rejection', async
       return copyResult;
     }
   });
-  expect(sent).toBe(100);
-  expect(report.stopReason).toBe('AUDIT_100_COMPLETE');
+  expect(sent).toBe(200);
+  expect(report.stopReason).toBe('AUDIT_200_COMPLETE');
   expect(report.audit).toMatchObject({
-    target: 100, maxAcceptanceFailures: 1, assessed: 100,
-    accepted: 99, acceptanceFailures: 1, verdict: 'PASS'
+    target: 200, maxAcceptanceFailures: 1, assessed: 200,
+    accepted: 199, acceptanceFailures: 1, verdict: 'PASS'
   });
   expect(report.seed).toBe(7);
   expect(report.intervalMs).toBe(15000);
 });
-test('100-case audit fails promptly at second copy rejection', async () => {
-  const generated = cases(100);
+test('200-case audit fails promptly at second copy rejection', async () => {
+  const generated = cases(200);
   let sent = 0;
-  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true,
+  const report = await runBenchmark({ minutes: AUDIT_WINDOW_MINUTES, cases: generated, audit200: true,
     sleep: async () => {}, call: async () => { sent++;
       return [8, 17].includes(sent) ? { result: { success: false,
         error: { code: 'COPY_INVALID_OUTPUT' } } } : copyResult;
@@ -248,10 +249,10 @@ test('100-case audit fails promptly at second copy rejection', async () => {
   expect(report.audit).toMatchObject({ verdict: 'FAIL',
     assessed: 17, accepted: 15, acceptanceFailures: 2 });
 });
-test('100-case audit provider errors are inconclusive and never retried', async () => {
-  const generated = cases(100);
+test('200-case audit provider errors are inconclusive and never retried', async () => {
+  const generated = cases(200);
   let sent = 0;
-  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true,
+  const report = await runBenchmark({ minutes: AUDIT_WINDOW_MINUTES, cases: generated, audit200: true,
     sleep: async () => {}, call: async () => { sent++;
       return sent === 2 ? { result: { success: false,
         error: { code: 'COPY_EXECUTION_UNKNOWN' } } } : copyResult;
@@ -261,9 +262,26 @@ test('100-case audit provider errors are inconclusive and never retried', async 
   expect(report.audit).toMatchObject({ verdict: 'INCONCLUSIVE',
     assessed: 1, accepted: 1, acceptanceFailures: 0 });
 });
-test('audit requires 100 prepared cases and explicit 60-minute window', async () => {
-  await expect(runBenchmark({ minutes: 30, cases: cases(100), audit100: true,
+test('audit requires 200 prepared cases, 75-minute window and devtest pool guidance', async () => {
+  expect(AUDIT_COUNT).toBe(200);
+  expect(AUDIT_WINDOW_MINUTES).toBe(75);
+  expect(MIN_AUDIT_POOL).toBe(16);
+  await expect(runBenchmark({ minutes: 60, cases: cases(200), audit200: true,
     call: async () => copyResult })).rejects.toThrow('Invalid benchmark setup');
-  await expect(runBenchmark({ minutes: 60, cases: cases(99), audit100: true,
+  await expect(runBenchmark({ minutes: 75, cases: cases(199), audit200: true,
     call: async () => copyResult })).rejects.toThrow('Invalid benchmark setup');
+  await expect(runBenchmark({ minutes: 75, cases: cases(200), audit200: false,
+    call: async () => copyResult })).rejects.toThrow('Invalid benchmark setup');
+});
+
+test('audit200 times out as INCONCLUSIVE rather than declaring a false pass', async () => {
+  let clock = Date.UTC(2026, 9, 9), sent = 0;
+  const report = await runBenchmark({
+    minutes: AUDIT_WINDOW_MINUTES, cases: cases(200), audit200: true,
+    now: () => clock, sleep: async ms => { clock += ms; },
+    call: async () => { sent++; clock += 50000; return copyResult; }
+  });
+  expect(sent).toBeLessThan(200);
+  expect(report.stopReason).toBe('TIME_WINDOW_ENDED');
+  expect(report.audit.verdict).toBe('INCONCLUSIVE');
 });
