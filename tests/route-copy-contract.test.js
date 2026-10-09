@@ -651,3 +651,15 @@ test('audit100 C052: route must not imply park-entry avoidance without route evi
     copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'recommendationReason'
   });
 });
+
+test('audit100 C057: abbreviated pocket-park name in recommendationReason remains invalid', () => {
+  const p = payload();
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '示例城市街角综合口袋公园', category: 'park' }
+  ];
+  const c = { ...copy, recommendationReason:
+    '想轻松走走、透口气时，这条路线够简单。途经口袋公园，沿途看看周围，给自己一点慢下来的空隙。' };
+  expect(contract.validateCopyDetailed(c, p)).toMatchObject({
+    copy: null, reason: 'INVALID_POI', field: 'recommendationReason'
+  });
+});
