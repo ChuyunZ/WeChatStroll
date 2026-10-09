@@ -516,7 +516,9 @@ test.each([
   { name: '70m upper 10m boundary', seconds: 4200, displayMinutes: 70,
     requestedMinutes: 45, accepted: true },
   { name: '71m outside upper boundary', seconds: 4260, displayMinutes: 71,
-    requestedMinutes: 45, accepted: false }
+    requestedMinutes: 45, accepted: false },
+  { name: '39m still wrong despite request for 60m', seconds: 2334, displayMinutes: 39,
+    requestedMinutes: 60, accepted: false }
 ])('audit100 time grounding: $name', ({ seconds, displayMinutes, requestedMinutes, accepted }) => {
   const p = payload();
   p.routeFacts.durationSeconds = seconds;
@@ -530,3 +532,23 @@ test.each([
     copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
   });
 });
+
+test.each([
+  [24, true],
+  [23, false],
+  [36, true],
+  [37, false]
+])('差不多半小时 retains the tighter 20%% semantic bound for short durations: %i minutes',
+  (displayMinutes, allowed) => {
+    const p = payload();
+    p.routeFacts.durationSeconds = displayMinutes * 60 - 1;
+    p.routeFacts.durationMinutes = displayMinutes;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, description:
+      '从起点出发，慢慢走一段路。差不多半小时的散步时光里，不妨换换心情，按喜欢的节奏看看周围。' };
+    const validated = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(validated).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(validated).toMatchObject({
+      copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
+    });
+  });
