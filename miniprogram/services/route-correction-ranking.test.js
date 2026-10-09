@@ -127,7 +127,7 @@ test('dynamic ranking changes the next choice when the first candidate resolves 
   const outcome = await runBoundedRouteCorrections({...input,maxCandidates:2,maxNewSegmentCalls:4,
     buildCandidateRoute: async ({candidate}) => {
       tried.push(candidate.waypointIds.join(''))
-      if (tried.length === 1) { settle('A','B',750);settle('B','A',750) }
+      if (tried.length === 1) { settle('A','B',950);settle('B','A',950) }
       return {success:false,reason:'ROUTE_DURATION_OUT_OF_RANGE',
         actualDurationSeconds:2500,minDurationSeconds:1350,maxDurationSeconds:2250,
         targetDurationSeconds:1800}
