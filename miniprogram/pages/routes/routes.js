@@ -3,6 +3,7 @@ const routeGenerationService = require(
 );
 const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
+const routeCopy = require("../../services/route-copy");
 const { waypointSetKey, normalizePlanningFailure } = require("../../services/agentic-route-planning");
 const { isProviderUnavailableCode } = require("../../utils/provider-errors");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
@@ -69,6 +70,7 @@ Page({
   },
 
   onLoad(options = {}) {
+    this._unloaded = false;
     this._routePreferences = {};
     this._rawRoutes = [];
     this._routePlanningSession = null;
@@ -89,19 +91,20 @@ Page({
         eventChannel &&
         typeof eventChannel.on === "function"
       ) {
-        eventChannel.on(
-          "routePreferences",
-          (preferences) => {
-            this._routePreferences =
-              preferences &&
-              typeof preferences === "object" &&
-              !Array.isArray(preferences)
-                ? preferences
-                : {};
+        this._preferencesChannel = eventChannel;
+        this._preferencesHandler = (preferences) => {
+          if (this._unloaded) return;
+          this._routePreferences =
+            preferences &&
+            typeof preferences === "object" &&
+            !Array.isArray(preferences)
+              ? preferences
+              : {};
 
-            this.loadRoutes();
-          }
-        );
+          this.startCopySession();
+          this.loadRoutes();
+        };
+        eventChannel.on("routePreferences", this._preferencesHandler);
 
         return;
       }
@@ -117,10 +120,19 @@ Page({
       ]
     };
 
+    this.startCopySession();
     this.loadRoutes();
   },
 
   onUnload() {
+    this._unloaded = true;
+    if (this._copyUnsubscribe) this._copyUnsubscribe();
+    if (this._copySession) this._copySession.dispose();
+    this._copyUnsubscribe = this._copySession = null;
+    if (this._preferencesChannel && typeof this._preferencesChannel.off === "function") {
+      this._preferencesChannel.off("routePreferences", this._preferencesHandler);
+    }
+    this._preferencesChannel = this._preferencesHandler = null;
     this.resetManualAlternatives();
     // 页面关闭后，让仍在运行的旧请求失效。
     this._routeRequestId =
@@ -137,6 +149,8 @@ Page({
   },
 
   async loadRoutes() {
+    // Retry is a new generation, but not a new questionnaire/copy budget.
+    if (this._copySession) this._copySession.beginGeneration();
     this.resetManualAlternatives();
     const requestId =
       (this._routeRequestId || 0) + 1;
@@ -243,13 +257,7 @@ Page({
 
       this._routeLocation = routeLoadResult.location;
 
-      const preparedRoutes =
-        this.prepareRoutes(this._rawRoutes);
-
-      this.setData({
-        routes: preparedRoutes,
-        routeState: "success"
-      });
+      this.renderRoutes({ routeState: "success" });
       // Do not await the remainder before making the first route usable.
       this._initialFillPromise = this.fillInitialRoutes(requestId);
     } catch (error) {
@@ -355,7 +363,7 @@ Page({
           if (!result.success || !this.isUnseenCandidateRoute(result.route, candidate)) continue;
           this._rawRoutes = this.rankCurrentRoutes([...this._rawRoutes, result.route]);
           this.rememberSurfacedRoute(result.route);
-          this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+          this.renderRoutes();
         } catch (error) {
           if (!isCurrent()) return;
           candidateCache.markFailed(candidate.candidateId);
@@ -379,7 +387,37 @@ Page({
     });
   },
 
-  prepareRoutes(routes) {
+  startCopySession() {
+    if (this._copyUnsubscribe) this._copyUnsubscribe();
+    if (this._copySession) this._copySession.dispose();
+    this._copySession = routeCopy.createSession();
+    this._copyUnsubscribe = this._copySession.subscribe(() => this.refreshCopyPresentation());
+  },
+
+  renderRoutes(extra = {}, fallbackRouteId = null) {
+    const session = this._copySession;
+    const routes = this._rawRoutes;
+    const generation = this._routeRequestId;
+    if (session) session.reconcile(routes, this._routePreferences, this._historicalPreferenceProfile);
+    this.setData({ routes: this.prepareRoutes(routes, fallbackRouteId), ...extra }, () => {
+      if (!this._unloaded && session && session === this._copySession && generation === this._routeRequestId) {
+        session.surfaced(routes);
+      }
+    });
+  },
+
+  refreshCopyPresentation() {
+    if (this._unloaded || !this._copySession || this.data.routeState !== "success") return;
+    const updates = {};
+    (this._rawRoutes || []).forEach((route, index) => {
+      if (!this.data.routes[index] || this.data.routes[index].routeId !== route.routeId) return;
+      const copy = routeCopy.presentation(route, this._copySession);
+      Object.keys(copy).forEach(key => { updates[`routes[${index}].${key}`] = copy[key]; });
+    });
+    if (Object.keys(updates).length) this.setData(updates);
+  },
+
+  prepareRoutes(routes, fallbackRouteId = null) {
     return routes.map((route, index) => {
       const routeMap = buildRouteMap(route);
       const middleIndex =
@@ -417,6 +455,7 @@ Page({
 
       return {
         ...route,
+        ...routeCopy.presentation(route, this._copySession, route.routeId === fallbackRouteId),
         isBestMatch: routes.length >= 2 && index === 0,
         displayPois: routeMap.displayPois,
         previewMarkers: routeMap.markers,
@@ -492,11 +531,16 @@ Page({
 
     // 兼容开发 / 测试场景。
     if (!selectedRoute) {
-      selectedRoute =
+      const displayedRoute =
         this.data.routes.find(
           (route) =>
             route.routeId === routeId
         );
+      // Compatibility data must never promote an AI overlay into a Walk Route.
+      if (displayedRoute && displayedRoute.copySource !== "ai") {
+        const { copySource, ...fallbackRoute } = displayedRoute;
+        selectedRoute = fallbackRoute;
+      }
     }
 
     if (!selectedRoute) {
@@ -507,6 +551,8 @@ Page({
 
       return;
     }
+
+    if (this._copySession) this._copySession.prioritize(selectedRoute);
 
     const session = this._routePlanningSession;
     const generationId = this._routeRequestId;
@@ -565,7 +611,7 @@ Page({
           selectedRoute = preview;
           preview = null;
           this.rememberSurfacedRoute(selectedRoute);
-          this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+          this.renderRoutes({}, routeId);
           this.updateManualAlternativeControls();
           respond('routeConfirmResult', { routeId, requestId: request.requestId, route: selectedRoute });
         },
@@ -578,6 +624,7 @@ Page({
           res.eventChannel &&
           typeof res.eventChannel.emit === "function"
         ) {
+          if (this._copySession) res.eventChannel.emit("routeCopyContext", { sessionId: this._copySession.id });
           res.eventChannel.emit("routePreferences", this._routePreferences);
           res.eventChannel.emit(
             "selectedRoute",
@@ -786,7 +833,7 @@ Page({
         this._rawRoutes = this.rankCurrentRoutes(newRawRoutes);
         this.rememberSurfacedRoute(result.route);
         this._manualAlternativeActionCount++;
-        this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+        this.renderRoutes();
         console.log('[Manual AI Planning] Route accepted:', { attempt: round, action: selectedRoute ? 'replace' : 'add' });
         wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
