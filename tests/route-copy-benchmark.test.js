@@ -30,9 +30,9 @@ test('captures rejection/acceptance with bounded interval and no exposed model t
       { ...copyResult, requestID: `safe-${calls}` }; },
     onRecord: r => seen.push(r)
   });
-  expect(report.records).toHaveLength(2); // third due at the 30-minute cutoff.
-  expect(report.summary).toMatchObject({ total: 2, failed: 1, accepted: 1, rejected: 1 });
-  expect(report.records.map(r => r.code)).toEqual(['COPY_INVALID_OUTPUT', 'OK']);
+  expect(report.records).toHaveLength(3); // all three scheduled before cutoff.
+  expect(report.summary).toMatchObject({ total: 3, failed: 1, accepted: 2, rejected: 1 });
+  expect(report.records.map(r => r.code)).toEqual(['COPY_INVALID_OUTPUT', 'OK', 'OK']);
   expect(report.intervalMs).toBeGreaterThanOrEqual(120000);
   expect(JSON.stringify(report)).not.toMatch(/PRIVATE_AI|人民公园|latitude|poi-0/);
   expect(seen).toHaveLength(2);
