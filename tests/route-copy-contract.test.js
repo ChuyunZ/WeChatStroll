@@ -657,8 +657,10 @@ test('audit100 C057: abbreviated pocket-park name in recommendationReason remain
   p.routeFacts.orderedPois = [
     { ref: 'P1', name: '示例城市街角综合口袋公园', category: 'park' }
   ];
-  const c = { ...copy, recommendationReason:
-    '想轻松走走、透口气时，这条路线够简单。途经口袋公园，沿途看看周围，给自己一点慢下来的空隙。' };
+  const c = { ...copy,
+    description: '从起点出发，经过途经点后按自己的步调散步，不赶时间，留意周围的变化，享受一段悠闲的探索。',
+    recommendationReason:
+      '想轻松走走、透口气时，这条路线够简单。途经口袋公园，沿途看看周围，给自己一点慢下来的空隙。' };
   expect(contract.validateCopyDetailed(c, p)).toMatchObject({
     copy: null, reason: 'INVALID_POI', field: 'recommendationReason'
   });
