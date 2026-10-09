@@ -470,7 +470,7 @@ test('initial planner asks for duration-aware out-and-back diversity without was
  expect(text).toContain('Straight-line distances provide only rough hints')
  const {validateRoutePlan} = require('./routePlanContract')
  expect(validateRoutePlan({ candidates: [
-   { waypoints: [{poiId:'park-1'}] },
-   { waypoints: [{poiId:'park-1'}, {poiId:'water-1'}] }
+   { waypoints: [{poiId:'poi-1'}] },
+   { waypoints: [{poiId:'poi-1'}, {poiId:'poi-2'}] }
  ] }, validInput.nearbyPois).data?.candidates?.length).toBe(1)
 })
