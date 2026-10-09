@@ -34,11 +34,15 @@
     从地图原始 POI 候选池随机抽取 1–8 个地点，组合模拟路线及不同偏好。不再请求地图、Walking API 或 AI 路线规划。
     hy3 串行测试、每次结束后等待约 15 秒（降低资源池限流风险），每轮最多 500 次；
     仅开发环境每日单用户上限 1000 次、全局 2000 次（UTC 日期）。
-    上游 RATE_LIMIT 仍会立即停止，不自动重试；模型共享资源池拥堵时，即使串行也可能触发限流。
+    常规模式遇到首次失败即停；100 次验收模式允许最多一次文案失败，出现第二次即 FAIL。
+    上游 RATE_LIMIT 或执行状态不明仍会立即停止为 INCONCLUSIVE，不自动重试；
+    模型共享资源池拥堵时，即使串行也可能触发限流。
+    100 次验收只评估自动验证通过率，无法替代人工事实正确性抽查。
     遇到第一次失败立即停止并保存报告。模拟距离和时长仅用于测试输入格式，不能视为实际可走路线。
   </view>
   <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
-  <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟</button>
+  <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟（首次失败停止）</button>
+  <button data-audit="100" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">验收 100 次（99% 门槛）</button>
   <button bindtap="stopCopyBenchmark" disabled="{{!benchmarkRunning}}">停止测试</button>
   <view class="benchmark-note">已完成：{{benchmarkCompleted}} · 失败：{{benchmarkFailures}}</view>
   <view class="benchmark-note">{{benchmarkMessage}}</view>

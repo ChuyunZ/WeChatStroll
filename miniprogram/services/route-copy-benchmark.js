@@ -163,11 +163,13 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
   return record;
 }
 
-async function runBenchmark({ minutes, cases, call, now = Date.now,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+async function runBenchmark({ minutes, cases, call, audit100 = false, seed = null,
+  now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   shouldStop = () => false, onRecord = () => {} }) {
   if (![30, 60].includes(minutes) || !Array.isArray(cases) || cases.length < 1 ||
-      cases.length > MAX_SENDS || typeof call !== 'function') throw new Error('Invalid benchmark setup');
+      cases.length > MAX_SENDS || typeof call !== 'function' ||
+      typeof audit100 !== 'boolean' || (audit100 && (minutes !== 60 || cases.length < 100)))
+    throw new Error('Invalid benchmark setup');
   const begin = now(), deadline = begin + minutes * 60000;
   // Add a 15-second cooldown after each settled request, never parallel.
   // Tencent CloudBase notes that 429 can stem from shared model pool
@@ -176,8 +178,10 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
   const intervalMs = MIN_INTERVAL_MS;
   const report = { schemaVersion: 1, tool: 'route-copy-development-benchmark',
     mode: 'simulated-from-tencent-poi-pool', plannedMinutes: minutes, intervalMs,
+    testMode: audit100 ? 'audit100' : 'fail-fast',
+    ...(Number.isSafeInteger(seed) ? { seed } : {}),
     startedAt: new Date(begin).toISOString(), records: [], stopReason: null };
-  for (let i = 0; i < cases.length; i++) {
+  for (let i = 0; i < (audit100 ? 100 : cases.length); i++) {
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
     if (i > 0) await sleep(intervalMs);
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
@@ -189,15 +193,25 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
     const record = publicRecord(cases[i], startedAt, Math.max(0, now() - startedAt), response, error);
     report.records.push(record);
     try { onRecord(record, report); } catch (_) { /* Reporting must not trigger a retry. */ }
-    // Fail fast on ANY non-accepted outcome, including server validation,
-    // client revalidation, UI deadline, exhausted quota or uncertain transport.
-    // Never send a second AI request after the first problem.
-    if (record.status !== 'accepted') {
+    // Default debug mode remains strict fail-fast. Explicit 100-case audit
+    // counts copy rejections separately but never retries a request.
+    if (!audit100 && record.status !== 'accepted') {
       report.stopReason = record.status === 'rejected' ? 'FIRST_FAILURE' : record.code;
+      break;
+    }
+    // Unknown transport/provider errors have uncertain upstream execution.
+    // Never continue sending after them, even in the audit mode.
+    if (audit100 && record.status === 'stop') {
+      report.stopReason = record.code;
+      break;
+    }
+    if (audit100 && report.records.filter(r => r.status === 'rejected').length >= 2) {
+      report.stopReason = 'ACCEPTANCE_TARGET_MISSED';
       break;
     }
   }
   if (!report.stopReason) report.stopReason = shouldStop() ? 'USER_STOPPED' :
+    audit100 && report.records.length === 100 ? 'AUDIT_100_COMPLETE' :
     report.records.length === cases.length ? 'CASE_LIMIT_REACHED' : 'TIME_WINDOW_ENDED';
   report.endedAt = new Date(now()).toISOString();
   report.summary = {
@@ -207,6 +221,15 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
     rejected: report.records.filter(r => r.code === 'COPY_INVALID_OUTPUT').length
   };
   report.failures = report.records.filter(r => r.status !== 'accepted');
+  if (audit100) {
+    const acceptanceFailures = report.records.filter(r => r.status === 'rejected').length;
+    const assessed = report.records.filter(r => r.status === 'accepted' || r.status === 'rejected').length;
+    const verdict = acceptanceFailures >= 2 ? 'FAIL' :
+      report.stopReason === 'AUDIT_100_COMPLETE' && assessed === 100 &&
+        acceptanceFailures <= 1 ? 'PASS' : 'INCONCLUSIVE';
+    report.audit = { target: 100, maxAcceptanceFailures: 1, assessed,
+      accepted: report.summary.accepted, acceptanceFailures, verdict };
+  }
   return report;
 }
 

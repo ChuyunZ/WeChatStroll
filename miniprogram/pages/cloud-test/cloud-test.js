@@ -19,7 +19,9 @@ Page({
   // do not ship benchmark controls as part of the public release.
   async startCopyBenchmark(event) {
     if (this._benchmarkRunning) return;
-    const minutes = Number(event && event.currentTarget && event.currentTarget.dataset.minutes);
+    const dataset = event && event.currentTarget && event.currentTarget.dataset;
+    const audit100 = dataset && dataset.audit === '100';
+    const minutes = audit100 ? 60 : Number(dataset && dataset.minutes);
     if (![30, 60].includes(minutes)) return;
     let platform = '';
     try { platform = wx.getSystemInfoSync().platform; } catch (_) { /* fail closed */ }
@@ -32,8 +34,9 @@ Page({
       this.setData({ benchmarkMessage: '请先生成真实路线，取得地图搜索的 POI 候选池，然后进入本页' });
       return;
     }
+    const seed = Date.now();
     const cases = generateCases({
-      poiPool: routesPage._verifiedWaypointPool, seed: Date.now(), count: MAX_SENDS
+      poiPool: routesPage._verifiedWaypointPool, seed, count: MAX_SENDS
     });
     if (!cases.length) {
       this.setData({ benchmarkMessage: '没有符合文案契约的地图 POI 名称及类别，未发送请求' });
@@ -55,11 +58,13 @@ Page({
     };
     const begin = Date.now();
     this.setData({ benchmarkRunning: true, benchmarkCompleted: 0,
-      benchmarkFailures: 0, benchmarkMessage: '随机组合地图 POI + 模拟路线事实；首次失败立即停止',
+      benchmarkFailures: 0, benchmarkMessage: audit100
+        ? '100 次验收：允许至多 1 次文案拒绝，第二次立即不达标；上游异常仍立即停止'
+        : '随机组合地图 POI + 模拟路线事实；首次失败立即停止',
       benchmarkFile: path, benchmarkHasReport: false });
     try {
       const report = await runBenchmark({
-        minutes, cases,
+        minutes, cases, audit100, seed,
         shouldStop: () => control.stopped || this._unloaded,
         call: payload => wx.cloud.callFunction({ name: 'routeCopyGenerator',
           data: { payload, benchmarkDebug: true } }),
@@ -79,7 +84,9 @@ Page({
       });
       save(report);
       if (!this._unloaded) this.setData({ benchmarkHasReport: true,
-        benchmarkMessage: report.stopReason === 'FIRST_FAILURE'
+        benchmarkMessage: report.audit
+          ? `100 次验收：${report.audit.verdict}，已测 ${report.audit.assessed}/100，文案拒绝 ${report.audit.acceptanceFailures}，停止原因 ${report.stopReason}`
+          : report.stopReason === 'FIRST_FAILURE'
           ? `已自动停止：第 ${report.summary.total} 次发现问题（${report.failures[0].code}）。请复制 JSON 报告发给我。`
           : `结束: ${report.stopReason}；成功 ${report.summary.accepted} / 失败 ${report.summary.failed}` });
       console.log('[Route Copy Benchmark] Finished:', {

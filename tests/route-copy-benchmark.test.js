@@ -189,3 +189,56 @@ test('preserves allowlisted provider error codes but never arbitrary transport s
   } });
   expect(unknown.upstream).toEqual({ category: 'RATE_LIMIT' });
 });
+
+test('100-case audit PASS is 100 checked with at most one copy rejection', async () => {
+  const generated = cases(100);
+  let clock = Date.UTC(2026, 9, 9), sent = 0;
+  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true, seed: 7,
+    now: () => clock, sleep: async ms => { clock += ms; },
+    call: async () => { sent++;
+      if (sent === 21) return { result: { success: false,
+        error: { code: 'COPY_INVALID_OUTPUT' } } };
+      return copyResult;
+    }
+  });
+  expect(sent).toBe(100);
+  expect(report.stopReason).toBe('AUDIT_100_COMPLETE');
+  expect(report.audit).toMatchObject({
+    target: 100, maxAcceptanceFailures: 1, assessed: 100,
+    accepted: 99, acceptanceFailures: 1, verdict: 'PASS'
+  });
+  expect(report.seed).toBe(7);
+  expect(report.intervalMs).toBe(15000);
+});
+test('100-case audit fails promptly at second copy rejection', async () => {
+  const generated = cases(100);
+  let sent = 0;
+  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true,
+    sleep: async () => {}, call: async () => { sent++;
+      return [8, 17].includes(sent) ? { result: { success: false,
+        error: { code: 'COPY_INVALID_OUTPUT' } } } : copyResult;
+    } });
+  expect(sent).toBe(17);
+  expect(report.stopReason).toBe('ACCEPTANCE_TARGET_MISSED');
+  expect(report.audit).toMatchObject({ verdict: 'FAIL',
+    assessed: 17, accepted: 15, acceptanceFailures: 2 });
+});
+test('100-case audit provider errors are inconclusive and never retried', async () => {
+  const generated = cases(100);
+  let sent = 0;
+  const report = await runBenchmark({ minutes: 60, cases: generated, audit100: true,
+    sleep: async () => {}, call: async () => { sent++;
+      return sent === 2 ? { result: { success: false,
+        error: { code: 'COPY_EXECUTION_UNKNOWN' } } } : copyResult;
+    } });
+  expect(sent).toBe(2);
+  expect(report.stopReason).toBe('COPY_EXECUTION_UNKNOWN');
+  expect(report.audit).toMatchObject({ verdict: 'INCONCLUSIVE',
+    assessed: 1, accepted: 1, acceptanceFailures: 0 });
+});
+test('audit requires 100 prepared cases and explicit 60-minute window', async () => {
+  await expect(runBenchmark({ minutes: 30, cases: cases(100), audit100: true,
+    call: async () => copyResult })).rejects.toThrow('Invalid benchmark setup');
+  await expect(runBenchmark({ minutes: 60, cases: cases(99), audit100: true,
+    call: async () => copyResult })).rejects.toThrow('Invalid benchmark setup');
+});

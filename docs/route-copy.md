@@ -342,6 +342,20 @@ The validator now attributes this to `UNSUPPORTED_FACT` instead of
 and POI-name abbreviations. This is a correctness fix, not removal of
 factual safeguards.
 
+The devtools Cloud Test panel includes a separate opt-in
+**“验收 100 次（99% 门槛）”** mode. It reuses the same normalized Tencent POI
+pool and simulated route facts, serial 15-second post-response cooldown,
+and maximum 60-minute run. It sends **up to 100 model requests without
+retry**. A first `COPY_INVALID_OUTPUT`, client validation failure or
+UI deadline miss is recorded but does not stop; a **second** failure
+immediately marks `audit.verdict=FAIL`. One or zero copy failures among
+exactly 100 checked outputs gives `PASS`, purely for the measured
+automatic **acceptance** rate. Any upstream error/unknown execution or
+incomplete sample produces `INCONCLUSIVE`, and stops without retry.
+Seed and detailed rejected cases are kept in the JSON report.
+This mode never changes the normal fail-fast buttons and never calls
+Tencent map during the benchmark.
+
 The release quality goal is **at least 99% AI-copy acceptance AND at
 least 99% human-audited factual correctness** on independent, varied POI
 pools/real routes. A fail-fast 17/18 run cannot certify either rate.
