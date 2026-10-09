@@ -295,6 +295,17 @@ false-negative for quantity claims.
 Matched evidence was preserved as an exact C004 regression and paired
 positive/negative tests; mirrored cloud/client contracts stay identical.
 
+A normal Routes E2E request (`a52ddb9d-a5c3-40a5-92f1-5d0255b08f6d`)
+was rejected for `WRONG_MEASUREMENT` on “用大概半小时散散步”.
+The displayed route in the accompanying screenshot was about 24 minutes.
+Explicitly approximate minute/hour expressions (`约`, `大概`,
+`大约`, `差不多`, `大致`, `左右`, `上下`, `前后`)
+now allow a deviation no greater than the smaller of **6 minutes and
+20% of the claimed duration**. Unqualified time expressions still
+require the exact seconds or displayed minutes; the questionnaire target
+cannot validate an actual-time claim. Tests cover actual-style prose and
+nearby rejection boundaries.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source

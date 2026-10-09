@@ -311,3 +311,45 @@ test.each([
     if (accepted) expect(result.reason).toBeNull();
     else expect(result).toMatchObject({ reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null });
   });
+
+test.each([
+  { title: '约半小时的轻松步行', minutes: 24, allowed: true },
+  { title: '大概半小时放松一下', minutes: 24, allowed: true },
+  { title: '大约半小时散散心情', minutes: 24, allowed: true },
+  { title: '差不多半小时走一走', minutes: 24, allowed: true },
+  { title: '半小时左右放空心情', minutes: 24, allowed: true },
+  { title: '约30分钟的散步时光', minutes: 24, allowed: true },
+  { title: '约半小时的轻松步行', minutes: 23, allowed: false },
+  { title: '半小时的轻松步行时光', minutes: 24, allowed: false },
+  { title: '大概半小时散步时光', minutes: 15, allowed: false },
+  { title: '大概一小时散步时光', minutes: 24, allowed: false },
+  { title: '半小时放松心情慢慢走', minutes: 30, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 54, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 53, allowed: false }
+])('approximate time expressions have tightly bounded tolerance: $title, $minutes minutes',
+  ({ title, minutes, allowed }) => {
+    const p = payload();
+    p.routeFacts.durationMinutes = minutes;
+    p.routeFacts.durationSeconds = minutes * 60 - 5;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({ copy: null, reason: 'WRONG_MEASUREMENT', field: 'title' });
+  });
+
+test('normal Routes E2E: “用大概半小时” for a displayed 24-minute walking route', () => {
+  const p = payload();
+  p.routeFacts.durationSeconds = 1420;
+  p.routeFacts.durationMinutes = 24;
+  p.preferences.durationMinutes = 30;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '桂花园', category: 'park' }];
+  const proposed = {
+    title: '慢走桂花园，换换每日的心情',
+    description: '从起点出发，途经桂花园。用大概半小时散散步，不赶时间，看看绿意，让紧绷的神经松一松，享受属于自己的悠闲片刻。',
+    recommendationReason: '想离开日常节奏时，这里适合随意走走。不必计划太多，跟着脚步去探索，或许就能遇见舒服的好心情。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});

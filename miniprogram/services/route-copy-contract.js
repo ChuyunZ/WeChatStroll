@@ -91,7 +91,23 @@ function hasWrongMeasurements(text, r) {
       allowed = [r.durationSeconds / 3600, r.durationMinutes / 60];
     }
     else allowed = [r.durationSeconds / 60, r.durationMinutes];
-    if (!allowed.some(n => Math.abs(n - value) < 0.000001)) return true;
+    if (allowed.some(n => Math.abs(n - value) < 0.000001)) continue;
+
+    // Explicitly approximate claims have bounded leeway around the route's
+    // *displayed* duration. Do not compare against the user's desired duration.
+    // “大概半小时” for a 24-minute route is valid, but neither an unqualified
+    // “半小时” nor “大概半小时” for a 15-minute route is valid.
+    if (['小时', '分钟', '分'].includes(unit)) {
+      const prefix = text.slice(Math.max(0, m.index - 12), m.index);
+      const suffix = text.slice(regex.lastIndex);
+      const approximate = /(?:大概|大约|约|差不多|大致)\s*$/.test(prefix) ||
+        /^\s*(?:左右|上下|前后)/.test(suffix);
+      const claimedMinutes = unit === '小时' ? value * 60 : value;
+      const toleranceMinutes = Math.min(6, claimedMinutes * 0.2);
+      if (approximate && Number.isFinite(claimedMinutes) && claimedMinutes > 0 &&
+          Math.abs(r.durationMinutes - claimedMinutes) <= toleranceMinutes + 1e-9) continue;
+    }
+    return true;
   }
   return false;
 }
