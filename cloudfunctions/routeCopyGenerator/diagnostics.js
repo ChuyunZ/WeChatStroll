@@ -47,4 +47,46 @@ function reportCopyRejection(reason, modelText, payload, {
   logger('[Route Copy] Validation:', diagnostic);
   return diagnostic;
 }
-module.exports = { LOG_SNIPPET_LIMIT, scrubOutput, buildRejectionDiagnostic, reportCopyRejection };
+
+// A generateText() exception may contain full prompts, POIs, access tokens or
+// raw provider payloads, even in error.message. Never copy/log error/message,
+// stack, arbitrary code, request/response bodies or nested provider objects.
+// Only fixed categories and whitelisted numeric HTTP statuses may escape.
+function buildModelFailureDiagnostic(error) {
+  const safeGet = (value, key) => {
+    try { return value && typeof value === 'object' ? value[key] : undefined; }
+    catch (_) { return undefined; }
+  };
+  const resp = safeGet(error, 'response');
+  const candidates = [
+    safeGet(error, 'statusCode'), safeGet(error, 'status'),
+    safeGet(error, 'httpStatus'), safeGet(resp, 'statusCode'),
+    safeGet(resp, 'status')
+  ];
+  const httpStatus = candidates.map(v => typeof v === 'string' && /^[45]\d\d$/.test(v)
+    ? Number(v) : v).find(v => Number.isInteger(v) && v >= 400 && v <= 599);
+  const safeCode = safeGet(error, 'code');
+  const shortCode = typeof safeCode === 'string' ? safeCode : '';
+  let category = 'UNCLASSIFIED';
+  if (httpStatus === 429 ||
+      ['429', 'RATE_LIMIT', 'RATE_LIMIT_EXCEEDED', 'TOO_MANY_REQUESTS', 'RESOURCE_EXHAUSTED'].includes(shortCode))
+    category = 'RATE_LIMIT';
+  else if (httpStatus === 401 || httpStatus === 403 ||
+      ['UNAUTHORIZED', 'PERMISSION_DENIED'].includes(shortCode))
+    category = 'AUTH_OR_PERMISSION';
+  else if (httpStatus === 400 || httpStatus === 422) category = 'INVALID_UPSTREAM_REQUEST';
+  else if (httpStatus >= 500) category = 'UPSTREAM_SERVER';
+  else if (['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNABORTED', 'TIMEOUT'].includes(shortCode))
+    category = 'TIMEOUT';
+  else if (['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'NETWORK_ERROR'].includes(shortCode))
+    category = 'NETWORK';
+  return { event: 'ROUTE_COPY_MODEL_EXCEPTION', category,
+    ...(httpStatus === undefined ? {} : { httpStatus }) };
+}
+function reportModelFailure(error, { logger = console.warn } = {}) {
+  const diagnostic = buildModelFailureDiagnostic(error);
+  logger('[Route Copy] Model exception:', diagnostic);
+  return diagnostic;
+}
+module.exports = { LOG_SNIPPET_LIMIT, scrubOutput, buildRejectionDiagnostic, reportCopyRejection,
+  buildModelFailureDiagnostic, reportModelFailure };

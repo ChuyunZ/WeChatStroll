@@ -154,3 +154,19 @@ test('devtools-only page uses the map POI candidate pool, never re-fetches from 
   expect(ui).toContain('运行 60 分钟');
   expect(ui).toContain('复制 JSON 报告');
 });
+
+test('unknown model execution stops once and includes only safe upstream diagnostic metadata', async () => {
+  let calls = 0;
+  const report = await runBenchmark({ minutes: 30, cases: cases(5),
+    call: async () => { calls++; return {
+      result: { success: false, error: { code: 'COPY_EXECUTION_UNKNOWN' },
+        executionState: 'unknown',
+        debug: { event: 'ROUTE_COPY_MODEL_EXCEPTION', category: 'RATE_LIMIT',
+          httpStatus: 429, secret: 'PRIVATE_PROVIDER_ERROR' } }
+    }; }
+  });
+  expect(calls).toBe(1);
+  expect(report.stopReason).toBe('COPY_EXECUTION_UNKNOWN');
+  expect(report.failures[0].upstream).toEqual({ category: 'RATE_LIMIT', httpStatus: 429 });
+  expect(JSON.stringify(report)).not.toContain('PRIVATE_PROVIDER_ERROR');
+});

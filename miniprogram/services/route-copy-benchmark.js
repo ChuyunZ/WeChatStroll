@@ -141,7 +141,19 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
         ? { modelTextRedacted: d.modelTextRedacted } : {})
     };
   }
+  if (code === 'COPY_EXECUTION_UNKNOWN' && result && result.debug &&
+      result.debug.event === 'ROUTE_COPY_MODEL_EXCEPTION') {
+    const diag = result.debug;
+    const categories = ['RATE_LIMIT', 'AUTH_OR_PERMISSION', 'INVALID_UPSTREAM_REQUEST',
+      'UPSTREAM_SERVER', 'TIMEOUT', 'NETWORK', 'UNCLASSIFIED'];
+    record.upstream = {
+      category: categories.includes(diag.category) ? diag.category : 'UNCLASSIFIED',
+      ...(Number.isInteger(diag.httpStatus) && diag.httpStatus >= 400 && diag.httpStatus <= 599
+        ? { httpStatus: diag.httpStatus } : {})
+    };
+  }
   if (code === 'COPY_INVALID_OUTPUT' && !record.validation) record.diagnosticsMissing = true;
+  if (code === 'COPY_EXECUTION_UNKNOWN' && !record.upstream) record.diagnosticsMissing = true;
   return record;
 }
 

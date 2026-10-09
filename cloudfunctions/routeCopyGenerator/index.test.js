@@ -215,3 +215,40 @@ test('explicit benchmark diagnostic is included only for opted-in development ou
     { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '0' });
   expect(disabled).not.toHaveProperty('debug');
 });
+
+test.each([
+  { err: Object.assign(new Error('SECRET_PROMPT'), { statusCode: 429, code: 'OTHER' }), expected: { category: 'RATE_LIMIT', httpStatus: 429 } },
+  { err: Object.assign(new Error('SECRET_PROMPT'), { response: { status: 503, data: 'SECRET_DATA' } }), expected: { category: 'UPSTREAM_SERVER', httpStatus: 503 } },
+  { err: Object.assign(new Error('SECRET_PROMPT'), { code: 'ETIMEDOUT' }), expected: { category: 'TIMEOUT' } },
+  { err: Object.assign(new Error('SECRET_PROMPT'), { code: 'ECONNRESET' }), expected: { category: 'NETWORK' } },
+  { err: Object.assign(new Error('SECRET_PROMPT'), { status: '403' }), expected: { category: 'AUTH_OR_PERMISSION', httpStatus: 403 } },
+  { err: Object.assign(new Error('SECRET_PROMPT'), { code: 'SECRET_USER_TOKEN', message: 'SECRET_PROMPT' }), expected: { category: 'UNCLASSIFIED' } }
+])('model exceptions provide safe diagnostic categories without exposing error data', async ({ err, expected }) => {
+  const { buildModelFailureDiagnostic, reportModelFailure } = require('./diagnostics');
+  expect(buildModelFailureDiagnostic(err)).toMatchObject({ event: 'ROUTE_COPY_MODEL_EXCEPTION', ...expected });
+  const logger = jest.fn();
+  reportModelFailure(err, { logger });
+  const entry = logger.mock.calls[0][1];
+  expect(entry).toMatchObject({ event: 'ROUTE_COPY_MODEL_EXCEPTION', ...expected });
+  expect(JSON.stringify(logger.mock.calls)).not.toMatch(/SECRET_PROMPT|SECRET_DATA|SECRET_USER_TOKEN/);
+  const mock = jest.fn().mockRejectedValue(err);
+  const deps = {
+    openid: 'private-openid', diagnosticsEnv: { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '1' },
+    createModel: () => ({ generateText: mock }), reserveQuota: async () => ({ allowed: true }),
+    reportUpstreamFailure: () => { throw new Error('logger failed'); }
+  };
+  const response = await generateCopy({ payload: payload(), benchmarkDebug: true }, deps);
+  expect(response).toMatchObject({ success: false, executionState: 'unknown',
+    error: { code: 'COPY_EXECUTION_UNKNOWN' },
+    debug: { event: 'ROUTE_COPY_MODEL_EXCEPTION', ...expected } });
+  expect(mock).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(response)).not.toMatch(/SECRET_PROMPT|SECRET_DATA|SECRET_USER_TOKEN|private-openid/);
+  const normal = await generateCopy({ payload: payload() }, deps);
+  expect(normal).not.toHaveProperty('debug');
+  const production = await generateCopy({ payload: payload(), benchmarkDebug: true },
+    { ...deps, diagnosticsEnv: { ROUTE_COPY_DEPLOYMENT_STAGE: 'production', ROUTE_COPY_DEBUG_TEXT: '1' } });
+  expect(production).not.toHaveProperty('debug');
+  const disabled = await generateCopy({ payload: payload(), benchmarkDebug: true },
+    { ...deps, diagnosticsEnv: { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '0' } });
+  expect(disabled).not.toHaveProperty('debug');
+});

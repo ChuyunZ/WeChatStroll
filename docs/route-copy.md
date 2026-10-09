@@ -306,6 +306,17 @@ require the exact seconds or displayed minutes; the questionnaire target
 cannot validate an actual-time claim. Tests cover actual-style prose and
 nearby rejection boundaries.
 
+A later live stress-test stopped at C006 (after five accepted outputs) with
+`COPY_EXECUTION_UNKNOWN` in 850 ms, rather than a validator failure or
+the 20-second UI deadline. The model SDK threw during `generateText()`,
+but the thrown object's payload was intentionally never logged. Developer
+diagnostics now whitelist only a fixed model-exception category and an
+optional numeric HTTP status; no raw SDK error, stack, response, POI,
+identity or prompt is stored. For an opted-in development benchmark, this
+limited metadata appears in `upstream` in the JSON report. Unknown
+execution still pauses the run; no automatic retry or quota refund is
+introduced. This does not identify the cause of the already-captured C006.
+
 The third live failure (`C041`, request
 `0b75e1bf-47b9-40ef-ab81-6c2b9112270a`) occurred after **40
 consecutive accepted outputs**. The model correctly wrote “用不到半小时”

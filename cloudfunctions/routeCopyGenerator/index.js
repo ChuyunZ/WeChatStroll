@@ -1,6 +1,7 @@
 const cloud = require('wx-server-sdk');
 const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopyDetailed } = require('./contract');
-const { reportCopyRejection, buildRejectionDiagnostic } = require('./diagnostics');
+const { reportCopyRejection, buildRejectionDiagnostic,
+  buildModelFailureDiagnostic, reportModelFailure } = require('./diagnostics');
 const { buildPrompt } = require('./prompt');
 const { createStore } = require('./quota-store');
 const { createQuotaGate, quotaLimitsForEnvironment } = require('./quota');
@@ -20,7 +21,7 @@ const failure = code => ({ success: false, error: { code, message: MESSAGES[code
   ...(code === 'COPY_EXECUTION_UNKNOWN' ? { executionState: 'unknown' } : {}) });
 
 async function generateCopy(event, { openid, createModel, reserveQuota, reportRejection = reportCopyRejection,
-  diagnosticsEnv = process.env } = {}) {
+  diagnosticsEnv = process.env, reportUpstreamFailure = reportModelFailure } = {}) {
   if (typeof openid !== 'string' || !openid.trim()) return failure('COPY_UNAUTHORIZED');
   if (byteLength(event) > MAX_INPUT_BYTES * 2) return failure('COPY_INVALID_INPUT');
   // Read only the business envelope; CloudBase may inject other event metadata.
@@ -41,10 +42,20 @@ async function generateCopy(event, { openid, createModel, reserveQuota, reportRe
   try {
     result = await model.generateText({ model: AI_MODEL, maxSteps: 1,
       messages: [{ role: 'user', content: buildPrompt(payload) }] });
-  } catch (_) {
-    // A timed-out transport does not prove that upstream inference stopped.
-    // Never log upstream errors: they may echo input or model output.
-    return failure('COPY_EXECUTION_UNKNOWN');
+  } catch (error) {
+    // An upstream rejection does NOT establish whether inference began or
+    // consumed tokens. No retry/refund. Raw provider errors can contain
+    // prompts and secret fields; only fixed, allowlisted metadata is emitted.
+    let diagnostic = null;
+    try { diagnostic = buildModelFailureDiagnostic(error); } catch (_) { /* fail closed */ }
+    try { reportUpstreamFailure(error); } catch (_) { /* diagnostics best effort */ }
+    const response = failure('COPY_EXECUTION_UNKNOWN');
+    if (event && event.benchmarkDebug === true &&
+        diagnosticsEnv && diagnosticsEnv.ROUTE_COPY_DEPLOYMENT_STAGE === 'development' &&
+        diagnosticsEnv.ROUTE_COPY_DEBUG_TEXT === '1' && diagnostic) {
+      response.debug = diagnostic;
+    }
+    return response;
   }
   // Only an explicitly requested benchmark in a configured development Cloud
   // Function may receive a redacted rejection diagnostic. Normal app callers,
