@@ -330,6 +330,38 @@ tolerance checks; the user's preferred duration is never used as a
 route fact. Tests include C041's complete model output, threshold
 boundaries at 29/30/31/40 minutes, and both sign directions.
 
+### New audit100 C019/C029 (2026-10-09 04:41–04:50 UTC)
+
+The next live run reached **29 checked outputs**, with 27 accepted and
+2 copy rejections (about 93.1% automatic acceptance). It stopped with
+`ACCEPTANCE_TARGET_MISSED`, not upstream `429`. The 99% gate remains
+unmet. Because the run is sourced from a single eight-POI pool with
+simulated route facts, it does not establish human factual accuracy.
+
+- **C019 (request `05968881-3848-4e5a-8233-de9e65d5729c`)**:
+  `INVALID_POI` in the recommendation reason misread the generic noun
+  “途经点能让你不必赶路” as a new road name ending in 路. However,
+  the same copy also asserted “树影摇曳” in the description and
+  “身边的安静角落” in the recommendation, neither grounded by a list of
+  park-category POIs. The parser now excludes the generic noun “途经点”
+  without exempting explicit invented names like “途经点：紫荆公园”;
+  unsupported scenery/quiet observations remain rejected as
+  `UNSUPPORTED_FACT`. Prompt warns against these ungrounded
+  environmental details and suggests neutral, subjective alternatives.
+- **C029 (request `b3d9accc-d3b8-40b4-90a6-1296226f81fe`)**:
+  `INVALID_ORIGIN_OR_INTERIOR` was **correct**: “再走进” two parks
+  cannot be verified from ordered POIs alone. Keep the rejection and
+  strengthen the prompt with explicit prohibited venue-entry verbs,
+  alternatives like “途经”, and unsupported forest-interior scenes.
+  The model copy's title/other sentences may also claim ungrounded
+  forest details, which requires human attention.
+
+Regressions separate generic-waypoint names from invented names,
+subjective aspirations from alleged observations, and neutral POI
+passage from unsupported venue entry. Do not loosen validator safety
+to inflate acceptance. Another live 100-case run and independent human
+factual audit are required before asserting 99% quality.
+
 ### Audit100 time-grounding review (C002 / C004)
 
 A fresh 100-case audit stopped on its second copy rejection after only four

@@ -160,6 +160,10 @@ function hasUnsupportedClaim(text) {
     // conveniently "on the way", easy to walk, or objectively good to visit.
     // C018: "这两处途经点顺路又好逛" is an unsupported assertion.
     if (/顺路(?:又|也|而且)?(?:好逛|方便|好走|省时)/.test(part)) return true;
+    // A park-category waypoint does not prove actual quiet corners or moving
+    // tree shadows along the route. Intentions (“希望有…”) are handled by
+    // the existing per-clause wish exemption above.
+    if (/(?:安静|宁静|幽静|清静|僻静)(?:的)?(?:角落|街角|街区|环境|空间)|树影摇曳/.test(part)) return true;
     if (/(?:全程|沿途|这里|这条路线|道路|路面|步道|【已知地点】(?:内|里|沿线)?)(?:都|均|十分|非常|很|始终|绝对|完全|保证|是|设有|有|并不|不|没有)*\s*(?:安全|无障碍|平坦|安静|人少|拥挤|人多|没有车辆|没有台阶|有路灯|有厕所|有座椅|有樱花|有湖景)/.test(part) ||
         /(?:全程|沿途|这里|【已知地点】(?:内|里)?)(?:有|设有|配有|提供|遍布|可以欣赏到|能看到)(?:免费的?|连续的?|完善的?|盛开的?)?(?:路灯|厕所|座椅|樱花|湖景|河景|护栏|坡道|饮水|洗手间)/.test(part) ||
         /(?:保证安全|绝对安全|放心通行|零风险|全程无车|轮椅畅行|人流量为|人流量仅|每小时\d+人)/.test(part)) return true;
@@ -184,13 +188,21 @@ function hasUnknownPoiName(maskedText) {
   // Let the “经过” alternative consume the overlap so “几个公园”
   // remains a generic, quantified place category. Still reject actual
   // invented proper nouns following either verb.
-  const name = /(?:前往|途经(?!过)|抵达|到达|走进|经过)(?:位于)?([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
+  // “途经点” is a generic noun, not the transit verb 途经 followed by a
+  // new place. C019: “这几处途经点能让你不必赶路” accidentally looked
+  // like a fictitious street name ending in “路”. A genuine place name
+  // after “途经” or a labelled “途经点：XXX” still gets checked.
+  const name = /(?:前往|途经(?!过|点)|抵达|到达|走进|经过)(?:位于)?([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
+  const labelledWaypoint = /途经点\s*(?:是|为|[:：])\s*([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
   // A measured quantity + place category is not a newly invented proper
   // name. The live benchmark C004 yielded "途经几处公园", while every
   // provided waypoint was a park. Match only explicit counters, not bare
   // numerals: "三桥" may be a real, unlisted place name.
   const generic = /^(?:(?:几|数|多|几十|若干|一|两|二|三|四|五|六|七|八|九|十)(?:个|处|座|条|片)|一些|不少|许多|好几个|好几处|若干个)(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)$/;
   return fragments.some(fragment => {
+    for (const match of fragment.matchAll(labelledWaypoint)) {
+      if (!generic.test(match[1])) return true;
+    }
     for (const match of fragment.matchAll(name)) {
       // “走进公园” is a claim about actually entering a venue; the
       // ordered POI list alone cannot establish that, even for several parks.

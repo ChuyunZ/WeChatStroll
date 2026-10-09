@@ -26,3 +26,13 @@ test.each([
     expect(prompt).toContain('不要另行估算时长');
     expect(prompt).toContain('不得自创简称');
   });
+
+test('C019/C029: prompt forbids unverified quiet/scenery and POI venue-entry claims', () => {
+  const p = projectRoute(route(), preferences, history).payload;
+  const text = buildPrompt(p);
+  for (const fragment of [
+    '只证明路线上经过这些地点', '不要写“走进XX”', '“再走进XX”',
+    '“穿过XX”', '“在林间走”', '“安静角落”', '“树影摇曳”',
+    '“穿街过林”', '可以用“留意周围”'
+  ]) expect(text).toContain(fragment);
+});

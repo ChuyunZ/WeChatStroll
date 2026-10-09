@@ -552,3 +552,83 @@ test.each([
       copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
     });
   });
+
+test('audit100 C019: generic 途经点 is not a fabricated road, but invented scenery is rejected', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.durationSeconds = 2701;
+  p.routeFacts.durationMinutes = 46;
+  p.routeFacts.distanceMeters = 2470;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '翠云园', category: 'park' },
+    { ref: 'P2', name: '云翠休闲森林公园观景入口', category: 'park' },
+    { ref: 'P3', name: '杏花园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 15;
+  const base = {
+    title: '慢走途经三处绿意小憩一下',
+    description: '从起点出发，途经翠云园、云翠休闲森林公园观景入口与杏花园。不妨随性走走，换换心情，在城市的缝隙里看看树影摇曳，享受属于自己的悠闲片刻。',
+    recommendationReason: '想短暂抽离琐碎时，这几处途经点能让你不必赶路，自主探索身边的安静角落，随心停下张望，给日常松一松绑。'
+  };
+  expect(contract.validateCopyDetailed(base, p)).toMatchObject({
+    copy: null, reason: 'UNSUPPORTED_FACT', field: 'description'
+  });
+  const withoutShadows = { ...base,
+    description: base.description.replace('看看树影摇曳', '留意身边的小变化') };
+  expect(contract.validateCopyDetailed(withoutShadows, p)).toMatchObject({
+    copy: null, reason: 'UNSUPPORTED_FACT', field: 'recommendationReason'
+  });
+  const fullyGrounded = { ...withoutShadows,
+    recommendationReason: withoutShadows.recommendationReason.replace('自主探索身边的安静角落',
+      '按自己的节奏探索周围') };
+  expect(contract.validateCopyDetailed(fullyGrounded, p))
+    .toEqual({ copy: fullyGrounded, reason: null, field: null });
+});
+test.each([
+  ['这些途经点能让你不必赶路，按自己的节奏探索周围。', null],
+  ['这些途经点让人不赶路，给日常留一点轻松时光。', null],
+  ['希望能找到安静角落，按自己的节奏走走。', null],
+  ['这几处途经点能让你不必赶路，附近有安静角落。', 'UNSUPPORTED_FACT'],
+  ['留意路边树影摇曳，给日常留一点轻松时光。', 'UNSUPPORTED_FACT'],
+  ['途经点：虚构的紫荆公园，按自己的节奏探索周围。', 'INVALID_POI'],
+  ['随后途经虚构的紫荆公园，按自己的节奏探索周围。', 'INVALID_POI']
+])('C019 disambiguates generic waypoints and actual fabricated landmarks: %s',
+  (sentence, reason) => {
+    const p = payload();
+    const proposed = { ...copy,
+      recommendationReason: sentence + '不用赶时间，不妨换换心情。' };
+    const got = contract.validateCopyDetailed(proposed, p);
+    if (reason) expect(got).toMatchObject({ reason, field: 'recommendationReason', copy: null });
+    else expect(got).toEqual({ copy: proposed, reason: null, field: null });
+  });
+test('audit100 C029: entering two masked POIs is not supported by waypoint-only route input', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'loop';
+  p.routeFacts.returnsToStart = true;
+  p.routeFacts.distanceMeters = 3680;
+  p.routeFacts.durationSeconds = 3964;
+  p.routeFacts.durationMinutes = 67;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '人民商街路步行街', category: 'shoppingStreet' },
+    { ref: 'P2', name: '沿河商业街区', category: 'shoppingStreet' },
+    { ref: 'P3', name: '花月园', category: 'park' },
+    { ref: 'P4', name: '芳菲生态绿地公园入口观景处', category: 'park' },
+    { ref: 'P5', name: '杏林公园', category: 'park' }
+  ];
+  const proposed = {
+    title: '穿街过林，慢逛人民商街路步行街一带',
+    description: '从起点出发，途经人民商街路步行街、沿河商业街区，再走进花月园、芳菲生态绿地公园入口观景处，最后前往杏林公园。沿路换换心情，随心看看街市与绿意。',
+    recommendationReason: '这条路线串起商街与几处公园，不用赶着走，适合想悠闲探索、在街头和林间自由切换氛围时，慢慢体会周边日常景致。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p)).toMatchObject({
+    reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description', copy: null
+  });
+  const neutral = { ...proposed,
+    title: '沿途慢逛，探索街角的自在时光',
+    description: proposed.description.replace('再走进', '再途经'),
+    recommendationReason: '途经商街与几个公园，你可以按自己的节奏慢慢走，想停下时稍作休息，让散步成为一段自在的时光。'
+  };
+  expect(contract.validateCopyDetailed(neutral, p))
+    .toEqual({ copy: neutral, reason: null, field: null });
+});
