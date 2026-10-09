@@ -107,6 +107,18 @@ function hasUnsupportedClaim(text) {
 // The POI list has ordered stops, not the user's original GPS starting point
 // or proof that the walking polyline enters a venue or follows an inner path.
 // Apply this check to location-masked prose so actual POI names are irrelevant.
+// A named destination must be a recognisable contiguous name, not an
+// arbitrary substring crossing Chinese clause/sequence words. In particular,
+// “途经商街再到公园外的路线” is generic prose, not an invented street name.
+// False negatives in complex Chinese remain possible; never treat this as a
+// complete named-entity recognizer.
+function hasUnknownPoiName(maskedText) {
+  if (/\bP\d+\b/.test(maskedText)) return true;
+  if (/[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(maskedText)) return true;
+  const fragments = maskedText.split(/(?:再到|再去|然后|随后|接着|以及|同时|中途|一路|沿途|这条|那条|路线|(?:公园|商街|广场)(?:外|里|内|旁|附近)(?:的)?|[，。！？；、与和及])/);
+  const name = /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)(?!线)/;
+  return fragments.some(fragment => name.test(fragment));
+}
 function hasUnsupportedOriginOrInterior(text) {
   if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
   // A POI category/name is not verified evidence of a traversed park footpath,
@@ -137,8 +149,7 @@ function validateCopyDetailed(copy, payload) {
     if (hasWrongMeasurements(text, r)) return rejectCopy('WRONG_MEASUREMENT', field);
     // Unknown explicit references and recognisable named destinations only.
     // Generic wishes such as “去公园换换心情” are not factual environment claims.
-    if (/\bP\d+\b/.test(text) || /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)/.test(text) ||
-        /[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(text)) return rejectCopy('INVALID_POI', field);
+    if (hasUnknownPoiName(text)) return rejectCopy('INVALID_POI', field);
     if (hasUnsupportedClaim(text)) return rejectCopy('UNSUPPORTED_FACT', field);
     if (hasUnsupportedOriginOrInterior(text)) return rejectCopy('INVALID_ORIGIN_OR_INTERIOR', field);
     if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);

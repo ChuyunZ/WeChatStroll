@@ -175,3 +175,24 @@ test('detailed validation also preserves accepted copy unchanged', () => {
   expect(contract.validateCopyDetailed(copy, payload())).toEqual({ copy, reason: null, field: null });
   expect(contract.parseCopyDetailed(JSON.stringify(copy), payload())).toEqual({ copy, reason: null, field: null });
 });
+
+test.each([
+  '想轻松散个步时，这条途经商街再到公园外的路线挺合适，中途可自主探索，到了尽头处静静待一会儿，挺治愈。',
+  '从起点出发，途经商街再到公园外的路线，不必赶时间。',
+  '途经商街，然后去公园外走走，按自己的节奏散步。',
+  '沿途可以自由探索，经过商街与公园周边的路线。',
+  '途经公园外的路线，随心看看街景，放慢脚步。'
+])('does not mistake generic places or the word 路线 for invented named POIs: %s', phrase => {
+  const c = { ...copy, recommendationReason: phrase.slice(0, 80) };
+  expect(contract.validateCopyDetailed(c, payload()).reason).not.toBe('INVALID_POI');
+});
+test.each([
+  '途经不存在的紫荆公园',
+  '走进陌生的海滨博物馆',
+  '一路经过东方明珠塔',
+  '前往虚构的海滨大道',
+  '经过陌生的小龙桥'
+])('continues rejecting recognisable invented named places: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopyDetailed(c, payload()).reason).toBe('INVALID_POI');
+});
