@@ -170,3 +170,22 @@ test('unknown model execution stops once and includes only safe upstream diagnos
   expect(report.failures[0].upstream).toEqual({ category: 'RATE_LIMIT', httpStatus: 429 });
   expect(JSON.stringify(report)).not.toContain('PRIVATE_PROVIDER_ERROR');
 });
+
+test('preserves allowlisted provider error codes but never arbitrary transport strings', () => {
+  const sample = cases(1)[0], now = Date.UTC(2026, 9, 9);
+  const known = publicRecord(sample, now, 946, { result: {
+    success: false, error: { code: 'COPY_EXECUTION_UNKNOWN' },
+    debug: { event: 'ROUTE_COPY_MODEL_EXCEPTION', category: 'CONCURRENCY_LIMIT',
+      providerCode: 'EXCEED_CONCURRENT_REQUEST_LIMIT', secret: 'PRIVATE_AI' }
+  } });
+  expect(known.upstream).toEqual({
+    category: 'CONCURRENCY_LIMIT', providerCode: 'EXCEED_CONCURRENT_REQUEST_LIMIT'
+  });
+  expect(JSON.stringify(known)).not.toContain('PRIVATE_AI');
+  const unknown = publicRecord(sample, now, 946, { result: {
+    success: false, error: { code: 'COPY_EXECUTION_UNKNOWN' },
+    debug: { event: 'ROUTE_COPY_MODEL_EXCEPTION', category: 'RATE_LIMIT',
+      providerCode: 'SENSITIVE_POI_FAKE_CODE' }
+  } });
+  expect(unknown.upstream).toEqual({ category: 'RATE_LIMIT' });
+});

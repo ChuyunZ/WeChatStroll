@@ -394,6 +394,26 @@ against future `RATE_LIMIT` failures. The runner still stops at first
 provider uncertainty with no retry or quota refund. More generous daily dev
 quotas do not change provider rate limits.
 
+A further run after the 15-second pacing change stopped on **C001**
+(`2026-10-09T03:25:57.656Z`, Request ID
+`63d98221-9c60-4262-ac93-b27c44d97cc8`) in 946 ms with
+`COPY_EXECUTION_UNKNOWN` and generic `RATE_LIMIT`.
+Because this was the first request of the run, changing the *inter-request*
+cooldown cannot directly fix this failure. No HTTP status or raw SDK code was
+captured, and earlier diagnostics had collapsed `RESOURCE_EXHAUSTED` and
+several rate-limit signals to one category. We cannot prove the precise
+provider cause from this report.
+
+For future calls only, development-only opt-in diagnostics now retain a
+**fixed allowlist of error.code strings** in `upstream.providerCode`,
+distinguishing `EXCEED_CONCURRENT_REQUEST_LIMIT`,
+`EXCEED_TOKEN_QUOTA_LIMIT`, `RESOURCE_EXHAUSTED`, and known rate-limit
+codes. Arbitrary provider errors, stacks and messages remain prohibited.
+The normal/prod response contract, no-retry/fail-fast policy, and daily
+quotas are unchanged. If the known code is still absent, contact Tencent
+CloudBase support with the UTC time and Request ID rather than making
+rapid repeat calls.
+
 This test can deplete today's development quota; **never reset database
 counters** to bypass it. The Tencent map usage is limited to the single
 ordinary route setup step; no map provider API is called by the sampler.

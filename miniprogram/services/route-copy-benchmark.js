@@ -144,12 +144,18 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
   if (code === 'COPY_EXECUTION_UNKNOWN' && result && result.debug &&
       result.debug.event === 'ROUTE_COPY_MODEL_EXCEPTION') {
     const diag = result.debug;
-    const categories = ['RATE_LIMIT', 'AUTH_OR_PERMISSION', 'INVALID_UPSTREAM_REQUEST',
+    const categories = ['RATE_LIMIT', 'CONCURRENCY_LIMIT', 'TOKEN_QUOTA',
+      'RESOURCE_LIMIT_UNKNOWN', 'AUTH_OR_PERMISSION', 'INVALID_UPSTREAM_REQUEST',
       'UPSTREAM_SERVER', 'TIMEOUT', 'NETWORK', 'UNCLASSIFIED'];
+    const providerCodes = ['429', 'RATE_LIMIT', 'RATE_LIMIT_EXCEEDED',
+      'TOO_MANY_REQUESTS', 'RESOURCE_EXHAUSTED', 'EXCEED_RATELIMIT',
+      'EXCEED_CONCURRENT_REQUEST_LIMIT', 'EXCEED_TOKEN_QUOTA_LIMIT'];
     record.upstream = {
       category: categories.includes(diag.category) ? diag.category : 'UNCLASSIFIED',
       ...(Number.isInteger(diag.httpStatus) && diag.httpStatus >= 400 && diag.httpStatus <= 599
-        ? { httpStatus: diag.httpStatus } : {})
+        ? { httpStatus: diag.httpStatus } : {}),
+      ...(providerCodes.includes(diag.providerCode)
+        ? { providerCode: diag.providerCode } : {})
     };
   }
   if (code === 'COPY_INVALID_OUTPUT' && !record.validation) record.diagnosticsMissing = true;

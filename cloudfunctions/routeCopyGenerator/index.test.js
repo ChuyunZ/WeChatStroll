@@ -252,3 +252,38 @@ test.each([
     { ...deps, diagnosticsEnv: { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '0' } });
   expect(disabled).not.toHaveProperty('debug');
 });
+
+test.each([
+  ['EXCEED_CONCURRENT_REQUEST_LIMIT', 'CONCURRENCY_LIMIT'],
+  ['EXCEED_TOKEN_QUOTA_LIMIT', 'TOKEN_QUOTA'],
+  ['RESOURCE_EXHAUSTED', 'RESOURCE_LIMIT_UNKNOWN'],
+  ['EXCEED_RATELIMIT', 'RATE_LIMIT'],
+  ['429', 'RATE_LIMIT'],
+  ['RATE_LIMIT_EXCEEDED', 'RATE_LIMIT']
+])('whitelists the provider SDK code and distinguishes concurrency, quota and unknown resource exhaustion: %s',
+  async (providerCode, category) => {
+    const { buildModelFailureDiagnostic } = require('./diagnostics');
+    const error = Object.assign(new Error('SECRET_PROMPT'), { code: providerCode });
+    const d = buildModelFailureDiagnostic(error);
+    expect(d).toEqual({ event: 'ROUTE_COPY_MODEL_EXCEPTION', category, providerCode });
+    const response = await generateCopy({ payload: payload(), benchmarkDebug: true },
+      withQuota({ openid: 'SECRET_OPENID',
+        diagnosticsEnv: { ROUTE_COPY_DEPLOYMENT_STAGE: 'development', ROUTE_COPY_DEBUG_TEXT: '1' },
+        createModel: () => ({ generateText: async () => { throw error; } }),
+        reportUpstreamFailure: () => {}
+      }));
+    expect(response.debug).toEqual(d);
+    expect(JSON.stringify(response)).not.toMatch(/SECRET_PROMPT|SECRET_OPENID/);
+  });
+
+test('unknown provider code and message are never reflected into diagnostic logs or clients', async () => {
+  const { buildModelFailureDiagnostic, reportModelFailure } = require('./diagnostics');
+  const error = Object.assign(new Error('SENSITIVE_POI'), { code: 'RATE_LIMIT_API_KEY_SECRET' });
+  const logger = jest.fn();
+  reportModelFailure(error, { logger });
+  expect(logger.mock.calls[0][1]).toEqual({
+    event: 'ROUTE_COPY_MODEL_EXCEPTION', category: 'UNCLASSIFIED'
+  });
+  expect(buildModelFailureDiagnostic(error)).not.toHaveProperty('providerCode');
+  expect(JSON.stringify(logger.mock.calls)).not.toMatch(/RATE_LIMIT_API_KEY_SECRET|SENSITIVE_POI/);
+});

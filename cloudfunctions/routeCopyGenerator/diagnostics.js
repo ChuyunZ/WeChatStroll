@@ -67,9 +67,21 @@ function buildModelFailureDiagnostic(error) {
     ? Number(v) : v).find(v => Number.isInteger(v) && v >= 400 && v <= 599);
   const safeCode = safeGet(error, 'code');
   const shortCode = typeof safeCode === 'string' ? safeCode : '';
+  // Explicit allowlist: NEVER include an arbitrary SDK code, which could
+  // contain dynamic upstream content, user input or access tokens.
+  const providerCodes = new Set([
+    '429', 'RATE_LIMIT', 'RATE_LIMIT_EXCEEDED', 'TOO_MANY_REQUESTS',
+    'RESOURCE_EXHAUSTED', 'EXCEED_RATELIMIT',
+    'EXCEED_CONCURRENT_REQUEST_LIMIT', 'EXCEED_TOKEN_QUOTA_LIMIT'
+  ]);
+  const providerCode = providerCodes.has(shortCode) ? shortCode : null;
   let category = 'UNCLASSIFIED';
-  if (httpStatus === 429 ||
-      ['429', 'RATE_LIMIT', 'RATE_LIMIT_EXCEEDED', 'TOO_MANY_REQUESTS', 'RESOURCE_EXHAUSTED'].includes(shortCode))
+  if (providerCode === 'EXCEED_TOKEN_QUOTA_LIMIT') category = 'TOKEN_QUOTA';
+  else if (providerCode === 'EXCEED_CONCURRENT_REQUEST_LIMIT') category = 'CONCURRENCY_LIMIT';
+  else if (providerCode === 'RESOURCE_EXHAUSTED') category = 'RESOURCE_LIMIT_UNKNOWN';
+  else if (httpStatus === 429 ||
+      ['429', 'RATE_LIMIT', 'RATE_LIMIT_EXCEEDED', 'TOO_MANY_REQUESTS',
+        'EXCEED_RATELIMIT'].includes(shortCode))
     category = 'RATE_LIMIT';
   else if (httpStatus === 401 || httpStatus === 403 ||
       ['UNAUTHORIZED', 'PERMISSION_DENIED'].includes(shortCode))
@@ -81,7 +93,8 @@ function buildModelFailureDiagnostic(error) {
   else if (['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'NETWORK_ERROR'].includes(shortCode))
     category = 'NETWORK';
   return { event: 'ROUTE_COPY_MODEL_EXCEPTION', category,
-    ...(httpStatus === undefined ? {} : { httpStatus }) };
+    ...(httpStatus === undefined ? {} : { httpStatus }),
+    ...(providerCode === null ? {} : { providerCode }) };
 }
 function reportModelFailure(error, { logger = console.warn } = {}) {
   const diagnostic = buildModelFailureDiagnostic(error);
