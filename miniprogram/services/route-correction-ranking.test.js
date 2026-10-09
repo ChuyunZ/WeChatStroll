@@ -87,3 +87,53 @@ test('rejects only fully resolved out-of-range sets; estimates never certify the
  for(const [a,b] of [['START','A'],['A','START'],['START','B'],['B','START'],['A','B'],['B','A']])s.settle(a,b,100)
  assert.deepEqual(proposeDeterministicWaypointSets(opts(s,{verifiedWaypointPool:pois.slice(0,2)})),[])
 })
+
+
+test('dynamic ranking changes the next choice when the first candidate resolves new costs', async () => {
+  const loc = { latitude: 45.5, longitude: -73.6 }
+  const pool = [
+    ['A',45.501210647217924,-73.60438353129406],
+    ['B',45.50521921420376,-73.60446564321848],
+    ['C',45.50136490792595,-73.60263933092564],
+    ['D',45.505735320688224,-73.5954825517775]
+  ].map(([poiId,latitude,longitude]) => ({poiId,latitude,longitude}))
+  const indexed = new Map(pool.map(p => [p.poiId,{...p,nodeType:'waypoint',nodeId:p.poiId}]))
+  const costs = new Map()
+  const point = id => id === 'START' ? createStartNode(loc) : indexed.get(id)
+  const edge = (a,b) => createDirectedEdgeKey(point(a),point(b))
+  const settle = (a,b,durationSeconds) =>
+    costs.set(edge(a,b), {success:true,durationSeconds})
+  for (const [id,forward,backward] of [
+    ['A',494.780485983938,544.6630021440797],
+    ['B',389.8744619684294,295.03858770476654],
+    ['C',461.4298643078655,501.1176376021467],
+    ['D',441.96030104067177,576.3203119509853]
+  ]) {
+    settle('START',id,forward);settle(id,'START',backward)
+  }
+  const fakeSession = {
+    getWaypointSearchData: ids => ({
+      valid: ids.every(id => indexed.has(id)), start: loc,
+      routeType: 'out_and_back', waypoints: ids.map(id => indexed.get(id))
+    }),
+    getCachedSegmentCosts: () => [...costs].map(([edgeKey,cost])=>({edgeKey,...cost}))
+  }
+  const input = {session:fakeSession,verifiedWaypointPool:pool,requestedDurationMinutes:30,
+    allowPairFallback:true,excludedWaypointSets:pool.map(p=>[p.poiId])}
+  const initial = proposeDeterministicWaypointSets(input)
+  assert.equal(initial[0].key, '["A","B"]')
+  assert.equal(initial[1].key, '["B","C"]')
+  const tried = []
+  const outcome = await runBoundedRouteCorrections({...input,maxCandidates:2,maxNewSegmentCalls:4,
+    buildCandidateRoute: async ({candidate}) => {
+      tried.push(candidate.waypointIds.join(''))
+      if (tried.length === 1) { settle('A','B',750);settle('B','A',750) }
+      return {success:false,reason:'ROUTE_DURATION_OUT_OF_RANGE',
+        actualDurationSeconds:2500,minDurationSeconds:1350,maxDurationSeconds:2250,
+        targetDurationSeconds:1800}
+    }
+  })
+  assert.deepEqual(tried,['AB','AC'])
+  assert.equal(outcome.attemptedCandidates,2)
+  assert.equal(outcome.remainingSegmentBudget,0)
+})
