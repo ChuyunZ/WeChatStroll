@@ -362,6 +362,33 @@ pools/real routes. A fail-fast 17/18 run cannot certify either rate.
 SDK provider rate-limit/unavailable calls are reported separately from
 model-copy violations and not hidden by retries or a looser validator.
 
+### Audit100 report: C003 generic POIs and C009 provider 429
+
+An audit100 run on 2026-10-09 assessed 8 model outputs: **7 accepted,
+1 rejected** at C003 (`INVALID_POI`, `recommendationReason`); C009
+then stopped with a model-side `COPY_EXECUTION_UNKNOWN`,
+`upstream.category=RATE_LIMIT`, `upstream.providerCode=429` (no
+`httpStatus` reported). Consequently `audit.verdict=INCONCLUSIVE`;
+the 99% quality gate has **not** been met or evaluated over 100 outputs.
+
+C003's “途经过几个公园” had **three park POIs**. The named-destination
+regex incorrectly matched “过几个公园” as a fabricated proper name;
+overlapping “途经” + “经过” now resolves to the generic quantity “几个公园”.
+Actual invented landmarks still fail, and numeric claims with fewer
+ordered park stops remain `UNSUPPORTED_FACT`. Prompt wording steers the
+model toward the natural “途经几个公园” / “经过几个公园”.
+Real route truthfulness and POI name truncation still need independent
+human review; an accepted copy alone is not ground-truth verification.
+
+The model SDK returned an allowlisted code string `"429"`, but did not
+expose a separate numeric HTTP status. That is evidence of provider-side
+limiting, not a proven reason (QPS, shared model capacity, or a specific
+account-level quota). The benchmark safely stopped without retry.
+If limits recur while idle or across sessions, contact CloudBase support
+with Request ID `3bb71232-5223-40c5-83df-fe497643c0f0` and timestamp
+`2026-10-09T03:53:58.834Z` rather than treating 429 as a copy-quality
+failure or increasing the test's request rate.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source

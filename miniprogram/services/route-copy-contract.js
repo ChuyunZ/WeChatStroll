@@ -173,7 +173,12 @@ function hasUnknownPoiName(maskedText) {
   if (/\bP\d+\b/.test(maskedText)) return true;
   if (/[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(maskedText)) return true;
   const fragments = maskedText.split(/(?:再到|再去|然后|随后|接着|以及|同时|中途|一路|沿途|这条|那条|路线|(?:公园|商街|广场)(?:外|里|内|旁|附近)(?:的)?|[，。！？；、与和及])/);
-  const name = /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
+  // “途经过几个公园” contains overlapping “途经” + “经过”. The
+  // original greedy prefix parsed “过几个公园” as a fabricated park name.
+  // Let the “经过” alternative consume the overlap so “几个公园”
+  // remains a generic, quantified place category. Still reject actual
+  // invented proper nouns following either verb.
+  const name = /(?:前往|途经(?!过)|抵达|到达|走进|经过)(?:位于)?([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
   // A measured quantity + place category is not a newly invented proper
   // name. The live benchmark C004 yielded "途经几处公园", while every
   // provided waypoint was a park. Match only explicit counters, not bare

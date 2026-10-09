@@ -451,3 +451,51 @@ test('invented named park after generic transit phrase is still rejected', () =>
     '这两个途经点可以自由探索，然后前往虚构的紫荆公园，按自己的步调感受一段轻松而自由的散步时光。' };
   expect(contract.validateCopyDetailed(c, payload())).toMatchObject({ reason: 'INVALID_POI', copy: null });
 });
+
+test('live audit100 C003: generic “途经过几个公园” with three park POIs is not an invented destination', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'loop';
+  p.routeFacts.returnsToStart = true;
+  p.routeFacts.distanceMeters = 2980;
+  p.routeFacts.durationSeconds = 3069;
+  p.routeFacts.durationMinutes = 52;
+  p.preferences.durationMinutes = 45;
+  p.preferences.crowdPreference = 'low';
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '静安河畔防护林休闲绿地公园', category: 'park' },
+    { ref: 'P2', name: '生态园绿地公园', category: 'park' },
+    { ref: 'P3', name: '夏景园', category: 'park' }
+  ];
+  const proposed = {
+    title: '午后慢走：防护林与生态园的小循环',
+    description: '从起点出发，途经静安河畔防护林休闲绿地公园、生态园绿地公园与夏景园，再回到原点。不妨把脚步交给自己，一路看看绿意，换换日常的心情。',
+    recommendationReason: '想散散心又不愿走太远时，这条环线刚好。途经过几个公园，可以自主停下张望，给脑子放个假，慢慢踱回出发的地方。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});
+
+test.each([
+  ['途经过几个公园，慢慢探索自己的步调。', 3, null],
+  ['途经过几处公园，慢慢探索自己的步调。', 2, null],
+  ['途经过几个公园，慢慢探索自己的步调。', 1, 'UNSUPPORTED_FACT'],
+  ['途经过四处公园，慢慢探索自己的步调。', 3, 'UNSUPPORTED_FACT'],
+  ['途经过虚构的紫荆公园，慢慢探索自己的步调。', 3, 'INVALID_POI'],
+  ['途经过陌生的海滨博物馆，慢慢探索自己的步调。', 3, 'INVALID_POI'],
+  ['途经紫荆公园，慢慢探索自己的步调。', 3, 'INVALID_POI']
+])('overlapping 途经过 prefix distinguishes generic park-count statements and invented names: %s with %i parks',
+  (phrase, count, reason) => {
+    const p = payload();
+    p.routeFacts.orderedPois = Array.from({ length: count }, (_, i) => ({
+      ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
+    }));
+    const proposed = {
+      title: '适合今天的慢走放松时光',
+      description: '从起点出发，慢慢走上一段路。可以按喜欢的节奏给自己一点时间，留意日常周围的小变化。',
+      recommendationReason: `${phrase}给自己一些悠闲和自由，换换心情，感受散步的乐趣。`
+    };
+    const checked = contract.validateCopyDetailed(proposed, p);
+    if (!reason) expect(checked.reason).toBeNull();
+    else expect(checked).toMatchObject({ reason, field: 'recommendationReason', copy: null });
+  });
