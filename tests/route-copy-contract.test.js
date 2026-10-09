@@ -304,9 +304,10 @@ test.each([
       ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
     }));
     const result = contract.validateCopyDetailed({
-      ...copy,
+      title: '适合今天散步的轻松时光',
+      description: '从起点出发，慢慢走上一段路。可以按自己喜欢的节奏散步，留点时间给日常生活，感受这次探索的轻松自由。',
       recommendationReason: `${phrase}。你可以慢慢欣赏周围，在这段时间里按自己的节奏探索。`
     }, p);
-    if (accepted) expect(result.reason).not.toBe('UNSUPPORTED_FACT');
+    if (accepted) expect(result.reason).toBeNull();
     else expect(result).toMatchObject({ reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null });
   });
