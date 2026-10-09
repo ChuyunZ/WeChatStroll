@@ -21,7 +21,7 @@ function generateCases({ routes, preferences, history, count = MAX_SENDS }) {
     // validated route metrics; this tests copy grounding, NOT route planning.
     const payload = normalizeInput({
       ...sample, preferences: { durationMinutes: DURATIONS[i % DURATIONS.length],
-        crowdPreference: CROWDS[i % CROWDS.length],
+        crowdPreference: CROWDS[Math.floor(i / DURATIONS.length) % CROWDS.length],
         routeType: sample.routeFacts.routeType, environmentPreferences }
     });
     if (!payload) continue;

@@ -9,6 +9,8 @@ test('generates valid diverse scenarios from a real route projection without cha
   expect(generated).toHaveLength(MAX_SENDS);
   expect(generated.map(c => c.scenario.durationMinutes).slice(0, 6)).toEqual([15, 30, 45, 60, 90, 120]);
   expect(new Set(generated.map(c => c.scenario.crowdPreference)).size).toBe(3);
+  expect(new Set(generated.filter(c => c.scenario.durationMinutes === 15)
+    .map(c => c.scenario.crowdPreference)).size).toBe(3);
   expect(new Set(generated.map(c => c.scenario.environmentPreferences.join('|'))).size).toBe(4);
   const baseline = generated[0].payload.routeFacts;
   for (const item of generated) {
@@ -35,7 +37,7 @@ test('captures rejection/acceptance with bounded interval and no exposed model t
   expect(report.records.map(r => r.code)).toEqual(['COPY_INVALID_OUTPUT', 'OK', 'OK']);
   expect(report.intervalMs).toBeGreaterThanOrEqual(120000);
   expect(JSON.stringify(report)).not.toMatch(/PRIVATE_AI|人民公园|latitude|poi-0/);
-  expect(seen).toHaveLength(2);
+  expect(seen).toHaveLength(3);
 });
 test.each(['COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE', 'COPY_EXECUTION_UNKNOWN',
   'COPY_UNAUTHORIZED'])('stops when server refuses %s; never retries', async code => {
