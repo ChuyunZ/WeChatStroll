@@ -374,7 +374,7 @@ describe("route planning prompt", () => {
       )
   
       expect(prompt).toContain(
-        "Aim to generate 5 route candidates"
+        "Aim for 5 structurally valid, distinct waypoint sets"
       )
   
       expect(prompt).toContain(
@@ -467,7 +467,7 @@ test('initial planner asks for duration-aware out-and-back diversity without was
  expect(text).toContain('Do not use all five candidate slots for nearby single-POI walks')
  expect(text).toContain('do not include {A} and {A,B} in the same batch')
  expect(text).toContain('For every pair of route candidates, neither candidate')
- expect(text).toContain('Straight-line distances provide only rough hints')
+ expect(text).toContain('Straight-line distances and coordinate geometry are only rough relative hints')
  const {validateRoutePlan} = require('./routePlanContract')
  expect(validateRoutePlan({ candidates: [
    { waypoints: [{poiId:'poi-1'}] },
