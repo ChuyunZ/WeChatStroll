@@ -32,7 +32,7 @@
   <view class="benchmark-note">
     先在 Routes 生成一条路线，让地图 POI 搜索候选池进入内存；再从 Console 运行 wx.navigateTo({url:'/pages/cloud-test/cloud-test'})。
     从地图原始 POI 候选池随机抽取 1–8 个地点，组合模拟路线及不同偏好。不再请求地图、Walking API 或 AI 路线规划。
-    hy3 串行测试、每次结束后约 5 秒间隔、最多 150 次；开发环境每日用户上限 150 次、全局 200 次。
+    hy3 串行测试、每次结束后约 5 秒间隔、每轮最多 500 次；仅开发环境每日单用户上限 1000 次、全局 2000 次（UTC 日期）。
     遇到第一次失败立即停止并保存报告。模拟距离和时长仅用于测试输入格式，不能视为实际可走路线。
   </view>
   <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>

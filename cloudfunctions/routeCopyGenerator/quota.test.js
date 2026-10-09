@@ -87,16 +87,39 @@ test('transaction conflict predicate excludes ambiguous network errors', () => {
   expect(isConflict({ message: 'connection reset' })).toBe(false);
 });
 
-test('development POI stress-test quota is 150 per user; production and unspecified retain 24', () => {
+test('development stress-test caps are 1000/user and 2000/global; other stages retain 24/200', () => {
   const { quotaLimitsForEnvironment, DEV_USER_DAILY_LIMIT,
-    PER_USER_DAILY_LIMIT, GLOBAL_DAILY_LIMIT } = require('./quota');
-  expect(DEV_USER_DAILY_LIMIT).toBe(150);
+    DEV_GLOBAL_DAILY_LIMIT, PER_USER_DAILY_LIMIT, GLOBAL_DAILY_LIMIT } = require('./quota');
+  expect(DEV_USER_DAILY_LIMIT).toBe(1000);
+  expect(DEV_GLOBAL_DAILY_LIMIT).toBe(2000);
   expect(quotaLimitsForEnvironment({ ROUTE_COPY_DEPLOYMENT_STAGE: 'development' }))
-    .toEqual({ userLimit: 150, globalLimit: GLOBAL_DAILY_LIMIT });
+    .toEqual({ userLimit: 1000, globalLimit: 2000 });
   for (const env of [{}, { ROUTE_COPY_DEPLOYMENT_STAGE: 'production' },
     { ROUTE_COPY_DEPLOYMENT_STAGE: 'unknown', benchmarkDebug: true }]) {
     expect(quotaLimitsForEnvironment(env)).toEqual({
       userLimit: PER_USER_DAILY_LIMIT, globalLimit: GLOBAL_DAILY_LIMIT
     });
   }
+});
+
+test('higher development quota honors existing UTC counters and stops exactly at user and global caps', async () => {
+  const { quotaLimitsForEnvironment } = require('./quota');
+  const limits = quotaLimitsForEnvironment({ ROUTE_COPY_DEPLOYMENT_STAGE: 'development' });
+  const store = fakeStore();
+  const now = () => Date.UTC(2026, 9, 9, 3, 0, 0);
+  const gate = createQuotaGate({ store, now, ...limits, sleep: noSleep });
+  expect((await gate('test-user-a')).allowed).toBe(true);
+  const userRow = [...store.rows.keys()].find(k => k.startsWith('user_'));
+  expect(userRow).toBeDefined();
+  expect(store.rows.get(userRow).used).toBe(1);
+  // Previously recorded usage must not be reset or cleared when limits change.
+  store.rows.set(userRow, { day: '2026-10-09', used: 999 });
+  store.rows.set('global', { day: '2026-10-09', used: 1200 });
+  expect((await gate('test-user-a')).allowed).toBe(true);
+  expect(store.rows.get(userRow).used).toBe(1000);
+  expect(await gate('test-user-a')).toEqual({ allowed: false, reason: 'exhausted' });
+  expect((await gate('test-user-b')).allowed).toBe(true);
+  store.rows.set('global', { day: '2026-10-09', used: 2000 });
+  expect(await gate('test-user-c')).toEqual({ allowed: false, reason: 'exhausted' });
+  expect(store.rows.get('global').used).toBe(2000);
 });

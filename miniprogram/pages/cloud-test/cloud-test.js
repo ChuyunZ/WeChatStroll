@@ -1,4 +1,4 @@
-const { generateCases, runBenchmark } = require('../../services/route-copy-benchmark');
+const { generateCases, runBenchmark, MAX_SENDS } = require('../../services/route-copy-benchmark');
 
 Page({
   data: {
@@ -33,7 +33,7 @@ Page({
       return;
     }
     const cases = generateCases({
-      poiPool: routesPage._verifiedWaypointPool, seed: Date.now(), count: 150
+      poiPool: routesPage._verifiedWaypointPool, seed: Date.now(), count: MAX_SENDS
     });
     if (!cases.length) {
       this.setData({ benchmarkMessage: '没有符合文案契约的地图 POI 名称及类别，未发送请求' });

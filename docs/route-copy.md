@@ -348,13 +348,15 @@ not confirmed navigable sequences. The benchmark does not call map APIs.
    model outputs as factual public-route recommendations. This tests grounding,
    JSON formats and validator false positives, **not genuine route E2E**.
 4. Requests are **serial**, with **5 seconds between settled requests**;
-   no auto retries; max **150 sends per run**, stopping at first rejection,
+   no auto retries; max **500 sends per run**, stopping at first rejection,
    invalid client copy, unknown execution, soft UI deadline or quota issue.
-   The original production server quota stays 24 sends/OpenID/day and
-   200 globally/day. **Only cloud functions deployed with
-   `ROUTE_COPY_DEPLOYMENT_STAGE=development`** use 150 sends per user/day,
-   still bounded by the same global 200/day. Normal/production callers
-   cannot lift limits using `benchmarkDebug`.
+   The original **production** quota remains **24 sends/OpenID/day and
+   200 globally/day**. **Only Cloud Functions explicitly deployed with
+   `ROUTE_COPY_DEPLOYMENT_STAGE=development`** have higher quotas:
+   **1000 sends/OpenID/day, 2000 sends globally/day (UTC day)**.
+   Client-provided `benchmarkDebug` cannot elevate limits. Previous
+   counters continue at their current values; no reset/migration required.
+   The 30/60-minute run-time windows and fail-fast stop remain unchanged.
 5. With BOTH `ROUTE_COPY_DEPLOYMENT_STAGE=development` and
    `ROUTE_COPY_DEBUG_TEXT=1`, the `benchmarkDebug: true` request receives
    `debug` on failed validation: reason, field and best-effort-POI-redacted

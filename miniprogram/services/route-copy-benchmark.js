@@ -7,7 +7,7 @@ const CROWDS = ['low', 'medium', 'high'];
 const ENVIRONMENTS = ['公园', '水边', '街道', '商街'];
 const CATEGORIES = new Set(['park', 'water', 'street', 'shoppingStreet']);
 const TYPES = ['loop', 'out_and_back', 'point_to_point'];
-const MAX_SENDS = 150;
+const MAX_SENDS = 500;
 const MIN_INTERVAL_MS = 5000;
 const BAD_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff<>]/;
 function rng(seed) {

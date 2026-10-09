@@ -146,6 +146,8 @@ test('devtools-only page uses the map POI candidate pool, never re-fetches from 
   const ui = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/cloud-test/cloud-test.wxml'), 'utf8');
   expect(pg).toContain("platform !== 'devtools'");
   expect(pg).toContain('poiPool: routesPage._verifiedWaypointPool');
+  expect(pg).toContain('count: MAX_SENDS');
+  expect(MAX_SENDS).toBe(500);
   expect(pg).toContain("name: 'routeCopyGenerator'");
   expect(pg).not.toMatch(/nearbyPois\s*\(/);
   expect(ui).toContain('运行 30 分钟');
