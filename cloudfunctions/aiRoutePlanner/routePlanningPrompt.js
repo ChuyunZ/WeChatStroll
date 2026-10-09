@@ -134,6 +134,21 @@ function isValidNearbyPois(nearbyPois) {
   return true
 }
 
+// Explicitly distinguish failed complete waypoint SETS from reusable POIs.
+// These are only bounded, real route-engine failure observations; the model
+// must not infer new verified walking times from them.
+const REPLANNING_DURATION_GUIDANCE = [
+  'PREVIOUS FAILURE INTERPRETATION',
+  'previousFailures contains real route-engine outcomes for COMPLETE waypoint sets, not a blacklist of individual POIs.',
+  'DURATION_TOO_SHORT: that exact set produced a route shorter than the target. Consider DIFFERENT complete sets with greater likely route extent, including multi-POI sets when useful.',
+  'DURATION_TOO_LONG: that exact set produced a route longer than the target. Consider DIFFERENT complete sets with smaller likely route extent.',
+  'UNWALKABLE_SEGMENT: avoid sets/orders that depend on a known failed directed connection; do not infer other connections are impassable.',
+  'A failed singleton {A} does NOT automatically exclude A from a new complete set such as {A,B}; do not repeat the failed set {A} itself.',
+  'Do not infer that every possible POI combination is exhausted merely because earlier singleton candidates failed.',
+  'Treat actualDurationSeconds in previousFailures as observed for that particular tested set ONLY, not a verified duration for a new combination.',
+  'Return new structurally valid, non-excluded sets when available, even if their eventual real walking duration is uncertain.'
+]
+
 function buildReplanningSection(context, nearbyPois) {
   const manual = context && context.mode === 'manual'
   if (!context || !Number.isInteger(context.attempt) || context.attempt < (manual ? 1 : 2) ||
@@ -180,6 +195,8 @@ function buildReplanningSection(context, nearbyPois) {
       'Generate new complete combinations from VERIFIED POI CANDIDATES. Partial POI overlap with excluded combinations is allowed.',
       'Different visit orders of the same complete POI set are not new alternatives. Do not repeat excluded combinations.',
       'Only previousFailures describes actual failures. Attempt 0 means cached candidates tried before this manual action requested AI batches.',
+      ...REPLANNING_DURATION_GUIDANCE,
+      'An excluded set may have been displayed successfully; never reuse that complete combination, but its individual POIs remain available in other non-excluded sets.',
       'Never invent POIs, coordinates, routes, distances or durations. The map provider and route engine determine real route facts.'
     ]
   }
@@ -187,7 +204,8 @@ function buildReplanningSection(context, nearbyPois) {
     '', 'PREVIOUS FAILED ATTEMPTS',
     JSON.stringify({ attempt: context.attempt, previousFailures }),
     'REPLANNING RULES',
-    'Choose different useful waypoint sets. Do not repeat previously failed sets, even in a different order.',
+    'Choose different useful COMPLETE waypoint sets. Do not repeat previously failed sets, even in a different order.',
+    ...REPLANNING_DURATION_GUIDANCE,
     'Use only VERIFIED POI CANDIDATES. Do not invent route facts. The optimizer determines visit order.'
   ]
 }
@@ -290,9 +308,11 @@ function buildRoutePlanningPrompt(input) {
   
     `Each route candidate must contain between ${MIN_WAYPOINTS} and ${MAX_WAYPOINTS} waypoint POIs.`,
   
-    "Aim to generate 5 route candidates when the verified POI pool and all planning constraints make this possible.",
+    "Aim for 5 structurally valid, distinct waypoint sets when the verified POI pool allows it.",
   
-    "Return fewer candidates if generating 5 valid candidates is not possible.",
+    "Structural validity means: verified POI IDs only, allowed waypoint count, no repeated ID inside a set, and no subset/equal-set conflicts across the returned batch.",
+    "Your job is to PROPOSE sets for real-route testing, NOT to certify walking durations. A plausible set is not invalid just because you cannot verify its actual walking time.",
+    "Return fewer than 5 candidates only if you cannot produce more distinct structurally valid sets under the constraints and exclusions. Do not fill slots with duplicate, invented, or meaningless sets.",
   
     "Only select POIs from the VERIFIED POI CANDIDATES supplied below.",
   
@@ -307,6 +327,9 @@ function buildRoutePlanningPrompt(input) {
     "Two candidates containing the same POI set are invalid even if their waypoint visit order is different.",
   
     "When possible, vary POI selection and environment categories across route candidates while still respecting the user's preferences.",
+    "Diversify likely route extent as well: avoid returning five nearly identical short-radius single-POI walks when more varied plausible verified-POI sets are available.",
+    "Include a mix of plausible single- and multi-POI sets when appropriate for the target duration; multi-POI sets are NOT automatically preferable to singletons.",
+    "Order the candidates by likely duration fit and current user preferences while preserving diversity. Any duration judgment from coordinates remains an uncertain heuristic.",
   
     "For loop routes, do not repeat a waypoint to represent returning to the start; the route engine will handle the return to the starting point.",
   
@@ -319,17 +342,21 @@ function buildRoutePlanningPrompt(input) {
     "The map provider and the application's route engine are the source of truth for real-world route facts.",
   
     "Use the requested walking duration only as a planning constraint. Do not claim an exact final walking duration.",
-    "For out_and_back walks, account for outward AND return walking legs when considering the likely duration; the route engine will decide the exact order and true directed walking times.",
+    "For out_and_back, the route engine walks START -> A -> START for a singleton {A}, and START -> A -> B -> A -> START for a two-waypoint order [A,B]. The engine may choose a different visit order.",
+    "Consider EVERY outbound and return leg when reasoning qualitatively about route extent; directed segments may have different real costs. Do not count only the outbound walk.",
+    "For loop routes the engine returns to START after visiting POIs; for point_to_point it ends at the final waypoint. Do not encode the repeated START or any return visits as extra POI IDs.",
     "Do not use all five candidate slots for nearby single-POI walks likely to be too short when a distinct multi-POI combination would better fit the requested duration.",
     "Respect the existing no-subset-conflict rule across complete candidate sets: do not include {A} and {A,B} in the same batch. Use that limited slot for another distinct set.",
-    "Straight-line distances provide only rough hints, never verified walking time. Do not fabricate route durations, path distances or route geometry.",
+    "Straight-line distances and coordinate geometry are only rough relative hints; never assume direct-line distance equals a verified walking path, and never fabricate route durations, path distances, or route geometry.",
   
     "Use the supplied START POINT as the user's actual starting location when selecting waypoint candidates.",
   
     "Prefer candidate POIs that reasonably match the user's normalized preferences.",
   
     "Select waypoint sets only. The route engine determines the final visit order using real directed walking segments.",
-    "Do not fill the waypoint limit unnecessarily. Return an empty candidates array when no suitable set is available.",
+    "Do not fill the waypoint limit unnecessarily. Prefer a few relevant POIs over arbitrary large combinations.",
+    "Return an empty candidates array only when no structurally valid, non-excluded, plausibly useful complete waypoint set can be built from the VERIFIED POI CANDIDATES.",
+    "Never return an empty batch solely because walking durations are unverified, some earlier candidates were too short/long, or you are uncertain which untried combination will pass real validation.",
   
     "",
     "START POINT",

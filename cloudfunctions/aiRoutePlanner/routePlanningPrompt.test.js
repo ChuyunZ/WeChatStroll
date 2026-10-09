@@ -474,3 +474,95 @@ test('initial planner asks for duration-aware out-and-back diversity without was
    { waypoints: [{poiId:'poi-1'}, {poiId:'poi-2'}] }
  ] }, validInput.nearbyPois).data?.candidates?.length).toBe(1)
 })
+
+
+describe('Issue #91 prompt behavior for initial quality and empty-batch replanning', () => {
+  const promptFor = (params = {}) =>
+    buildRoutePlanningPrompt({ ...validInput, ...params }).data.prompt
+
+  test('initial prompt distinguishes structural from map-verified duration validity', () => {
+    const prompt = promptFor()
+    expect(prompt).toContain('Aim for 5 structurally valid, distinct waypoint sets')
+    expect(prompt).toContain('PROPOSE sets for real-route testing, NOT to certify walking durations')
+    expect(prompt).toContain('Return fewer than 5 candidates only if')
+    expect(prompt).toContain('Return an empty candidates array only when no structurally valid')
+    expect(prompt).toContain('Never return an empty batch solely because walking durations are unverified')
+    expect(prompt).toContain('Diversify likely route extent as well')
+    expect(prompt).toContain('multi-POI sets are NOT automatically preferable')
+    expect(prompt).toContain('no subset/equal-set conflicts')
+    expect(prompt).toContain('do not include {A} and {A,B} in the same batch')
+    expect(prompt).not.toContain('Return fewer candidates if generating 5 valid candidates is not possible.')
+    expect(prompt).not.toContain('Return an empty candidates array when no suitable set is available.')
+  })
+
+  test('route topology instructions match the actual traversal graph', () => {
+    const p = promptFor()
+    const { buildTraversalNodes, createStartNode } =
+      require('../../miniprogram/services/route-graph')
+    const { ROUTE_TYPES } = require('../../miniprogram/constants/route-types')
+    const start = createStartNode({latitude:45.5,longitude:-73.57})
+    const waypoint = poiId => ({nodeId:poiId,nodeType:'waypoint'})
+    const nodeIds = nodes => nodes.map(node=>node.nodeId)
+    expect(nodeIds(buildTraversalNodes(start,[waypoint('A')],ROUTE_TYPES.OUT_AND_BACK)))
+      .toEqual(['START','A','START'])
+    expect(nodeIds(buildTraversalNodes(start,[waypoint('A'),waypoint('B')],ROUTE_TYPES.OUT_AND_BACK)))
+      .toEqual(['START','A','B','A','START'])
+    expect(p).toContain('START -> A -> B -> A -> START')
+    expect(p).toContain('directed segments may have different real costs')
+    expect(p).toContain('for point_to_point it ends at the final waypoint')
+    expect(p).toContain('Never invent walking distances or walking durations.')
+  })
+
+  test('replanning distinguishes whole failed sets from still-reusable POIs and preserves only allowlisted values', () => {
+    const plan = promptFor({replanningContext:{attempt:2,previousFailures:[
+      {attempt:1,waypointIds:['poi-1'],failure:{
+        type:'DURATION_TOO_SHORT',actualDurationSeconds:900,targetDurationSeconds:1800,
+        providerTrace:'PRIVATE_TOKEN',latitude:1.23}},
+      {attempt:1,waypointIds:['poi-2'],failure:{
+        type:'DURATION_TOO_LONG',actualDurationSeconds:2500,targetDurationSeconds:1800}}
+    ]}})
+    expect(plan).toContain('DURATION_TOO_SHORT: that exact set')
+    expect(plan).toContain('DURATION_TOO_LONG: that exact set')
+    expect(plan).toContain('A failed singleton {A} does NOT automatically exclude A')
+    expect(plan).toContain('Do not infer that every possible POI combination is exhausted')
+    expect(plan).toContain('for that particular tested set ONLY')
+    expect(plan).not.toContain('PRIVATE_TOKEN')
+    expect(plan).not.toContain('providerTrace')
+    expect(plan).not.toContain('1.23')
+    expect(plan).toContain('"actualDurationSeconds":900')
+    expect(plan).toContain('"actualDurationSeconds":2500')
+  })
+
+  test('manual alternatives keep exclusion semantics while reusing individually verified POIs', () => {
+    const plan = promptFor({replanningContext:{
+      mode:'manual',attempt:1,excludedWaypointSets:[['poi-1']],
+      previousFailures:[{attempt:0,waypointIds:['poi-1'],
+        failure:{type:'DURATION_TOO_SHORT',actualDurationSeconds:850,targetDurationSeconds:1800}}]
+    }})
+    expect(plan).toContain('MANUAL ALTERNATIVE CONTEXT')
+    expect(plan).toContain('excluded set may have been displayed successfully')
+    expect(plan).toContain('A failed singleton {A} does NOT automatically exclude A')
+    expect(plan).toContain('do not repeat the failed set {A} itself')
+    expect(plan).toContain('"excludedWaypointSets":[["poi-1"]]')
+    expect(plan).toContain('Only previousFailures describes actual failures.')
+  })
+
+  test('contract still enforces no-subset duplicate slots, JSON shape and verified POI allowlist', () => {
+    const { validateRoutePlan } = require('./routePlanContract')
+    const { nearbyPois } = validInput
+    const overlapping = validateRoutePlan({candidates:[
+      {waypoints:[{poiId:'poi-1'}]},
+      {waypoints:[{poiId:'poi-1'},{poiId:'poi-2'}]}
+    ]}, nearbyPois)
+    expect(overlapping.success).toBe(true)
+    expect(overlapping.data.candidates).toHaveLength(1)
+    const good = validateRoutePlan({candidates:[
+      {waypoints:[{poiId:'poi-1'}]},{waypoints:[{poiId:'poi-2'}]}
+    ]},nearbyPois)
+    expect(good.success).toBe(true)
+    expect(good.data.candidates).toHaveLength(2)
+    expect(validateRoutePlan({candidates:[{waypoints:[{poiId:'unverified-id'}]}]},nearbyPois).success).toBe(false)
+    expect(validateRoutePlan({candidates:[]},nearbyPois))
+      .toEqual({success:true,data:{candidates:[]}})
+  })
+})
