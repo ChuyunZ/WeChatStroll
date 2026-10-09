@@ -168,7 +168,7 @@ test('devtools-only page loads a direct Tencent POI pool once, independent of Ro
   const pg = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/cloud-test/cloud-test.js'), 'utf8');
   const ui = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/cloud-test/cloud-test.wxml'), 'utf8');
   expect(pg).toContain("platform !== 'devtools'");
-  expect(pg).toContain('this._benchmarkPoiPool || await loadBenchmarkPoiPool()');
+  expect(pg).toContain('this._benchmarkPoiPool || await loadBenchmarkPoiPool({');
   expect(pg).toContain('this._benchmarkPoiPool = poiPool');
   expect(pg).not.toContain('getCurrentPages()');
   expect(pg).not.toContain('_verifiedWaypointPool');
