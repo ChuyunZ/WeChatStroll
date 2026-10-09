@@ -1,36 +1,83 @@
-// Explicit, developer-only live acceptance sampler. Never calls mapProvider,
-// route planner, or any other cloud function besides routeCopyGenerator.
-const { projectRoute } = require('./route-copy');
+// DEVTOOLS ONLY. Sample from the normalized Tencent nearbyPois candidate pool
+// captured before AI planning and before any walking-route validation.
+// No map APIs, route planners, or location permissions are used here.
 const { normalizeInput, validateCopyDetailed } = require('./route-copy-contract');
 const DURATIONS = [15, 30, 45, 60, 90, 120];
 const CROWDS = ['low', 'medium', 'high'];
 const ENVIRONMENTS = ['公园', '水边', '街道', '商街'];
-const MAX_SENDS = 16;
-const MIN_INTERVAL_MS = 120000;
-
-function generateCases({ routes, preferences, history, count = MAX_SENDS }) {
-  if (!Array.isArray(routes) || !preferences || !Number.isInteger(count) || count < 1 || count > MAX_SENDS) return [];
-  const snapshots = routes.slice(0, 3).map(route => projectRoute(route, preferences, history))
-    .filter(Boolean).map(p => p.payload);
+const CATEGORIES = new Set(['park', 'water', 'street', 'shoppingStreet']);
+const TYPES = ['loop', 'out_and_back', 'point_to_point'];
+const MAX_SENDS = 150;
+const MIN_INTERVAL_MS = 5000;
+const BAD_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff<>]/;
+function rng(seed) {
+  let x = seed >>> 0;
+  return () => { x += 0x6D2B79F5; let t = x;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function normalizePoiPool(pool) {
+  if (!Array.isArray(pool)) return [];
+  const ids = new Set(), output = [];
+  for (const poi of pool) {
+    if (!poi || typeof poi.poiId !== 'string' || !poi.poiId.trim() ||
+        typeof poi.name !== 'string' || !poi.name || poi.name !== poi.name.trim() ||
+        [...poi.name].length > 120 || BAD_TEXT.test(poi.name) ||
+        !CATEGORIES.has(poi.category)) continue;
+    const key = poi.category + ':' + poi.name;
+    if (ids.has(key)) continue;
+    ids.add(key); output.push({ name: poi.name, category: poi.category });
+  }
+  return output;
+}
+function generateCases({ poiPool, count = MAX_SENDS, seed = 1 }) {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SENDS ||
+      !Number.isSafeInteger(seed)) return [];
+  const pool = normalizePoiPool(poiPool);
+  if (!pool.length) return [];
+  const random = rng(seed);
+  let available = [];
+  function refill() {
+    available = [...pool];
+    for (let i = available.length - 1; i > 0; i--) {
+      const k = Math.floor(random() * (i + 1));
+      [available[i], available[k]] = [available[k], available[i]];
+    }
+  }
+  refill();
   const cases = [];
-  for (let i = 0; i < count && snapshots.length; i++) {
-    const sample = snapshots[i % snapshots.length];
-    const rotation = i % 4;
+  for (let i = 0; i < count; i++) {
+    const n = Math.min(1 + (i % 8), pool.length);
+    const chosen = [];
+    while (chosen.length < n) {
+      if (!available.length) refill();
+      const poi = available.shift();
+      if (!chosen.some(p => p.name === poi.name && p.category === poi.category)) chosen.push(poi);
+    }
+    const routeType = TYPES[Math.floor(i / 8) % TYPES.length];
+    const durationMinutes = DURATIONS[i % DURATIONS.length];
+    const crowdPreference = CROWDS[Math.floor(i / DURATIONS.length) % CROWDS.length];
+    const rotation = (i + Math.floor(random() * 4)) % 4;
     const environmentPreferences = [...ENVIRONMENTS.slice(rotation), ...ENVIRONMENTS.slice(0, rotation)];
-    // Questionnaire targets intentionally vary independently of already
-    // validated route metrics; this tests copy grounding, NOT route planning.
-    const payload = normalizeInput({
-      ...sample, preferences: { durationMinutes: DURATIONS[i % DURATIONS.length],
-        crowdPreference: CROWDS[Math.floor(i / DURATIONS.length) % CROWDS.length],
-        routeType: sample.routeFacts.routeType, environmentPreferences }
+    // Simulated, internally consistent only; NOT actual Tencent walking data.
+    const distanceMeters = Math.round((n * 650 + 400 + random() * 1100) / 10) * 10;
+    const durationSeconds = Math.ceil((distanceMeters / (65 + random() * 15) + n * 2.5) * 60);
+    const payload = normalizeInput({ schemaVersion: 1,
+      routeFacts: { routeType, returnsToStart: routeType !== 'point_to_point',
+        distanceMeters, durationSeconds, durationMinutes: Math.ceil(durationSeconds / 60),
+        orderedPois: chosen.map((poi, j) => ({
+          ref: `P${j + 1}`, name: poi.name, category: poi.category
+        })) },
+      preferences: { durationMinutes, routeType, crowdPreference, environmentPreferences },
+      historicalPreferenceProfile: null
     });
     if (!payload) continue;
-    cases.push({ id: `C${String(i + 1).padStart(2, '0')}`, payload,
-      scenario: { sampleIndex: i % snapshots.length + 1,
-        actualRouteMinutes: payload.routeFacts.durationMinutes,
-        durationMinutes: payload.preferences.durationMinutes,
-        crowdPreference: payload.preferences.crowdPreference,
-        environmentPreferences, routeType: payload.routeFacts.routeType } });
+    cases.push({ id: `C${String(i + 1).padStart(3, '0')}`, payload,
+      scenario: { inputMode: 'simulated-from-tencent-poi-pool', poolSize: pool.length,
+        sampledPoiCount: chosen.length, sampleIndex: i + 1,
+        actualRouteMinutes: payload.routeFacts.durationMinutes, durationMinutes,
+        crowdPreference, environmentPreferences, routeType } });
   }
   return cases;
 }
@@ -104,15 +151,14 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
   if (![30, 60].includes(minutes) || !Array.isArray(cases) || cases.length < 1 ||
       cases.length > MAX_SENDS || typeof call !== 'function') throw new Error('Invalid benchmark setup');
   const begin = now(), deadline = begin + minutes * 60000;
-  const intervalMs = Math.max(MIN_INTERVAL_MS, Math.ceil(minutes * 60000 / cases.length));
+  // Five-second cooldown after the previous request completes, never parallel.
+  const intervalMs = MIN_INTERVAL_MS;
   const report = { schemaVersion: 1, tool: 'route-copy-development-benchmark',
-    mode: 'live-hy3-copy-only', plannedMinutes: minutes, intervalMs,
+    mode: 'simulated-from-tencent-poi-pool', plannedMinutes: minutes, intervalMs,
     startedAt: new Date(begin).toISOString(), records: [], stopReason: null };
   for (let i = 0; i < cases.length; i++) {
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
-    const due = begin + i * intervalMs;
-    const delay = due - now();
-    if (delay > 0) await sleep(delay);
+    if (i > 0) await sleep(intervalMs);
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
     if (now() >= deadline) { report.stopReason = 'TIME_WINDOW_ENDED'; break; }
     const startedAt = now();
@@ -143,4 +189,5 @@ async function runBenchmark({ minutes, cases, call, now = Date.now,
   return report;
 }
 
-module.exports = { MAX_SENDS, DURATIONS, CROWDS, generateCases, runBenchmark, publicRecord };
+module.exports = { MAX_SENDS, DURATIONS, CROWDS, normalizePoiPool, generateCases,
+  runBenchmark, publicRecord };

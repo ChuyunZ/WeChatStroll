@@ -27,15 +27,16 @@ Page({
       this.setData({ benchmarkMessage: '仅允许在微信开发者工具运行' }); return;
     }
     const routesPage = getCurrentPages().find(p => p.route === 'pages/routes/routes');
-    if (!routesPage || !Array.isArray(routesPage._rawRoutes) || !routesPage._rawRoutes.length) {
-      this.setData({ benchmarkMessage: '请先在 Routes 生成路线，再从 Console 使用 wx.navigateTo 进入本页' });
+    if (!routesPage || !Array.isArray(routesPage._verifiedWaypointPool) ||
+        !routesPage._verifiedWaypointPool.length) {
+      this.setData({ benchmarkMessage: '请先生成真实路线，取得地图搜索的 POI 候选池，然后进入本页' });
       return;
     }
-    const cases = generateCases({ routes: routesPage._rawRoutes,
-      preferences: routesPage._routePreferences,
-      history: routesPage._historicalPreferenceProfile });
+    const cases = generateCases({
+      poiPool: routesPage._verifiedWaypointPool, seed: Date.now(), count: 150
+    });
     if (!cases.length) {
-      this.setData({ benchmarkMessage: '缺少有效的真实路线样本，未发送任何 AI 请求' });
+      this.setData({ benchmarkMessage: '没有符合文案契约的地图 POI 名称及类别，未发送请求' });
       return;
     }
     const control = { stopped: false };
@@ -54,7 +55,7 @@ Page({
     };
     const begin = Date.now();
     this.setData({ benchmarkRunning: true, benchmarkCompleted: 0,
-      benchmarkFailures: 0, benchmarkMessage: '逐次调用真实 hy3；请保持开发者工具运行',
+      benchmarkFailures: 0, benchmarkMessage: '随机组合地图 POI + 模拟路线事实；首次失败立即停止',
       benchmarkFile: path, benchmarkHasReport: false });
     try {
       const report = await runBenchmark({

@@ -2,6 +2,13 @@ const crypto = require('crypto');
 const { transact } = require('./quota-store');
 const PER_USER_DAILY_LIMIT = 24;
 const GLOBAL_DAILY_LIMIT = 200;
+const DEV_USER_DAILY_LIMIT = 150;
+function quotaLimitsForEnvironment(env = process.env) {
+  // A client cannot lift limits by sending a benchmark flag.
+  const development = env && env.ROUTE_COPY_DEPLOYMENT_STAGE === 'development';
+  return { userLimit: development ? DEV_USER_DAILY_LIMIT : PER_USER_DAILY_LIMIT,
+    globalLimit: GLOBAL_DAILY_LIMIT };
+}
 
 // Enforced across all Cloud Function instances before any model inference.
 // Counters reset at 00:00 UTC; transaction protects both counters atomically.
@@ -31,4 +38,5 @@ function createQuotaGate({ store, now = Date.now, sleep,
     }, sleep);
   };
 }
-module.exports = { PER_USER_DAILY_LIMIT, GLOBAL_DAILY_LIMIT, createQuotaGate };
+module.exports = { PER_USER_DAILY_LIMIT, GLOBAL_DAILY_LIMIT, DEV_USER_DAILY_LIMIT,
+  quotaLimitsForEnvironment, createQuotaGate };

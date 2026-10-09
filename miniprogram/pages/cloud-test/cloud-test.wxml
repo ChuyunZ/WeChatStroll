@@ -30,10 +30,10 @@
 <view class="benchmark">
   <view class="title">AI 文案自动测试（仅开发工具）</view>
   <view class="benchmark-note">
-    先在 Routes 完成真实路线生成，再从 Console 运行 wx.navigateTo({url:'/pages/cloud-test/cloud-test'})。
-    本测试只调用 routeCopyGenerator，不重复调用腾讯地图。最多 16 次调用，串行、间隔至少 120 秒；
-    遇到第一条失败（含验收不通过或超时）立即停止并保存报告；每用户每天 24 次的服务端额度仍然生效。
-    问卷时长与已经验证的路线时长独立变化，用来测试 AI 文案是否遵守路线事实，不代表重新规划了路线。
+    先在 Routes 生成一条路线，让地图 POI 搜索候选池进入内存；再从 Console 运行 wx.navigateTo({url:'/pages/cloud-test/cloud-test'})。
+    从地图原始 POI 候选池随机抽取 1–8 个地点，组合模拟路线及不同偏好。不再请求地图、Walking API 或 AI 路线规划。
+    hy3 串行测试、每次结束后约 5 秒间隔、最多 150 次；开发环境每日用户上限 150 次、全局 200 次。
+    遇到第一次失败立即停止并保存报告。模拟距离和时长仅用于测试输入格式，不能视为实际可走路线。
   </view>
   <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
   <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟</button>

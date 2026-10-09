@@ -3,7 +3,7 @@ const { MAX_INPUT_BYTES, byteLength, normalizeInput, parseCopyDetailed } = requi
 const { reportCopyRejection, buildRejectionDiagnostic } = require('./diagnostics');
 const { buildPrompt } = require('./prompt');
 const { createStore } = require('./quota-store');
-const { createQuotaGate } = require('./quota');
+const { createQuotaGate, quotaLimitsForEnvironment } = require('./quota');
 const AI_MODEL = 'hy3';
 const MODEL_REQUEST_TIMEOUT_MS = 60000;
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV, timeout: MODEL_REQUEST_TIMEOUT_MS });
@@ -71,7 +71,8 @@ exports.main = async event => {
     return await generateCopy(event, { openid: cloud.getWXContext().OPENID,
       createModel: () => cloud.ai().createModel('cloudbase'),
       reserveQuota: openid => createQuotaGate({
-        store: createStore(cloud.database({ throwOnNotFound: false }))
+        store: createStore(cloud.database({ throwOnNotFound: false })),
+        ...quotaLimitsForEnvironment(process.env)
       })(openid) });
   } catch (_) { return failure('COPY_UNAVAILABLE'); }
 };
