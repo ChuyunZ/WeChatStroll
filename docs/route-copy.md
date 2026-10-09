@@ -414,9 +414,12 @@ Seed and detailed rejected cases are kept in the JSON report.
 This mode never changes the normal fail-fast buttons and never calls
 Tencent map during the benchmark.
 
-The release quality goal is **at least 99% AI-copy acceptance AND at
-least 99% human-audited factual correctness** on independent, varied POI
-pools/real routes. A fail-fast 17/18 run cannot certify either rate.
+The near-term automated gate is **at least 199 accepted outputs out of
+200 assessed (99.5%)**, with varied real Tencent POI pools but simulated
+walking facts. It is a progressively tightened engineering target, not
+a claim of production accuracy or a statistical guarantee. Independent
+human review on **real walkable routes** is still required before release;
+a fail-fast 17/18 run cannot certify either quality dimension.
 SDK provider rate-limit/unavailable calls are reported separately from
 model-copy violations and not hidden by retries or a looser validator.
 
