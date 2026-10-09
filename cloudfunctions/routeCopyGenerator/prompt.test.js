@@ -43,6 +43,9 @@ test('audit100 C041/C052: prompt prevents abbreviated POI names and unsupported 
   const text = buildPrompt(p);
   expect(text).toContain('完整名称放不下');
   expect(text).toContain('不能改写为“防护林小公园”');
+  expect(text).toContain('这条完整地名规则同样适用于 recommendationReason 和 description');
+  expect(text).toContain('不得写成“途经口袋公园”');
+  expect(text).toContain('三个字段全部不出现 POI 名字也完全允许');
   expect(text).toContain('不必走进园里');
   expect(text).toContain('否定句也不例外');
   expect(text).toContain('不能写');
