@@ -688,7 +688,7 @@ establish nuanced wording quality or 100% true-route factual accuracy.
 
 - [x] `develop` is an ancestor of the feature branch (GitHub compare
   reports **behind_by=0**) and GitHub reports the PR as mergeable.
-- [x] CI at `cd08df2`: **79 test suites / 1,810 tests, all passed**.
+- [x] CI at `be7b9c8`: **79 test suites / 1,810 tests, all passed**.
 - [x] Live simulated-input audit200: **200/200 accepted**, 21-POI pool.
 - [x] No changed production `mapProvider` / walking-route functions;
   five-center collection is dev-only input for Cloud Test.
@@ -701,10 +701,12 @@ establish nuanced wording quality or 100% true-route factual accuracy.
   route preview, cancel and confirm with correct copy restoration/replacement;
   no repeat needed for that ordinary flow. The separate lifecycle/failure
   check below still covers uncertain in-flight callbacks/background changes.
-- [ ] **Failure/lifecycle smoke:** force a rejected/unavailable copy in
-  a controlled *development* run, verify deterministic fallback and no
-  stale text after background/resume or route/page change. Do not reset
-  quota counters or retry unknown model execution.
+- [x] **Failure/lifecycle smoke (developer-confirmed):** previous
+  manual development E2E covered rejected/unavailable AI copy retaining
+  deterministic fallback, and background/resume or route/page changes
+  not displaying stale AI text. No repeat needed. Confirmation is
+  user-reported; automatic stale/timeout/fallback regressions also pass.
+  No quota reset or retry of unknown model execution was performed.
 - [ ] **Operational/privacy gate before public release:** confirm CloudBase
   `routeCopyGenerator` deployment revision, its 60-second timeout, required
   `route_copy_quotas` collection access, production quota limits,
