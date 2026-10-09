@@ -81,3 +81,9 @@ test('cloud-test has explicit user-run controls and a devtools-only platform gat
   expect(view).toContain('运行 60 分钟');
   expect(view).toContain('复制 JSON 报告');
 });
+
+test('successful model output arriving beyond 20-second UI deadline is reported as a failure', () => {
+  const sample = cases(1)[0], now = Date.UTC(2026, 9, 9);
+  const r = publicRecord(sample, now, 23000, copyResult, null);
+  expect(r).toMatchObject({ status: 'rejected', code: 'COPY_UI_DEADLINE_EXCEEDED' });
+});

@@ -42,8 +42,12 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
   const requestId = envelope && (envelope.requestID || envelope.requestId);
   let code = 'COPY_TRANSPORT_UNKNOWN', status = 'stop';
   if (!error && result && result.success === true) {
-    if (validateCopy(result.copy, payload)) { code = 'OK'; status = 'accepted'; }
-    else { code = 'CLIENT_VALIDATION_FAILED'; status = 'rejected'; }
+    if (!validateCopy(result.copy, payload)) {
+      code = 'CLIENT_VALIDATION_FAILED'; status = 'rejected';
+    } else if (elapsedMs >= 20000) {
+      // The actual UI will stop accepting copy after its 20-second deadline.
+      code = 'COPY_UI_DEADLINE_EXCEEDED'; status = 'rejected';
+    } else { code = 'OK'; status = 'accepted'; }
   } else if (!error && result && result.success === false && result.error &&
       typeof result.error.code === 'string') {
     const allowed = ['COPY_INVALID_OUTPUT', 'COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE',

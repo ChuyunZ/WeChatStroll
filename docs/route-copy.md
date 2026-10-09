@@ -305,7 +305,9 @@ backend endpoints, Tencent Map API calls or route-planning API calls are added.
    `routeCopyGenerator` app logs for the same period (`ROUTE_COPY_REJECTED`,
    `reason`, `field`, `modelTextRedacted`). Join by Request ID when
    available, otherwise use start times. Both report and sanitized CloudBase
-   logs are needed for in-depth per-case analysis.
+   logs are needed for in-depth per-case analysis. A response that exceeds the
+   existing 20-second UI acceptance deadline is recorded as
+   `COPY_UI_DEADLINE_EXCEEDED` even if the eventual model response is valid.
 
 **Do not ship the Cloud Test benchmark panel in public releases.** Disable
 `ROUTE_COPY_DEBUG_TEXT` production-side, and review log retention/access
