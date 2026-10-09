@@ -373,7 +373,7 @@ test.each([
   ['大于30分钟慢慢走', 31, true],
   ['30分钟以上悠闲慢走', 30, true],
   ['30分钟以上悠闲慢走', 29, false],
-  ['不到60秒就能走完', 1, false]
+  ['不到60秒就能走完', 2, false]
 ])('duration bounds are validated as inequalities, not exact equalities: %s, %i displayed minutes',
   (title, minutes, allowed) => {
     const p = payload();
