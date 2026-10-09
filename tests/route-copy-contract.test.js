@@ -353,3 +353,59 @@ test('normal Routes E2E: “用大概半小时” for a displayed 24-minute walk
     .toEqual({ copy: proposed, reason: null, field: null });
   expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
 });
+
+test.each([
+  ['用不到半小时慢慢走', 28, true],
+  ['不到半小时的轻松散步', 29, true],
+  ['不到半小时的轻松散步', 30, false],
+  ['不到半小时的轻松散步', 40, false],
+  ['不足30分钟的散步', 28, true],
+  ['未满30分钟的散步', 30, false],
+  ['少于30分钟的散步', 29, true],
+  ['少于30分钟的散步', 30, false],
+  ['半小时以内走一走', 30, true],
+  ['不超过半小时慢慢走', 30, true],
+  ['不超过半小时慢慢走', 31, false],
+  ['至少半小时走一走', 30, true],
+  ['不少于半小时放空一下', 29, false],
+  ['超过半小时再歇一会', 30, false],
+  ['超过半小时再歇一会', 31, true],
+  ['大于30分钟慢慢走', 31, true],
+  ['30分钟以上悠闲慢走', 30, true],
+  ['30分钟以上悠闲慢走', 29, false],
+  ['不到60秒就能走完', 1, false]
+])('duration bounds are validated as inequalities, not exact equalities: %s, %i displayed minutes',
+  (title, minutes, allowed) => {
+    const p = payload();
+    p.routeFacts.durationMinutes = minutes;
+    p.routeFacts.durationSeconds = minutes * 60 - 1;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({
+      copy: null, reason: 'WRONG_MEASUREMENT', field: 'title'
+    });
+  });
+
+test('live benchmark C041: displayed 28m is less than half an hour, despite user requesting 90m', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.distanceMeters = 1740;
+  p.routeFacts.durationSeconds = 1672;
+  p.routeFacts.durationMinutes = 28;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '桂花园', category: 'park' }];
+  p.preferences.durationMinutes = 90;
+  p.preferences.routeType = 'point_to_point';
+  p.preferences.crowdPreference = 'low';
+  p.preferences.environmentPreferences = ['街道', '商街', '公园', '水边'];
+  const proposed = {
+    title: '慢行桂花园，换换心情的小散步',
+    description: '从起点出发，途经桂花园。用不到半小时的从容步调，在城市的角落里松弛一下，不必赶路，只是随意走走，听听风声。',
+    recommendationReason: '想轻松换换心情时，这条短途路线刚好。途经桂花园，沿途留给自己发呆和探索的空间，很适合悠闲地散个小步。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});

@@ -91,6 +91,37 @@ function hasWrongMeasurements(text, r) {
       allowed = [r.durationSeconds / 3600, r.durationMinutes / 60];
     }
     else allowed = [r.durationSeconds / 60, r.durationMinutes];
+
+    // A quantified duration can be an inequality, not an exact measurement.
+    // IMPORTANT: handle bounds *before* exact equality: “不到半小时” is
+    // false for a displayed 30-minute route, even though 30 == 30.
+    // Prefer the user-visible rounded duration to the fractional seconds.
+    if (['小时', '分钟', '分', '秒'].includes(unit)) {
+      const prefix = text.slice(Math.max(0, m.index - 12), m.index);
+      const suffix = text.slice(regex.lastIndex);
+      const actual = unit === '秒' ? r.durationSeconds : r.durationMinutes;
+      const claimed = unit === '小时' ? value * 60 : value;
+      const target = unit === '秒' ? value : claimed;
+      let bound = null;
+      // Inclusive forms must take priority over their strict suffixes:
+      // “不超过” contains “超过”, “不少于” contains “少于”.
+      if (/(?:不超过|至多|最多|不高于|不多于)\s*$/.test(prefix) ||
+          /^\s*(?:以内|之内)/.test(suffix)) bound = 'atMost';
+      else if (/(?:至少|不少于|不低于|不小于)\s*$/.test(prefix) ||
+          /^\s*(?:以上)/.test(suffix)) bound = 'atLeast';
+      else if (/(?:不到|不足|不满|未满|少于|低于|小于)\s*$/.test(prefix))
+        bound = 'lessThan';
+      else if (/(?:超过|多于|大于|高于)\s*$/.test(prefix))
+        bound = 'greaterThan';
+      if (bound !== null) {
+        if (!Number.isFinite(target) || target < 0) return true;
+        if (bound === 'lessThan' && actual < target ||
+            bound === 'greaterThan' && actual > target ||
+            bound === 'atMost' && actual <= target ||
+            bound === 'atLeast' && actual >= target) continue;
+        return true;
+      }
+    }
     if (allowed.some(n => Math.abs(n - value) < 0.000001)) continue;
 
     // Explicitly approximate claims have bounded leeway around the route's

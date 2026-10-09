@@ -306,6 +306,19 @@ require the exact seconds or displayed minutes; the questionnaire target
 cannot validate an actual-time claim. Tests cover actual-style prose and
 nearby rejection boundaries.
 
+The third live failure (`C041`, request
+`0b75e1bf-47b9-40ef-ab81-6c2b9112270a`) occurred after **40
+consecutive accepted outputs**. The model correctly wrote “用不到半小时”
+for a simulated 1,672-second/28-minute point-to-point route, but the
+validator had treated “半小时” as exact equality. Time-quantity
+inequalities now use the displayed route duration with strict
+(`不到`, `不足`, `未满`, `少于`, `超过`, `大于`)
+and inclusive (`不超过`, `以内`, `至少`, `不少于`,
+`以上`) semantics. They run **before** equality or approximate
+tolerance checks; the user's preferred duration is never used as a
+route fact. Tests include C041's complete model output, threshold
+boundaries at 29/30/31/40 minutes, and both sign directions.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source
