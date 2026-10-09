@@ -28,26 +28,38 @@
   </view>
 </view>
 <view class="benchmark">
-  <view class="title">AI 文案自动测试（仅开发工具）</view>
-  <view class="benchmark-note">
-    编译后直接进入 Cloud Test，无需先生成 Routes。点击测试按钮，先使用开发者工具模拟定位，向现有 mapProvider 获取一次真实腾讯 POI 候选池（公园、水边、商街各一类，最多三类 Explore 查询）。
-    本页后续测试复用内存 POI 池；重新编译或离开页面后需重新获取。不调用 Walking API 或 AI 路线规划。
-    每轮随机抽取 1–8 个地图 POI 并组合模拟路线事实及不同问卷偏好；模拟路线不保证实际可走。
-    hy3 串行测试、每次结束后等待约 15 秒（降低资源池限流风险），每轮最多 500 次；
-    仅开发环境每日单用户上限 1000 次、全局 2000 次（UTC 日期）。
-    常规模式遇到首次失败即停；100 次验收模式允许最多一次文案失败，出现第二次即 FAIL。
-    上游 RATE_LIMIT 或执行状态不明仍会立即停止为 INCONCLUSIVE，不自动重试；
-    模型共享资源池拥堵时，即使串行也可能触发限流。
-    100 次验收只评估自动验证通过率，无法替代人工事实正确性抽查。
-    遇到第一次失败立即停止并保存报告。模拟距离和时长仅用于测试输入格式，不能视为实际可走路线。
+  <view class="benchmark-heading">
+    <view class="benchmark-heading-title">AI 文案自动测试</view>
+    <view class="benchmark-tag">仅开发工具</view>
   </view>
-  <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
-  <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟（首次失败停止）</button>
-  <button data-audit="100" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">验收 100 次（99% 门槛）</button>
-  <button bindtap="stopCopyBenchmark" disabled="{{!benchmarkRunning}}">停止测试</button>
-  <view class="benchmark-note">已完成：{{benchmarkCompleted}} · 失败：{{benchmarkFailures}}</view>
-  <view class="benchmark-note">{{benchmarkMessage}}</view>
-  <view class="benchmark-note" wx:if="{{benchmarkFile}}">报告本地路径：{{benchmarkFile}}</view>
-  <button bindtap="copyBenchmarkReport" disabled="{{!benchmarkHasReport}}">复制 JSON 报告</button>
-  <view class="benchmark-note">首次失败停止模式遇到第一条失败即停；100 次验收模式第二条文案失败判 FAIL，上游异常仍立即停。报告仅包含原因、字段、脱敏文案及安全的路线事实摘要，不保存 POI 真实名称、坐标或原始 Prompt。详细诊断需要开发云函数已有的两个 Debug 环境变量。生产环境禁止运行测试。</view>
+  <view class="benchmark-lead">
+    编译后进入 Cloud Test 即可直接测试，无需先生成 Routes。首次测试会通过模拟定位获取一次真实腾讯 POI 候选池，同一页面内后续测试复用。
+  </view>
+  <view class="benchmark-summary">串行 AI 请求 · 请求结束后间隔约 15 秒 · 自动保存测试报告</view>
+
+  <button class="benchmark-help-toggle" size="mini" bindtap="toggleBenchmarkHelp">
+    {{benchmarkHelpExpanded ? '收起详细说明' : '展开详细说明与限制'}}
+  </button>
+  <view class="benchmark-details" wx:if="{{benchmarkHelpExpanded}}">
+    <view class="benchmark-note">POI 池来自现有 mapProvider（公园、水边、商街三类，最多三类 Explore 查询）。离开页面或重新编译后需重新获取；不会调用 Walking API 或 AI 路线规划。</view>
+    <view class="benchmark-note">每轮随机选择 1–8 个 POI，组合模拟路线事实与问卷偏好。模拟路线不保证真实可走，模拟距离和时长也不能用于验证实际路径。</view>
+    <view class="benchmark-note">hy3 串行执行，每个请求结束后等待约 15 秒以降低共享资源池限流风险。每轮最多 500 次；仅开发环境每日单用户上限 1000 次、全局上限 2000 次（UTC 日期）。</view>
+    <view class="benchmark-note">30/60 分钟模式遇首次失败即停止；100 次验收模式最多允许 1 次文案验证失败，第 2 次判定 FAIL。上游 RATE_LIMIT、请求异常或执行状态不明会立即终止，结果为 INCONCLUSIVE，不会自动重试。</view>
+    <view class="benchmark-note">100 次验收仅评估自动验证通过率，不能替代人工事实抽查。报告只保留原因、字段、脱敏文案与安全的路线事实摘要，不包含真实 POI 名称、坐标或原始 Prompt。详细诊断依赖云函数的两个 Debug 环境变量。</view>
+  </view>
+
+  <view class="benchmark-actions">
+    <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
+    <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟（首次失败停止）</button>
+    <button data-audit="100" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">验收 100 次（99% 门槛）</button>
+    <button bindtap="stopCopyBenchmark" disabled="{{!benchmarkRunning}}">停止测试</button>
+  </view>
+
+  <view class="benchmark-results">
+    <view class="benchmark-progress">已完成：{{benchmarkCompleted}} · 失败：{{benchmarkFailures}}</view>
+    <view class="benchmark-status" wx:if="{{benchmarkMessage}}">{{benchmarkMessage}}</view>
+    <view class="benchmark-note benchmark-file" wx:if="{{benchmarkFile}}">报告本地路径：{{benchmarkFile}}</view>
+    <button bindtap="copyBenchmarkReport" disabled="{{!benchmarkHasReport}}">复制 JSON 报告</button>
+  </view>
+  <view class="benchmark-footnote">请仅在开发环境运行，出现上游异常不要立即重试。测试未完成前请保持页面打开。</view>
 </view>
