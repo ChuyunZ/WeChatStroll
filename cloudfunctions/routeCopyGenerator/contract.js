@@ -150,6 +150,10 @@ function hasUnsupportedClaim(text) {
       // Bare wishes/conditionals are not route observations. Keep the
       // exemption limited to this smallest recognisable statement.
       if (/(?:希望|期待|如果|假如|倘若|想要|偏好|喜欢|寻找)/.test(part)) continue;
+    // In a POI-only input the model cannot verify that the stops are
+    // conveniently "on the way", easy to walk, or objectively good to visit.
+    // C018: "这两处途经点顺路又好逛" is an unsupported assertion.
+    if (/顺路(?:又|也|而且)?(?:好逛|方便|好走|省时)/.test(part)) return true;
     if (/(?:全程|沿途|这里|这条路线|道路|路面|步道|【已知地点】(?:内|里|沿线)?)(?:都|均|十分|非常|很|始终|绝对|完全|保证|是|设有|有|并不|不|没有)*\s*(?:安全|无障碍|平坦|安静|人少|拥挤|人多|没有车辆|没有台阶|有路灯|有厕所|有座椅|有樱花|有湖景)/.test(part) ||
         /(?:全程|沿途|这里|【已知地点】(?:内|里)?)(?:有|设有|配有|提供|遍布|可以欣赏到|能看到)(?:免费的?|连续的?|完善的?|盛开的?)?(?:路灯|厕所|座椅|樱花|湖景|河景|护栏|坡道|饮水|洗手间)/.test(part) ||
         /(?:保证安全|绝对安全|放心通行|零风险|全程无车|轮椅畅行|人流量为|人流量仅|每小时\d+人)/.test(part)) return true;
@@ -179,6 +183,10 @@ function hasUnknownPoiName(maskedText) {
     for (const match of fragment.matchAll(name)) {
       // “走进公园” is a claim about actually entering a venue; the
       // ordered POI list alone cannot establish that, even for several parks.
+      // “途经点顺路” contains the *generic noun* 途经点 and the everyday
+      // word 顺路, not a named POI ending in 路. Its unverified convenience
+      // assertion is independently checked under UNSUPPORTED_FACT.
+      if (match[0] === '途经点顺路') continue;
       if (match[0].startsWith('走进') || !generic.test(match[1])) return true;
     }
     return false;

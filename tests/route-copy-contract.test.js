@@ -409,3 +409,45 @@ test('live benchmark C041: displayed 28m is less than half an hour, despite user
     .toEqual({ copy: proposed, reason: null, field: null });
   expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
 });
+
+test('C018: generic “途经点” is not an invented POI; unverified 顺路 claim remains rejected', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.durationSeconds = 1970;
+  p.routeFacts.durationMinutes = 33;
+  p.routeFacts.distanceMeters = 2060;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '生态防护林公园北区观景入口', category: 'park' },
+    { ref: 'P2', name: '夏景园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 120;
+  p.preferences.crowdPreference = 'high';
+  const base = {
+    title: '午后慢行：两处公园随心探索',
+    description: '从起点出发，途经生态防护林公园北区观景入口，再前往夏景园。换换心情的短途走走，不妨放慢脚步，留意路边的小风景。',
+    recommendationReason: '想轻松散心时，这两处途经点顺路又好逛，不用赶时间，适合随意探索，给平淡日子添一点温柔的停顿。'
+  };
+  // Do not “fix” an unsupported route ease claim by marking it valid.
+  expect(contract.validateCopyDetailed(base, p)).toMatchObject({
+    reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null
+  });
+  const safe = { ...base, recommendationReason: base.recommendationReason.replace('顺路又好逛', '可以慢慢探索') };
+  expect(contract.validateCopyDetailed(safe, p)).toEqual({ copy: safe, reason: null, field: null });
+});
+test.each([
+  '这两处途经点顺路又好逛',
+  '两处途经点顺路方便',
+  '几个途经点顺路好走'
+])('does not confuse 途经点 with a proper POI name: %s', phrase => {
+  const result = contract.validateCopyDetailed({ ...copy,
+    recommendationReason: `${phrase}，按自己的节奏探索街角，换换心情，感受自在。`
+  }, payload());
+  expect(result.reason).not.toBe('INVALID_POI');
+  expect(result.reason).toBe('UNSUPPORTED_FACT');
+});
+test('invented named park after generic transit phrase is still rejected', () => {
+  const c = { ...copy, description:
+    '这两个途经点可以自由探索，然后前往虚构的紫荆公园，按自己的步调感受一段轻松而自由的散步时光。' };
+  expect(contract.validateCopyDetailed(c, payload())).toMatchObject({ reason: 'INVALID_POI', copy: null });
+});

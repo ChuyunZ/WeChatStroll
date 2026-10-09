@@ -330,6 +330,24 @@ tolerance checks; the user's preferred duration is never used as a
 route fact. Tests include C041's complete model output, threshold
 boundaries at 29/30/31/40 minutes, and both sign directions.
 
+### Acceptance target and C018 evidence
+
+The 2026-10-09 15-second-interval POI benchmark accepted 17 outputs before
+C018 returned `INVALID_POI` in `recommendationReason` for
+“这两处途经点顺路又好逛”. The name regex misread “途经点顺路” as a proper
+name ending in 路. It is **not** an unknown named POI; however, “顺路又好逛”
+also asserts route convenience unsupported by random POI-only inputs.
+The validator now attributes this to `UNSUPPORTED_FACT` instead of
+`INVALID_POI`, and the prompt forbids such route-convenience guarantees
+and POI-name abbreviations. This is a correctness fix, not removal of
+factual safeguards.
+
+The release quality goal is **at least 99% AI-copy acceptance AND at
+least 99% human-audited factual correctness** on independent, varied POI
+pools/real routes. A fail-fast 17/18 run cannot certify either rate.
+SDK provider rate-limit/unavailable calls are reported separately from
+model-copy violations and not hidden by retries or a looser validator.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source
