@@ -6,6 +6,7 @@ const { createWaypointCandidateCache } = require('./waypoint-candidate-cache')
 const { createSessionDurationEstimator } = require('./route-correction-estimator')
 const { createStartNode, createDirectedEdgeKey, buildPrefetchEdgePairs } = require('./route-graph')
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { ROUTE_TYPES } = require('../constants/route-types')
 const {
   EXACT_ORDERING_MAX_WAYPOINTS,
   MAX_CORRECTION_CANDIDATES,
@@ -73,8 +74,33 @@ function inspectSet(session, ids, targetSeconds, estimator, cachedCosts) {
     .filter(key => !costByEdge.has(key)))
   const window = durationWindow(targetSeconds)
   const orders = permutations([...ids].sort())
+  // A known singleton out-and-back time is a *lower bound* on any longer
+  // out-and-back order beginning with that POI (all additional edges are
+  // nonnegative). A long singleton therefore cannot be the first waypoint
+  // of a feasible expanded route. It does NOT invalidate other first POIs.
+  const singleton = new Map()
+  if (scope.routeType === ROUTE_TYPES.OUT_AND_BACK) {
+    for (const node of nodes) {
+      const outward = costByEdge.get(createDirectedEdgeKey(start,node))
+      const inward = costByEdge.get(createDirectedEdgeKey(node,start))
+      if (outward && inward && outward.success && inward.success &&
+          Number.isFinite(outward.durationSeconds) && Number.isFinite(inward.durationSeconds)) {
+        singleton.set(node.nodeId, outward.durationSeconds + inward.durationSeconds)
+      }
+    }
+  }
+  const overlongCount = ids.filter(id => singleton.has(id) && singleton.get(id) > window.maxSeconds).length
+  if (scope.routeType === ROUTE_TYPES.OUT_AND_BACK && overlongCount === ids.length) return null
+  // This is a SOFT tie-break for promising expansions: when two singleton
+  // walks are short, joining them is preferable to involving an already long
+  // or already satisfactory singleton, all else equal.
+  const withinWindowCount = ids.filter(id => singleton.has(id) &&
+    singleton.get(id) >= window.minSeconds && singleton.get(id) <= window.maxSeconds).length
+  const evidencePenalty = overlongCount * 0.65 + withinWindowCount * 0.25
   let best = null
   for (const order of orders) {
+    if (scope.routeType === ROUTE_TYPES.OUT_AND_BACK &&
+        singleton.has(order[0]) && singleton.get(order[0]) > window.maxSeconds) continue
     const estimate = estimator.estimate(order, scope.routeType, targetSeconds,
       window.minSeconds, window.maxSeconds)
     // A known unwalkable directed segment makes this order impossible. Other
@@ -92,6 +118,7 @@ function inspectSet(session, ids, targetSeconds, estimator, cachedCosts) {
     estimatedHighSeconds: best.highSeconds,
     rankTier: best.tier,
     rankQuality: best.quality,
+    rankEvidencePenalty: evidencePenalty,
     knownFailedEdges: 0,
     fullyCached: missing.size === 0
   }
@@ -108,6 +135,7 @@ function createRankingContext(session, poolIds) {
 
 function compareRankedProposals(a, b) {
   return a.rankTier - b.rankTier ||
+    a.rankEvidencePenalty - b.rankEvidencePenalty ||
     a.rankQuality - b.rankQuality ||
     a.newSegmentUpperBound - b.newSegmentUpperBound ||
     a.estimatedTargetErrorSeconds - b.estimatedTargetErrorSeconds ||
