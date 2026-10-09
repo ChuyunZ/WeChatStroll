@@ -566,3 +566,37 @@ describe('Issue #91 prompt behavior for initial quality and empty-batch replanni
       .toEqual({success:true,data:{candidates:[]}})
   })
 })
+
+describe('Issue 91 whole-batch construction guidance', () => {
+  test.each([undefined,
+    { attempt: 2, previousFailures: [] },
+    { mode: 'manual', attempt: 1, previousFailures: [], excludedWaypointSets: [['poi-1']] }
+  ])('places the silent batch check after context and before output format (%#)', replanningContext => {
+    const prompt = buildRoutePlanningPrompt({ ...validInput, replanningContext }).data.prompt
+    const start = prompt.indexOf('BATCH CONSTRUCTION AND SILENT SELF-CHECK')
+    expect(start).toBeGreaterThan(prompt.indexOf('VERIFIED POI CANDIDATES'))
+    if (replanningContext) expect(start).toBeGreaterThan(prompt.indexOf(
+      replanningContext.mode === 'manual' ? 'MANUAL ALTERNATIVE RULES' : 'REPLANNING RULES'))
+    expect(start).toBeLessThan(prompt.indexOf('EXPECTED OUTPUT FORMAT'))
+    expect(prompt).toContain('recheck ALL pairs')
+    expect(prompt).toContain('Disjoint sets are NOT required')
+    expect(prompt).toContain('singleton reserves its ID against all other slots')
+    expect(prompt).toContain('no excluded complete set')
+    expect(prompt).toContain('inside this ONE response')
+    expect(prompt).toContain('Do not force multi-POI sets, five slots')
+  })
+
+  test('the actual illustrative five-slot pattern passes the unchanged strict contract', () => {
+    const prompt = buildRoutePlanningPrompt(validInput).data.prompt
+    const pattern = prompt.match(/Illustrative compatible five-slot pattern: (.*?)\./)[1]
+    const sets = [...pattern.matchAll(/\{([^}]+)\}/g)].map(match => ({
+      waypoints: match[1].split(',').map(poiId => ({ poiId }))
+    }))
+    const pois = 'ABCDE'.split('').map(poiId => ({ poiId }))
+    const { validateRoutePlan } = require('./routePlanContract')
+    expect(sets).toHaveLength(5)
+    expect(validateRoutePlan({ candidates: sets }, pois))
+      .toEqual({ success: true, data: { candidates: sets } })
+    expect(prompt).toContain('Letters are placeholders, NOT actual POI IDs')
+  })
+})

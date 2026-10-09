@@ -7,6 +7,7 @@ jest.mock('../miniprogram/services/location',()=>({getCurrentLocation:jest.fn()}
 jest.mock('../miniprogram/services/preference-profile-records',()=>({refreshProfile:jest.fn()}))
 jest.mock('../miniprogram/services/cloud-function-client',()=>({callCloudFunction:jest.fn()}))
 jest.mock('../miniprogram/services/walking-segment',()=>({getWalkingSegment:jest.fn()}))
+jest.mock('wx-server-sdk', () => ({ init: jest.fn(), DYNAMIC_CURRENT_ENV: 'test-env' }))
 
 const { getCurrentLocation } = require('../miniprogram/services/location')
 const { refreshProfile } = require('../miniprogram/services/preference-profile-records')
@@ -16,6 +17,7 @@ const { generateRoutes } = require('../miniprogram/services/route-generation')
 const { getAllowedDurationRange } = require('../miniprogram/services/route-validation')
 const { waypointSetKey } = require('../miniprogram/services/agentic-route-planning')
 const { conflictsBySubset } = require('../miniprogram/services/initial-candidate-quality')
+const { generateWaypointPlan } = require('../cloudfunctions/aiRoutePlanner')
 
 const start={latitude:30,longitude:120}
 const points=[
@@ -92,4 +94,42 @@ test('a valid third AI singleton is never delayed or discarded by unreliable geo
  expect(result.waypointCandidateCache.getAllCandidates().map(x=>x.status))
    .toEqual(['failed','failed','success','unused','unused'])
  expect(callCloudFunction.mock.calls.filter(([name])=>name==='aiRoutePlanner')).toHaveLength(1)
+})
+
+test('cloud filtering reaches the real generation pipeline without retries or speculative map requests', async () => {
+ const log = jest.spyOn(console, 'log').mockImplementation(() => {})
+ const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+ try {
+  const rawSets = [['A'], ['A','B'], ['C'], ['C','D'], ['E']]
+  const client = { request: jest.fn().mockResolvedValue({ success: true, data: {
+   text: JSON.stringify({ candidates: rawSets.map(ids => ({waypoints:ids.map(poiId=>({poiId}))})) })
+  } }) }
+  callCloudFunction.mockImplementation(async (name, event) => {
+   if (name === 'mapProvider') return {poisByCategory:{park:pool}}
+   if (name === 'aiRoutePlanner') return generateWaypointPlan(event, client)
+   throw Error('Unexpected network boundary')
+  })
+  getWalkingSegment.mockImplementation(async (from,to) => ({
+   success:true, durationSeconds:from.poiId==='C'||to.poiId==='C'?900:400,
+   distanceMeters:500,
+   polyline:[from,to].map(({latitude,longitude})=>({latitude,longitude}))
+  }))
+  const result = await generateRoutes({...selected, crowdPreference:'low',
+   environmentPreferences:['公园','水边','街道','商街']})
+  expect(result.status).toBe('success')
+  expect(result.source).toBe('ai')
+  expect(result.routes[0].candidateWaypointIds).toEqual(['C'])
+  expect(result.routes[0].durationSeconds).toBe(1800)
+  expect(result.waypointCandidateCache.getAllCandidates().map(c=>c.waypointIds))
+   .toEqual([['A'],['C'],['E']])
+  expect(client.request).toHaveBeenCalledTimes(1)
+  expect(getWalkingSegment).toHaveBeenCalledTimes(4)
+  expect(result.routePlanningSession.getPlanningDiagnostics().segmentResolverCalls).toBe(4)
+  const summary = log.mock.calls.find(([label])=>label==='[AI Route Planner] Contract summary:')[1]
+  expect(summary).toMatchObject({rawCandidateCount:5, structurallyValidCount:5,
+   retainedCandidateCount:3, removedCandidateCount:2, removedByReason:{subset_conflict:2}})
+ } finally {
+  log.mockRestore()
+  warn.mockRestore()
+ }
 })

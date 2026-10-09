@@ -371,6 +371,18 @@ function buildRoutePlanningPrompt(input) {
     "VERIFIED POI CANDIDATES",
     JSON.stringify(nearbyPois, null, 2),
     ...buildReplanningSection(input.replanningContext, nearbyPois),
+
+    "",
+    "BATCH CONSTRUCTION AND SILENT SELF-CHECK",
+    "Plan the whole batch together before writing JSON. Aim for 5 mutually compatible useful sets; do not build each slot independently.",
+    "Choose promising multi-POI sets first when appropriate, then choose singleton alternatives using IDs absent from EVERY multi-POI set in this batch. A singleton reserves its ID against all other slots.",
+    "Partial overlap between multi-POI sets is allowed: {A,B} and {A,C} are compatible. Disjoint sets are NOT required. Equal-size distinct sets cannot be subsets of each other.",
+    "For unequal-size sets, check containment in BOTH directions: {A,B} and {A,B,C} conflict even though neither is a singleton.",
+    "If a slot conflicts, replace or revise it and recheck ALL pairs; simply deleting conflicting slots wastes capacity when other useful verified combinations exist.",
+    "Illustrative compatible five-slot pattern: {A,B}, {A,C}, {B,C}, {D}, {E}. Letters are placeholders, NOT actual POI IDs or a mandatory template. Use only IDs from the supplied verified pool; adapt to preferences, route extent and exclusions.",
+    "Do not force multi-POI sets, five slots, or arbitrary extra waypoints when no useful compatible alternatives exist. Unknown walking duration alone is not a reason to drop a structurally valid proposal.",
+    "Before responding, silently verify: only the candidates key at the top level; only waypoints per candidate; only poiId per waypoint; nonempty string IDs copied exactly from the verified pool; 1-8 unique IDs per candidate; 0-5 candidates; no equal or subset pair; no excluded complete set.",
+    "This self-check happens inside this ONE response. Do not output reasoning, a validation report, or additional fields.",
   
     "",
     "EXPECTED OUTPUT FORMAT",
