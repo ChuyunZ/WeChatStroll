@@ -325,7 +325,11 @@ test.each([
   { title: '大概一小时散步时光', minutes: 24, allowed: false },
   { title: '半小时放松心情慢慢走', minutes: 30, allowed: true },
   { title: '差不多一小时散步时光', minutes: 54, allowed: true },
-  { title: '差不多一小时散步时光', minutes: 53, allowed: false }
+  { title: '差不多一小时散步时光', minutes: 51, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 50, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 49, allowed: false },
+  { title: '差不多一小时散步时光', minutes: 39, allowed: false },
+  { title: '大概一小时散步时光', minutes: 53, allowed: false }
 ])('approximate time expressions have tightly bounded tolerance: $title, $minutes minutes',
   ({ title, minutes, allowed }) => {
     const p = payload();
@@ -499,3 +503,30 @@ test.each([
     if (!reason) expect(checked.reason).toBeNull();
     else expect(checked).toMatchObject({ reason, field: 'recommendationReason', copy: null });
   });
+
+test.each([
+  { name: 'C002 incorrect 39m as almost 1h', seconds: 2334, displayMinutes: 39,
+    requestedMinutes: 30, accepted: false },
+  { name: 'C004 conversational 51m as almost 1h', seconds: 3004, displayMinutes: 51,
+    requestedMinutes: 60, accepted: true },
+  { name: '50m lower 10m boundary', seconds: 2999, displayMinutes: 50,
+    requestedMinutes: 60, accepted: true },
+  { name: '49m outside lower boundary', seconds: 2940, displayMinutes: 49,
+    requestedMinutes: 60, accepted: false },
+  { name: '70m upper 10m boundary', seconds: 4200, displayMinutes: 70,
+    requestedMinutes: 45, accepted: true },
+  { name: '71m outside upper boundary', seconds: 4260, displayMinutes: 71,
+    requestedMinutes: 45, accepted: false }
+])('audit100 time grounding: $name', ({ seconds, displayMinutes, requestedMinutes, accepted }) => {
+  const p = payload();
+  p.routeFacts.durationSeconds = seconds;
+  p.routeFacts.durationMinutes = displayMinutes;
+  p.preferences.durationMinutes = requestedMinutes;
+  const proposed = { ...copy,
+    description: '从起点出发，顺着自己的心情慢慢散步。用差不多一小时的节奏给自己一点空闲，换换日常状态，沿途看看周围。' };
+  const checked = contract.validateCopyDetailed(proposed, p);
+  if (accepted) expect(checked).toEqual({ copy: proposed, reason: null, field: null });
+  else expect(checked).toMatchObject({
+    copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
+  });
+});

@@ -134,7 +134,13 @@ function hasWrongMeasurements(text, r) {
       const approximate = /(?:大概|大约|约|差不多|大致)\s*$/.test(prefix) ||
         /^\s*(?:左右|上下|前后)/.test(suffix);
       const claimedMinutes = unit === '小时' ? value * 60 : value;
-      const toleranceMinutes = Math.min(6, claimedMinutes * 0.2);
+      // “差不多一小时” reasonably covers a 51-minute displayed walk.
+      // Keep it bounded: at most 10 minutes and 20% of the claim.
+      // Other approximate forms (“约/大概/左右”) retain their stricter
+      // six-minute ceiling. A 39-minute walk is never “差不多一小时”.
+      const looseApproximation = /差不多\s*$/.test(prefix);
+      const toleranceMinutes = Math.min(looseApproximation ? 10 : 6,
+        claimedMinutes * 0.2);
       if (approximate && Number.isFinite(claimedMinutes) && claimedMinutes > 0 &&
           Math.abs(r.durationMinutes - claimedMinutes) <= toleranceMinutes + 1e-9) continue;
     }

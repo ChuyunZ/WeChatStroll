@@ -330,6 +330,31 @@ tolerance checks; the user's preferred duration is never used as a
 route fact. Tests include C041's complete model output, threshold
 boundaries at 29/30/31/40 minutes, and both sign directions.
 
+### Audit100 time-grounding review (C002 / C004)
+
+A fresh 100-case audit stopped on its second copy rejection after only four
+outputs (2 accepted, 2 rejected; `ACCEPTANCE_TARGET_MISSED`).
+Both rejected copies used “差不多一小时” despite routeFacts:
+- C002: 2,334 seconds / **39 displayed minutes**, requested 30 minutes.
+  “差不多一小时” is a **real hallucination**, not a validator false positive.
+- C004: 3,004 seconds / **51 displayed minutes**, requested 60 minutes.
+  In ordinary Chinese, “差不多一小时” is a reasonable approximation,
+  though the previous six-minute ceiling rejected it.
+
+Fixes prioritize *generation quality* over making validators permissive:
+the model prompt **forbids all explicit and approximate time/distance
+claims** in title, description and recommendationReason, since the route
+card already displays the metrics. It emphasizes that preference duration
+is a user wish, not calculated route time; gives contrasting 39/51-minute
+examples; and offers neutral pacing phrasing as a creative alternative.
+For already-generated text, validation only grants the specifically
+looser idiom “差不多” at most a 10-minute AND 20%-of-claim discrepancy.
+Other “约/大概/左右” claims retain a six-minute AND 20% ceiling;
+39 versus 60 still fails. Strict bounds, POI and factual safeguards stay.
+Unit tests demonstrate both sides. A passing Jest run does **not**
+demonstrate the ≥99% live-copy acceptance goal, which needs a new run
+after the prompt is deployed and a separate human factual audit.
+
 ### Acceptance target and C018 evidence
 
 The 2026-10-09 15-second-interval POI benchmark accepted 17 outputs before
