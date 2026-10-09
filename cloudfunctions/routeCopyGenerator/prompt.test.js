@@ -36,3 +36,17 @@ test('C019/C029: prompt forbids unverified quiet/scenery and POI venue-entry cla
     '“穿街过林”', '可以用“留意周围”'
   ]) expect(text).toContain(fragment);
 });
+
+test('audit100 C041/C052: prompt prevents abbreviated POI names and unsupported negative interior claims', () => {
+  const p = projectRoute(route(), preferences, history).payload;
+  p.routeFacts.orderedPois[0].name = '示例区防护林小公园';
+  const text = buildPrompt(p);
+  expect(text).toContain('完整名称放不下');
+  expect(text).toContain('不能改写为“防护林小公园”');
+  expect(text).toContain('不必走进园里');
+  expect(text).toContain('否定句也不例外');
+  expect(text).toContain('不能写');
+  expect(text).toContain('UNTRUSTED_ROUTE_DATA_JSON');
+  const serialized = text.split('UNTRUSTED_ROUTE_DATA_JSON\n')[1].split('\nEND_UNTRUSTED_ROUTE_DATA_JSON')[0];
+  expect(JSON.parse(serialized)).toEqual(p);
+});
