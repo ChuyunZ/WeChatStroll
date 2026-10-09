@@ -12,10 +12,11 @@ test.each([
     p.routeFacts.durationSeconds = actual * 60 - 1;
     p.routeFacts.durationMinutes = actual;
     const prompt = buildPrompt(p);
-    const data = prompt.split('UNTRUSTED_ROUTE_DATA_JSON')[1]
-      .split('END_UNTRUSTED_ROUTE_DATA_JSON')[0];
-    expect(JSON.parse(data.trim()).routeFacts.durationMinutes).toBe(actual);
-    expect(JSON.parse(data.trim()).preferences.durationMinutes).toBe(desired);
+    const data = prompt.match(/\nUNTRUSTED_ROUTE_DATA_JSON\n(.*)\nEND_UNTRUSTED_ROUTE_DATA_JSON$/s);
+    expect(data).not.toBeNull();
+    const parsed = JSON.parse(data[1]);
+    expect(parsed.routeFacts.durationMinutes).toBe(actual);
+    expect(parsed.preferences.durationMinutes).toBe(desired);
     expect(prompt).toContain('三个字段均不要提任何步行时长或路线距离');
     expect(prompt).toContain('差不多一小时');
     expect(prompt).toContain('路线卡片显示');
