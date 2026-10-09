@@ -1,7 +1,8 @@
 const { normalizeInput, validateCopy } = require('./route-copy-contract');
 const MAX_COPY_CALLS = 8;
 const COPY_SOFT_TIMEOUT_MS = 20000;
-const TERMINAL_ERRORS = new Set(['COPY_UNAUTHORIZED', 'COPY_INVALID_INPUT', 'COPY_UNAVAILABLE', 'COPY_INVALID_OUTPUT']);
+const TERMINAL_ERRORS = new Set(['COPY_UNAUTHORIZED', 'COPY_INVALID_INPUT', 'COPY_UNAVAILABLE', 'COPY_INVALID_OUTPUT',
+  'COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE']);
 const sessions = new Map();
 let nextSessionId = 0;
 

@@ -91,12 +91,16 @@ function hasWrongMeasurements(text, r) {
 }
 function hasUnsupportedClaim(text) {
   for (const clause of text.split(/[，。！？；]/)) {
-    // Preferences, wishes and conditionals are not observations of this route.
-    // Only scope the exemption to this clause, not a preceding preference clause.
-    if (/(?:希望|期待|如果|假如|倘若|想要|偏好|喜欢|寻找)/.test(clause)) continue;
-    if (/(?:全程|沿途|这里|这条路线|道路|路面|步道|【已知地点】(?:内|里|沿线)?)(?:都|均|十分|非常|很|始终|绝对|完全|保证|是|设有|有|并不|不|没有)*\s*(?:安全|无障碍|平坦|安静|人少|拥挤|人多|没有车辆|没有台阶|有路灯|有厕所|有座椅|有樱花|有湖景)/.test(clause) ||
-        /(?:全程|沿途|这里|【已知地点】(?:内|里)?)(?:有|设有|配有|提供|遍布|可以欣赏到|能看到)(?:免费的?|连续的?|完善的?|盛开的?)?(?:路灯|厕所|座椅|樱花|湖景|河景|护栏|坡道|饮水|洗手间)/.test(clause) ||
-        /(?:保证安全|绝对安全|放心通行|零风险|全程无车|轮椅畅行|人流量为|人流量仅|每小时\d+人)/.test(clause)) return true;
+    // A preference in one independent statement must never exempt an adjacent
+    // observed claim: "喜欢公园而且沿途有路灯" must still reject the second part.
+    for (const part of clause.split(/(?:但是|不过|然而|并且|而且|同时|因此|所以|于是|因为|可是|但|而|却)/)) {
+      // Bare wishes/conditionals are not route observations. Keep the
+      // exemption limited to this smallest recognisable statement.
+      if (/(?:希望|期待|如果|假如|倘若|想要|偏好|喜欢|寻找)/.test(part)) continue;
+    if (/(?:全程|沿途|这里|这条路线|道路|路面|步道|【已知地点】(?:内|里|沿线)?)(?:都|均|十分|非常|很|始终|绝对|完全|保证|是|设有|有|并不|不|没有)*\s*(?:安全|无障碍|平坦|安静|人少|拥挤|人多|没有车辆|没有台阶|有路灯|有厕所|有座椅|有樱花|有湖景)/.test(part) ||
+        /(?:全程|沿途|这里|【已知地点】(?:内|里)?)(?:有|设有|配有|提供|遍布|可以欣赏到|能看到)(?:免费的?|连续的?|完善的?|盛开的?)?(?:路灯|厕所|座椅|樱花|湖景|河景|护栏|坡道|饮水|洗手间)/.test(part) ||
+        /(?:保证安全|绝对安全|放心通行|零风险|全程无车|轮椅畅行|人流量为|人流量仅|每小时\d+人)/.test(part)) return true;
+    }
   }
   return false;
 }
@@ -117,7 +121,7 @@ function validateCopy(copy, payload) {
     if (hasWrongMeasurements(text, r)) return null;
     // Unknown explicit references and recognisable named destinations only.
     // Generic wishes such as “去公园换换心情” are not factual environment claims.
-    if (/\bP\d+\b/.test(text) || /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}(?:公园|广场|大街|大道|步行街|博物馆|街|路|湖|桥)/.test(text) ||
+    if (/\bP\d+\b/.test(text) || /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)/.test(text) ||
         /[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(text)) return null;
     if (hasUnsupportedClaim(text)) return null;
     if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return null;

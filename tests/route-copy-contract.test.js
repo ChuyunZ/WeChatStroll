@@ -99,3 +99,25 @@ test('JSON escapes in ordinary creative prose remain valid', () => {
   const c = { ...copy, title: '给心情按下"暂停键"' };
   expect(contract.parseCopy(JSON.stringify(c), payload())).toEqual(c);
 });
+
+test.each([
+  '你喜欢公园而且沿途有路灯',
+  '你希望环境安静，但这条路线绝对安全',
+  '你喜欢热闹，所以沿途有洗手间',
+  '希望沿途有路灯，并且全程安全',
+  '你期待自然风光，同时这里有湖景',
+  '一路经过东方明珠塔',
+  '途经虚构古镇',
+  '走进不存在的纪念馆'
+])('does not excuse unsupported claims or invented landmarks: %s', claim => {
+  const c = { ...copy, description: `${claim}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test.each([
+  '如果沿途有路灯，不妨留意周围环境',
+  '希望沿途有路灯',
+  '你喜欢安静的氛围，可以按自己的步调散步'
+])('accepts genuine preference and hypothetical language: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
+  expect(contract.validateCopy(c, payload())).toEqual(c);
+});

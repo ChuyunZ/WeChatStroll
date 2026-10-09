@@ -140,3 +140,14 @@ test('new generation invalidates in-flight response without replenishing budget'
   expect(session.get(old)).toBeNull(); expect(session.get(next)).toEqual(copy);
   expect(session.inspect().sent).toBe(2); expect(request).toHaveBeenCalledTimes(2);
 });
+
+test.each(['COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE'])('terminal server quota %s retains fallback without pausing scheduling', async code => {
+  const { session, scheduler, request } = setup(jest.fn().mockResolvedValue({
+    success: false, error: { code }
+  }));
+  const routes = [route(), route('r2', { distanceMeters: 2100 })];
+  surface(session, routes); await flush();
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(session.get(routes[0])).toBeNull();
+  expect(scheduler.inspect()).toEqual({ inFlight: false, paused: false, queued: 0 });
+});

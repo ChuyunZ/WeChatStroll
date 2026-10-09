@@ -106,6 +106,34 @@ The server validates supplied facts structurally and checks copy against them.
 It cannot independently prove that a caller's route came from Tencent; the
 normal application's existing route validation establishes that provenance.
 
+## Server-side budget (required before deployment)
+
+The Cloud Function reserves an **atomic** daily quota before `generateText`:
+24 sends per authenticated OpenID and 200 sends globally per UTC calendar day
+(00:00 UTC reset). The counters share a single CloudBase database transaction,
+using fixed document IDs in `route_copy_quotas`. OPENID is SHA-256 hashed;
+the only stored fields are day, count and counter-update timestamp. There is no
+persistent prompt, POI, route or model response in the quota documents.
+
+**Deployment prerequisite:** create the `route_copy_quotas` collection in the
+target CloudBase environment before deploying this function. This PR creates
+code only; it does not create the collection or change a database, cloud
+configuration, environment variable or deployment. Missing collection,
+transaction conflict exhaustion or uncertain database outcomes **fail closed**
+as `COPY_QUOTA_UNAVAILABLE`; an exhausted budget returns
+`COPY_QUOTA_EXCEEDED`. Both are ordinary terminal fallback conditions for the
+client scheduler, not unknown remote model execution.
+
+Reservations are committed *before* model inference and are never refunded
+for invalid output, timeout or unknown upstream completion. Only explicit
+rolled-back transaction conflicts may be retried. This protects the send count
+across instances; it does not bound provider token pricing or other AI functions.
+The per-session client limit of eight remains an independent UX limit; the server
+cannot trust a client-provided session as an authorization or billing identity.
+Tune the two constants only with an explicit cost/usage decision.
+Optionally configure CloudBase's own per-user QPS limit separately for burst
+protection; no console QPS setting is changed by this PR.
+
 ## Budget, freshness and timeout
 
 A questionnaire submission creates a session with eight sends. A Routes retry
@@ -147,9 +175,11 @@ There is no polling, background retry, database, cancellation endpoint or task
 system. The cloud client's 60-second HTTP timeout is not proof of upstream model
 termination or stopped token charges.
 
-This product budget is not an abuse-prevention or global cost cap. It cannot
-enforce limits across devices, process restarts or modified clients. Global
-quotas and any stronger remote-execution guarantee require separate design.
+The eight-send client budget alone is not an abuse-prevention or billing cap.
+The server-side daily counters above provide cross-device/instance admission
+limits for this Cloud Function, but do not guarantee a monetary ceiling or
+protect `aiRoutePlanner`. A stronger remote-execution guarantee would require
+separate design.
 
 ## Editing, cleanup and persistence
 
@@ -188,6 +218,11 @@ Run `npm test -- --runInBand` (`npm.cmd` on Windows when PowerShell blocks the
 
 Before a separately authorized deployment/E2E, verify:
 
+- Confirm that `route_copy_quotas` exists and Cloud Function DB permissions
+  permit transactional reads/writes; a missing collection intentionally causes
+  deterministic fallback with no AI request.
+- Verify same-user daily quota, cross-user global quota and reset behavior in
+  the development environment only, without logging raw user identifiers.
 - CloudBase model content logs and actual provider retention settings; no
   application logging does not establish platform non-retention.
 - The deployed SDK/model behavior, function runtime limit and upstream timeout
