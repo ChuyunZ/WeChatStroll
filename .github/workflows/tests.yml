@@ -23,3 +23,6 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Issue 91 correction benchmark (synthetic map provider)
+        run: node tests/benchmarks/issue91-route-correction.cjs
