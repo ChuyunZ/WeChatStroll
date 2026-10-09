@@ -82,3 +82,19 @@ test('selection is deterministic under candidate/POI iteration and tied geometry
   expect(new Set(arr.map(c=>waypointSetKey(ids(c)))).size).toBe(arr.length)
  }
 })
+
+test('preserves AI batch and order when singleton geometry does not strongly suggest too-short walks',()=>{
+  const far=pool.slice(0,5).map((p,i)=>({...p,latitude:30.0075+i*0.00015,longitude:120.001}))
+  const input=plan(['A','B','C','D','E'])
+  const ranked=rankInitialCandidates(options(input,{verifiedWaypointPool:[...far,...pool.slice(5)]}))
+  expect(ranked.applied).toBe(false)
+  expect(ranked.candidates).toBe(input)
+  expect(ranked.supplementalPairCount).toBe(0)
+})
+test('does not displace a meaningful mixed AI batch where at least two are already multi-POI',()=>{
+ const input=[...plan(['A','B','C']),{waypoints:[{poiId:'D'},{poiId:'E'}]},
+   {waypoints:[{poiId:'F'},{poiId:'G'}]}]
+ const ranked=rankInitialCandidates(options(input))
+ expect(ranked.applied).toBe(false)
+ expect(ranked.candidates).toBe(input)
+})

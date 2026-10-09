@@ -9,7 +9,8 @@ const {
   INITIAL_MAX_CANDIDATES,
   INITIAL_MAX_SUPPLEMENTAL_PAIRS,
   INITIAL_POOL_POI_LIMIT,
-  INITIAL_PAIR_MIN_SCORE_GAIN
+  INITIAL_PAIR_MIN_SCORE_GAIN,
+  INITIAL_SHORT_SINGLETON_TRIGGER_RATIO
 } = require('../config/route-planning')
 
 const PREFERENCE_CATEGORY = { '公园': 'park', '水边': 'water', '商街': 'shoppingStreet' }
@@ -76,6 +77,7 @@ function rankInitialCandidates({ candidates, verifiedWaypointPool, location, pre
   const singletonCount = candidates.filter(item =>
     item && Array.isArray(item.waypoints) && item.waypoints.length === 1).length
   if (candidates.length < 3 || singletonCount < 3 ||
+      singletonCount / candidates.length < 0.8 ||
       candidates.length > INITIAL_MAX_CANDIDATES) return unchanged()
 
   const allPois = new Map()
@@ -111,6 +113,24 @@ function rankInitialCandidates({ candidates, verifiedWaypointPool, location, pre
   // cloud-provider validation. Preserve their existing behavior.
   if (entries.some((entry, i) => entries.slice(i + 1)
     .some(other => conflictsBySubset(entry.ids, other.ids)))) return unchanged()
+
+  // The model's existing five slots are valuable. Do NOT displace working AI
+  // choices merely because a guessed pair looks closer to 30 minutes.
+  // Activate the hybrid only when the median AI singleton's direct-distance
+  // estimate is *very short* relative to the target. This is a cautious
+  // trigger, not a hard rejection of any AI route or a walking-time fact.
+  const singletonDurations = entries
+    .filter(item => item.ids.length === 1)
+    .map(item => estimator.estimate(item.ids, routeType, range.targetSeconds,
+      range.minSeconds, range.maxSeconds).durationSeconds)
+    .sort((a,b)=>a-b)
+  const medianIndex = Math.floor(singletonDurations.length / 2)
+  const medianDuration = singletonDurations.length % 2
+    ? singletonDurations[medianIndex]
+    : (singletonDurations[medianIndex - 1] + singletonDurations[medianIndex]) / 2
+  if (medianDuration >= range.targetSeconds * INITIAL_SHORT_SINGLETON_TRIGGER_RATIO) {
+    return unchanged()
+  }
 
   const rankedPois = [...allPois.values()]
     .sort((a, b) =>

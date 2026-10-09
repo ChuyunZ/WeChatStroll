@@ -19,6 +19,9 @@ const INITIAL_MAX_CANDIDATES = 5
 const INITIAL_MAX_SUPPLEMENTAL_PAIRS = 2
 const INITIAL_POOL_POI_LIMIT = 18
 const INITIAL_PAIR_MIN_SCORE_GAIN = 0.08
+// Strong evidence threshold for replacing initial AI singleton slots with pairs.
+// Uses only straight-line time; does not claim a route is invalid.
+const INITIAL_SHORT_SINGLETON_TRIGGER_RATIO = 0.40
 
 const ORDERING_MAX_SEEDS = 3
 const ORDERING_MAX_EVALUATIONS = 32
@@ -50,6 +53,7 @@ module.exports = {
   INITIAL_MAX_SUPPLEMENTAL_PAIRS,
   INITIAL_POOL_POI_LIMIT,
   INITIAL_PAIR_MIN_SCORE_GAIN,
+  INITIAL_SHORT_SINGLETON_TRIGGER_RATIO,
 
   ORDERING_MAX_SEEDS,
   ORDERING_MAX_EVALUATIONS,
