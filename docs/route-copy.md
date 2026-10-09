@@ -282,6 +282,15 @@ Contradictory hour claims still fail validation. Mirrored cloud and client
 contracts, and negative tests, remain in sync. The fix requires redeploying
 `routeCopyGenerator` and recompiling the mini program.
 
+The live C004 fail-fast POI-pool benchmark (2026-10-09) also exposed
+`INVALID_POI` on “途经几处公园慢慢晃” when the simulated route contained
+four park POIs. The landmark detector now distinguishes quantified generic
+category phrases (e.g. `几处公园`, `两座公园`) from a new proper name.
+It still rejects clear invented names, including after a generic mention,
+and does not silently permit “走进几个公园” without venue-entry facts.
+Matched evidence was preserved as an exact C004 regression and paired
+positive/negative tests; mirrored cloud/client contracts stay identical.
+
 ## Development-only Tencent POI copy stress-test
 
 The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source

@@ -240,3 +240,53 @@ test('live C001 rejection is a rounded half-hour false positive, not a 15-minute
     .toEqual({ copy: proposed, reason: null, field: null });
   expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
 });
+
+test('live C004: four known park POIs and generic “途经几处公园” do not invent a named destination', () => {
+  const p = payload();
+  p.routeFacts.distanceMeters = 3140;
+  p.routeFacts.durationSeconds = 3070;
+  p.routeFacts.durationMinutes = 52;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '静安河畔公园', category: 'park' },
+    { ref: 'P2', name: '闵行滨水绿道休闲生态公园', category: 'park' },
+    { ref: 'P3', name: '梅陇生态园', category: 'park' },
+    { ref: 'P4', name: '海心园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 60;
+  p.preferences.environmentPreferences = ['水边', '街道', '商街', '公园'];
+  const generated = {
+    title: '慢行环线，偷得半日闲趣',
+    description: '从起点出发，途经静安河畔公园、闵行滨水绿道休闲生态公园、梅陇生态园与海心园，兜转一圈回到原处。不妨把脚步交还给心情，随意看看沿路绿意。',
+    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空一下午。'
+  };
+  expect(contract.validateCopyDetailed(generated, p))
+    .toEqual({ copy: generated, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(generated), p).copy).toEqual(generated);
+});
+
+test.each([
+  '途经几个公园慢慢逛',
+  '经过两座公园放松心情',
+  '途经四处公园，给生活留点空白',
+  '途经一些公园，随心散步',
+  '经过许多公园，慢慢探索',
+  '途经几处公园，然后前往人民公园'
+])('does not misclassify generic quantified place categories as new proper names: %s', phrase => {
+  const c = { ...copy, recommendationReason:
+    `${phrase}，按自己的步调慢慢走，给日常留一段轻松的时光。` };
+  expect(contract.validateCopyDetailed(c, payload()).reason).not.toBe('INVALID_POI');
+});
+
+test.each([
+  '途经紫荆公园',
+  '途经三桥',
+  '经过陌生的海滨博物馆',
+  '途经几个紫荆公园',
+  '途经几处公园，然后前往虚构的海滨广场',
+  '走进几处公园'
+])('generic quantity exclusion does not excuse identifiable unknown places or unverified entry: %s', phrase => {
+  const c = { ...copy, description:
+    `${phrase}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  const verdict = contract.validateCopyDetailed(c, payload());
+  expect(verdict).toMatchObject({ copy: null, reason: 'INVALID_POI', field: 'description' });
+});

@@ -122,8 +122,20 @@ function hasUnknownPoiName(maskedText) {
   if (/\bP\d+\b/.test(maskedText)) return true;
   if (/[“「][^”」]{2,24}(?:公园|广场|大街|大道|博物馆|街|路|湖|桥)[”」]/.test(maskedText)) return true;
   const fragments = maskedText.split(/(?:再到|再去|然后|随后|接着|以及|同时|中途|一路|沿途|这条|那条|路线|(?:公园|商街|广场)(?:外|里|内|旁|附近)(?:的)?|[，。！？；、与和及])/);
-  const name = /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?[^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)(?!线)/;
-  return fragments.some(fragment => name.test(fragment));
+  const name = /(?:前往|途经|抵达|到达|走进|经过)(?:位于)?([^，。！？；、【】\s]{2,24}?(?:步行街|博物馆|纪念馆|美术馆|公园|广场|大街|大道|景区|景点|古镇|寺|庙|塔|街|路|湖|桥))(?!线)/g;
+  // A measured quantity + place category is not a newly invented proper
+  // name. The live benchmark C004 yielded "途经几处公园", while every
+  // provided waypoint was a park. Match only explicit counters, not bare
+  // numerals: "三桥" may be a real, unlisted place name.
+  const generic = /^(?:(?:几|数|多|几十|若干|一|两|二|三|四|五|六|七|八|九|十)(?:个|处|座|条|片)|一些|不少|许多|好几个|好几处|若干个)(?:公园|广场|大街|大道|步行街|博物馆|纪念馆|美术馆|景区|景点|古镇|寺|庙|塔|街|路|湖|桥)$/;
+  return fragments.some(fragment => {
+    for (const match of fragment.matchAll(name)) {
+      // “走进公园” is a claim about actually entering a venue; the
+      // ordered POI list alone cannot establish that, even for several parks.
+      if (match[0].startsWith('走进') || !generic.test(match[1])) return true;
+    }
+    return false;
+  });
 }
 function hasUnsupportedOriginOrInterior(text) {
   if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
