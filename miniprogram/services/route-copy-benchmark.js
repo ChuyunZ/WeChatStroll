@@ -9,6 +9,10 @@ const ENVIRONMENTS = ['公园', '水边', '街道', '商街'];
 const CATEGORIES = new Set(['park', 'water', 'street', 'shoppingStreet']);
 const TYPES = ['loop', 'out_and_back', 'point_to_point'];
 const MAX_SENDS = 500;
+const AUDIT_COUNT = 200;
+const AUDIT_MAX_FAILURES = 1;
+const AUDIT_WINDOW_MINUTES = 75;
+const MIN_AUDIT_POOL = 16;
 const MIN_INTERVAL_MS = 15000;
 const BAD_TEXT = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff<>]/;
 function rng(seed) {
@@ -173,12 +177,14 @@ function publicRecord(testCase, startedAtMs, elapsedMs, response, error) {
   return record;
 }
 
-async function runBenchmark({ minutes, cases, call, audit100 = false, seed = null,
+async function runBenchmark({ minutes, cases, call, audit200 = false, seed = null,
   now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   shouldStop = () => false, onRecord = () => {} }) {
-  if (![30, 60].includes(minutes) || !Array.isArray(cases) || cases.length < 1 ||
+  if (![30, 60, AUDIT_WINDOW_MINUTES].includes(minutes) || !Array.isArray(cases) || cases.length < 1 ||
       cases.length > MAX_SENDS || typeof call !== 'function' ||
-      typeof audit100 !== 'boolean' || (audit100 && (minutes !== 60 || cases.length < 100)))
+      typeof audit200 !== 'boolean' || (audit200
+        ? (minutes !== AUDIT_WINDOW_MINUTES || cases.length < AUDIT_COUNT)
+        : minutes === AUDIT_WINDOW_MINUTES))
     throw new Error('Invalid benchmark setup');
   const begin = now(), deadline = begin + minutes * 60000;
   // Add a 15-second cooldown after each settled request, never parallel.
@@ -188,10 +194,10 @@ async function runBenchmark({ minutes, cases, call, audit100 = false, seed = nul
   const intervalMs = MIN_INTERVAL_MS;
   const report = { schemaVersion: 1, tool: 'route-copy-development-benchmark',
     mode: 'simulated-from-tencent-poi-pool', plannedMinutes: minutes, intervalMs,
-    testMode: audit100 ? 'audit100' : 'fail-fast',
+    testMode: audit200 ? 'audit200' : 'fail-fast',
     ...(Number.isSafeInteger(seed) ? { seed } : {}),
     startedAt: new Date(begin).toISOString(), records: [], stopReason: null };
-  for (let i = 0; i < (audit100 ? 100 : cases.length); i++) {
+  for (let i = 0; i < (audit200 ? AUDIT_COUNT : cases.length); i++) {
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
     if (i > 0) await sleep(intervalMs);
     if (shouldStop()) { report.stopReason = 'USER_STOPPED'; break; }
@@ -203,25 +209,25 @@ async function runBenchmark({ minutes, cases, call, audit100 = false, seed = nul
     const record = publicRecord(cases[i], startedAt, Math.max(0, now() - startedAt), response, error);
     report.records.push(record);
     try { onRecord(record, report); } catch (_) { /* Reporting must not trigger a retry. */ }
-    // Default debug mode remains strict fail-fast. Explicit 100-case audit
+    // Default debug mode remains strict fail-fast. Explicit 200-case audit
     // counts copy rejections separately but never retries a request.
-    if (!audit100 && record.status !== 'accepted') {
+    if (!audit200 && record.status !== 'accepted') {
       report.stopReason = record.status === 'rejected' ? 'FIRST_FAILURE' : record.code;
       break;
     }
     // Unknown transport/provider errors have uncertain upstream execution.
     // Never continue sending after them, even in the audit mode.
-    if (audit100 && record.status === 'stop') {
+    if (audit200 && record.status === 'stop') {
       report.stopReason = record.code;
       break;
     }
-    if (audit100 && report.records.filter(r => r.status === 'rejected').length >= 2) {
+    if (audit200 && report.records.filter(r => r.status === 'rejected').length > AUDIT_MAX_FAILURES) {
       report.stopReason = 'ACCEPTANCE_TARGET_MISSED';
       break;
     }
   }
   if (!report.stopReason) report.stopReason = shouldStop() ? 'USER_STOPPED' :
-    audit100 && report.records.length === 100 ? 'AUDIT_100_COMPLETE' :
+    audit200 && report.records.length === AUDIT_COUNT ? 'AUDIT_200_COMPLETE' :
     report.records.length === cases.length ? 'CASE_LIMIT_REACHED' : 'TIME_WINDOW_ENDED';
   report.endedAt = new Date(now()).toISOString();
   report.summary = {
@@ -231,17 +237,18 @@ async function runBenchmark({ minutes, cases, call, audit100 = false, seed = nul
     rejected: report.records.filter(r => r.code === 'COPY_INVALID_OUTPUT').length
   };
   report.failures = report.records.filter(r => r.status !== 'accepted');
-  if (audit100) {
+  if (audit200) {
     const acceptanceFailures = report.records.filter(r => r.status === 'rejected').length;
     const assessed = report.records.filter(r => r.status === 'accepted' || r.status === 'rejected').length;
-    const verdict = acceptanceFailures >= 2 ? 'FAIL' :
-      report.stopReason === 'AUDIT_100_COMPLETE' && assessed === 100 &&
-        acceptanceFailures <= 1 ? 'PASS' : 'INCONCLUSIVE';
-    report.audit = { target: 100, maxAcceptanceFailures: 1, assessed,
+    const verdict = acceptanceFailures > AUDIT_MAX_FAILURES ? 'FAIL' :
+      report.stopReason === 'AUDIT_200_COMPLETE' && assessed === AUDIT_COUNT &&
+        acceptanceFailures <= AUDIT_MAX_FAILURES ? 'PASS' : 'INCONCLUSIVE';
+    report.audit = { target: AUDIT_COUNT, maxAcceptanceFailures: AUDIT_MAX_FAILURES, assessed,
       accepted: report.summary.accepted, acceptanceFailures, verdict };
   }
   return report;
 }
 
-module.exports = { MAX_SENDS, DURATIONS, CROWDS, normalizePoiPool, generateCases,
+module.exports = { MAX_SENDS, AUDIT_COUNT, AUDIT_MAX_FAILURES, AUDIT_WINDOW_MINUTES,
+  MIN_AUDIT_POOL, DURATIONS, CROWDS, normalizePoiPool, generateCases,
   runBenchmark, publicRecord };
