@@ -86,3 +86,17 @@ test('transaction conflict predicate excludes ambiguous network errors', () => {
   expect(isConflict({ errMsg: 'database transaction conflict' })).toBe(true);
   expect(isConflict({ message: 'connection reset' })).toBe(false);
 });
+
+test('development POI stress-test quota is 150 per user; production and unspecified retain 24', () => {
+  const { quotaLimitsForEnvironment, DEV_USER_DAILY_LIMIT,
+    PER_USER_DAILY_LIMIT, GLOBAL_DAILY_LIMIT } = require('./quota');
+  expect(DEV_USER_DAILY_LIMIT).toBe(150);
+  expect(quotaLimitsForEnvironment({ ROUTE_COPY_DEPLOYMENT_STAGE: 'development' }))
+    .toEqual({ userLimit: 150, globalLimit: GLOBAL_DAILY_LIMIT });
+  for (const env of [{}, { ROUTE_COPY_DEPLOYMENT_STAGE: 'production' },
+    { ROUTE_COPY_DEPLOYMENT_STAGE: 'unknown', benchmarkDebug: true }]) {
+    expect(quotaLimitsForEnvironment(env)).toEqual({
+      userLimit: PER_USER_DAILY_LIMIT, globalLimit: GLOBAL_DAILY_LIMIT
+    });
+  }
+});

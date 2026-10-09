@@ -144,7 +144,8 @@ normal application's existing route validation establishes that provenance.
 ## Server-side budget (required before deployment)
 
 The Cloud Function reserves an **atomic** daily quota before `generateText`:
-24 sends per authenticated OpenID and 200 sends globally per UTC calendar day
+24 sends per authenticated OpenID in production (150 in explicitly configured
+development Cloud Functions), and 200 sends globally per UTC calendar day
 (00:00 UTC reset). The counters share a single CloudBase database transaction,
 using fixed document IDs in `route_copy_quotas`. OPENID is SHA-256 hashed;
 the only stored fields are day, count and counter-update timestamp. There is no
@@ -269,59 +270,55 @@ Before a separately authorized deployment/E2E, verify:
 
 This document records local implementation, not deployment or real-device proof.
 
-## Development live-copy benchmark (manual opt-in)
+## Development-only Tencent POI copy stress-test
 
-The existing `pages/cloud-test/cloud-test` page contains an explicit developer
-benchmark for the **copy generator only**. No new dependencies, local secrets,
-backend endpoints, Tencent Map API calls or route-planning API calls are added.
+The Cloud Test panel runs explicitly in WeChat DevTools only. **Its source
+is the POI candidate pool from Tencent Maps' `nearbyPois` search**:
+`generateRoutes()` calls `searchNearbyPois()`, flattens category results
+using `buildPoiCandidates()`, and returns `verifiedWaypointPool` to Routes.
+This pool is obtained **before AI waypoint selection or walking validation**.
+The name `verifiedWaypointPool` refers to structurally normalized POIs,
+not confirmed navigable sequences. The benchmark does not call map APIs.
 
-1. In WeChat DevTools, open Routes normally and wait for one or more real,
-   validated routes. A previous real route is reused; do not replace it while
-   the benchmark is running.
-2. In the **AppService** Console, navigate without unloading Routes:
-   `wx.navigateTo({ url: '/pages/cloud-test/cloud-test' })`.
-3. On Cloud Test choose **30 minutes** or **60 minutes**, or Stop. Keep DevTools
-   awake with this page open. The runner is guarded by platform `devtools`.
-4. The sampler rotates `durationMinutes` (15/30/45/60/90/120), crowd
-   (low/medium/high), four environment preference orders and up to three
-   validated route fact snapshots. The actual route metrics and ordered POIs
-   are never fabricated or altered. This is an acceptance test, **not a full
-   route-planning E2E**. As with normal app operation, questionnaire target
-   duration need not equal the route's observed duration.
-5. The harness sends sequential requests, never retries, waits at least
-   120 seconds between sends, and caps each run at **16 model sends**. A
-   30-minute/60-minute setting specifies the latest start time for calls,
-   not a guarantee of a fixed number of calls. Server quotas (24/OpenID/day,
-   200 globally/day) still apply. The harness stops if it encounters an
-   auth, quota, network/unknown execution or malformed response problem.
-6. **Fail fast:** a single server rejection, failed client validation, soft
-   UI deadline, transport uncertainty or quota error stops the run immediately.
-   No automatic retry and no further model sends after the first problem.
-7. The benchmark sends `benchmarkDebug: true`. **Only when BOTH**
-   `ROUTE_COPY_DEPLOYMENT_STAGE=development` and `ROUTE_COPY_DEBUG_TEXT=1`
-   are configured does the development cloud function include
-   `debug: { event, reason, field?, modelTextRedacted? }` in an
-   `COPY_INVALID_OUTPUT` response. The ordinary UI never sends this opt-in
-   and public/production deployments never return debug data even when the
-   opt-in flag is provided. The secure development diagnostics still appear in
-   CloudBase app logs. No new collection or provider log API is needed.
-8. The first failed case automatically saves the complete sanitized diagnostic
-   into the JSON checkpoint at `wx.env.USER_DATA_PATH/route-copy-benchmark.json`
-   (if filesystem access works), alongside the selected questionnaire preferences,
-   real route timing/distance/type and waypoint category/length metadata, error
-   category, field, masked model output, start time and request ID when supplied.
-   Actual POI names, identity, coordinates, raw full responses and prompts are
-   excluded. Click **复制 JSON 报告** and share the content in one message/file.
-   Sanitization is best-effort and may leave indirect location clues, so treat the
-   report as development-only. If the `debug` field is missing on a rejected
-   case, verify the cloud code and environment variables; the report marks it.
-   Stops or page unloads leave the in-flight call to settle without sending
-   another request. Supplementary CloudBase logs can still be consulted if needed. A response that exceeds the
-   existing 20-second UI acceptance deadline is recorded as
-   `COPY_UI_DEADLINE_EXCEEDED` even if the eventual model response is valid.
+1. Generate one ordinary route in Routes, then enter the existing Cloud Test
+   page in AppService Console:
+   `wx.navigateTo({url:'/pages/cloud-test/cloud-test'})`.
+   The Routes page must remain alive, including its in-memory
+   `_verifiedWaypointPool`. No extra map/AI-planning requests are made.
+2. Choose 30 or 60 minutes (maximum time window, not promised run length).
+   From **all eligible map-returned POIs**, the harness shuffles and rotates
+   through the whole pool, selects random combinations of **1–8 POIs**,
+   varies target duration (15–120m), crowd, environment order and route type.
+   Every input POI name/category comes from the already fetched Tencent
+   candidate pool, never an AI-generated selection. Duplicates and malformed
+   POIs are excluded, and the run is reproducible using its seed.
+3. **Simulated facts:** for each combination, the harness generates internally
+   consistent distance/time and return-type metadata to satisfy the existing
+   cloud contract. These are invented test measurements, **not true walking
+   calculations or evidence that this route can be walked**. Do not present
+   model outputs as factual public-route recommendations. This tests grounding,
+   JSON formats and validator false positives, **not genuine route E2E**.
+4. Requests are **serial**, with **5 seconds between settled requests**;
+   no auto retries; max **150 sends per run**, stopping at first rejection,
+   invalid client copy, unknown execution, soft UI deadline or quota issue.
+   The original production server quota stays 24 sends/OpenID/day and
+   200 globally/day. **Only cloud functions deployed with
+   `ROUTE_COPY_DEPLOYMENT_STAGE=development`** use 150 sends per user/day,
+   still bounded by the same global 200/day. Normal/production callers
+   cannot lift limits using `benchmarkDebug`.
+5. With BOTH `ROUTE_COPY_DEPLOYMENT_STAGE=development` and
+   `ROUTE_COPY_DEBUG_TEXT=1`, the `benchmarkDebug: true` request receives
+   `debug` on failed validation: reason, field and best-effort-POI-redacted
+   model output. Normal UI/production receives fixed error responses only.
+6. Each result checkpoints to
+   `wx.env.USER_DATA_PATH/route-copy-benchmark.json` when possible. After
+   **the first failure**, click **复制 JSON 报告** and send it directly for
+   analysis. The report includes scenario mode, input duration, simulated
+   timing, POI counts/categories/name lengths (not actual names), reason,
+   field and redacted model reply. Treat reports as potentially sensitive:
+   generated prose might contain indirect location clues. Production should
+   disable and remove this developer-only panel and debug flags.
 
-**Do not ship the Cloud Test benchmark panel in public releases.** Disable
-`ROUTE_COPY_DEBUG_TEXT` production-side, and review log retention/access
-before sharing diagnostics. A long run can exhaust today's remaining quota;
-never delete/reset `route_copy_quotas` to extend it. This test uses billed
-`hy3` invocations and should be started only with explicit cost approval.
+This test can deplete today's development quota; **never reset database
+counters** to bypass it. The Tencent map usage is limited to the single
+ordinary route setup step; no map provider API is called by the sampler.
