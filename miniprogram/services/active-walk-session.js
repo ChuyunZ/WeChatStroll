@@ -1,6 +1,12 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
 const ACTIVE_WALK_SESSION_VERSION = 2;
+const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
+// Terminal results are optional Feedback metadata, never planned-route caches.
+const PENDING_FIELDS = [
+  "walkId", "routeId", "startTime", "endTime", "actualDurationSeconds",
+  "completionStatus", "trajectoryEnabled", "trajectoryPartial", "trajectoryEndTimeMs"
+];
 const { isValidPreferences } = require("./walk-records");
 const { isValidGeoPoint } = require("../utils/geo");
 
@@ -156,8 +162,6 @@ function isValidPendingWalkResult(result) {
     result.walkId.trim() !== "" &&
     typeof result.routeId === "string" &&
     result.routeId.trim() !== "" &&
-    isValidRouteSnapshot(result.route) &&
-    result.route.routeId === result.routeId &&
     typeof result.startTime === "string" &&
     typeof result.endTime === "string" &&
     Number.isFinite(result.actualDurationSeconds) &&
@@ -166,28 +170,42 @@ function isValidPendingWalkResult(result) {
   );
 }
 
+function minimalPendingWalkResult(result) {
+  const minimal = {};
+  for (const key of PENDING_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(result, key)) minimal[key] = result[key];
+  }
+  return minimal;
+}
+
 function savePendingWalkResult(result) {
   if (!isValidPendingWalkResult(result)) {
     throw new Error("Invalid pending walk result.");
   }
-
-  wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, result);
-  return result;
+  const minimal = minimalPendingWalkResult(result);
+  wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, minimal);
+  return minimal;
 }
 
 function getPendingWalkResult() {
   const result = wx.getStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
-
-  if (!result) {
-    return null;
-  }
-
+  if (!result) return null;
   if (!isValidPendingWalkResult(result)) {
     wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
     return null;
   }
 
-  return result;
+  // Rewrite legacy full-route terminal snapshots when the user next opens the app.
+  const minimal = minimalPendingWalkResult(result);
+  if (Object.keys(result).some(key => !PENDING_FIELDS.includes(key))) {
+    try {
+      wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, minimal);
+    } catch (_) {
+      // Storage may be temporarily unavailable. Return safe in-memory metadata
+      // and retry sanitizing the old key on its next read.
+    }
+  }
+  return minimal;
 }
 
 function clearPendingWalkResult(walkId) {
@@ -215,6 +233,14 @@ async function reconcileActiveWalk(route = null) {
   const local = getActiveWalkSession();
   if (local) {
     const cloud = await records.getWalk(local.walkId);
+    // Ignore stale cloud responses rather than erasing a newer local session.
+    const current = getActiveWalkSession();
+    if (!current || current.walkId !== local.walkId ||
+        current.routeId !== local.routeId || current.startTimeMs !== local.startTimeMs) {
+      throw Object.assign(new Error("Active walk changed during reconciliation."), {
+        code: "WALK_STATE_CHANGED"
+      });
+    }
     if (cloud.status === "active") {
       if (cloud.routeId !== local.routeId || Date.parse(cloud.startTime) !== local.startTimeMs) {
         throw new Error("Local walk does not match cloud identity.");
@@ -229,15 +255,35 @@ async function reconcileActiveWalk(route = null) {
         { code: "WALK_ABANDONED" }
       );
     }
-    try { savePendingWalkResult({ ...cloud, route: local.route }); }
-    finally { clearActiveWalkSession(local.routeId, local.walkId); }
+    try {
+      const pending = getPendingWalkResult();
+      // Do not replace a different, newer user's pending Feedback handoff.
+      if (!pending || pending.walkId === local.walkId) savePendingWalkResult(cloud);
+    } finally {
+      clearActiveWalkSession(local.routeId, local.walkId);
+    }
     return null;
   }
   const cloud = await records.getActiveWalk();
   return cloud ? restoreCloudWalk(cloud, route) : null;
 }
 
+// Check aged local sessions when the app restarts. Only CloudBase can establish
+// actual abandonment: never delete a still-active or unverified Walk by clock.
+async function cleanupStaleActiveWalk() {
+  const local = getActiveWalkSession();
+  if (!local || Date.now() - local.startTimeMs < MAX_ACTIVE_WALK_AGE_MS) return false;
+  try {
+    await reconcileActiveWalk();
+  } catch (error) {
+    if (!error || error.code !== "WALK_ABANDONED") throw error;
+  }
+  return true;
+}
+
 module.exports = {
+  cleanupStaleActiveWalk,
+  MAX_ACTIVE_WALK_AGE_MS,
   restoreCloudWalk,
   reconcileActiveWalk,
   ACTIVE_WALK_STORAGE_KEY,
