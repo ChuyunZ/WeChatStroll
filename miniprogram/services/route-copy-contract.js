@@ -229,6 +229,9 @@ function hasUnsupportedParkCount(text, r) {
   return false;
 }
 function hasUnsupportedOriginOrInterior(text) {
+  // An ordered waypoint is never verified as the user's origin, including a
+  // point-to-point route's first stop. “从POI甲到POI乙” implies otherwise.
+  if (/(?:从|由|自)【已知地点】(?:附近)?(?:到|至|前往|走向|抵达)/.test(text)) return true;
   if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
   // A POI category/name is not verified evidence of a traversed park footpath,
   // a quiet inner corner or even entering the venue.
@@ -237,6 +240,11 @@ function hasUnsupportedOriginOrInterior(text) {
   if (/(?:走进|步入|进入|穿过|穿行于|沿着|顺着|漫步于|漫步在|走在)(?:【已知地点】(?:里|内|中|里面|内部)?|(?:园子?|公园|景区|商场|广场)(?:里|内|中|里面|内部))/.test(text)) return true;
   if (new RegExp(`(?:在|于)${interior.source}(?:散步|漫步|穿行|走走|游览)`).test(text)) return true;
   return false;
+}
+function hasUnsupportedTemporalContext(text) {
+  // routeFacts contains no planned departure time, weather or season.
+  // Caller masks exact verified POI names before this screen.
+  return /(?:凌晨|清晨|早晨|早上|上午|正午|中午|午后|下午|傍晚|黄昏|日落|日出|黎明|拂晓|午夜|夜幕|夜晚|夜间|夜里|晚上|深夜|今早|今晚|明早|明晚|昨晚|晨光|晨曦|晚霞|夕阳|落日|日暮|朝霞|今天|今日|明天|昨日|周末|晴天|晴朗|阴天|雨天|雪天|雨后|雨中|雪后|下雨|下雪|细雨|飘雪|微风|清风|阳光|凉爽|寒冷|炎热|酷暑|雾气|春天|春日|春季|夏天|夏日|夏季|秋天|秋日|秋季|冬天|冬日|冬季)/.test(text);
 }
 const rejectCopy = (reason, field = null) => ({ copy: null, reason, field });
 function validateCopyDetailed(copy, payload) {
@@ -264,6 +272,7 @@ function validateCopyDetailed(copy, payload) {
     if (!r.returnsToStart && /(?:并|再|最后|随后|最终)返回起点|回到出发点|环形路线|往返路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);
     if (r.returnsToStart && /(?:无需|不必|不会|不再)返回起点|单程路线/.test(text)) return rejectCopy('WRONG_ROUTE_TYPE', field);
     if (/(?:向|往)(?:东|西|南|北)(?:走|行|转)|(?:左|右)转/.test(text)) return rejectCopy('NAVIGATION_INSTRUCTION', field);
+    if (hasUnsupportedTemporalContext(text)) return rejectCopy('UNSUPPORTED_TIME_CONTEXT', field);
   }
   // Check explicit paired ordering, without treating mere mention order as visit order.
   const joined = COPY_FIELDS.map(k => result[k]).join('。');

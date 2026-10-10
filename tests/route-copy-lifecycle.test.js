@@ -261,3 +261,31 @@ test('compatibility navigation never promotes an AI display object to a business
   routes._rawRoutes = []; routes.viewRoute(tap(raw.routeId));
   expect(wx.navigateTo).not.toHaveBeenCalled(); expect(wx.showToast).toHaveBeenCalled();
 });
+
+test('Routes and open Detail agree when async duplicate titles arrive and card order changes', async () => {
+  const { routes, raw, openDetail } = await setup();
+  const other = alternative('duplicate-detail');
+  routes._rawRoutes = [raw, other]; routes.renderRoutes(); await flush();
+  const { detail } = openDetail();
+  expect(detail.data.route.copySource).toBe('fallback');
+  requests[0].resolve({ success: true, copy }); await flush();
+  requests[1].resolve({ success: true, copy: { ...copy, title: copy.title + '！' } }); await flush();
+  expect(detail.data.route.copySource).toBe('ai');
+  expect(routes.data.routes.find(r => r.routeId === raw.routeId).title).toBe(detail.data.route.title);
+  expect(new Set(routes.data.routes.map(r => r.title)).size).toBe(2);
+
+  // Reordering should transfer the displayed AI title deterministically.
+  routes._rawRoutes = [other, raw]; routes.renderRoutes(); await flush();
+  const display = routes.data.routes.find(r => r.routeId === raw.routeId);
+  expect(display.copySource).toBe('fallback');
+  expect(detail.data.route).toMatchObject({
+    title: display.title, description: display.description,
+    recommendationReason: display.recommendationReason, copySource: 'fallback'
+  });
+  expect(new Set(routes.data.routes.map(r => r.title)).size).toBe(2);
+  expect(send).toHaveBeenCalledTimes(2);
+
+  routes._rawRoutes = [raw, other]; routes.renderRoutes(); await flush();
+  expect(detail.data.route.copySource).toBe('ai');
+  expect(detail.data.route.title).toBe(routes.data.routes[0].title);
+});

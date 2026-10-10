@@ -7,6 +7,57 @@ validated and displayed. Hunyuan `hy3` freely writes `title`, `description` and
 `recommendationReason`; it does not select templates or change route facts.
 Until all three fields pass validation, the existing deterministic copy remains.
 
+## Copy-quality safeguards (Issue #110)
+
+The original 200/200 synthetic hy3 acceptance run predates #110 and **does not
+measure** title diversity or departure-time accuracy. The #110 change adds:
+
+- **Time-neutral prompting and mirrored validation.** No planned departure
+  date, time, timezone, live weather or season is present in the current
+  `schemaVersion: 1` payload. All three copy fields reject unsupported
+  time-of-day/current-conditions wording with `UNSUPPORTED_TIME_CONTEXT`.
+  Known POI names are masked before these checks so verified names such as
+  "清晨公园" are not treated as a morning-departure claim. Existing duration
+  and distance consistency checks remain separate and unchanged.
+- **Route-specific prompt.** Favor exact verified full POI names, known
+  route type and waypoint composition; avoid repetitive generic framing
+  such as "换换心情". Never invent scenery or abbreviate location names.
+  A `point_to_point` route does **not** prove that the first waypoint is
+  the actual start or the last POI the user's destination. The prompt
+  explicitly prohibits "从[POI]出发" and "从[POI A]到[POI B]" copy,
+  even with exact verified place names. The mirrored validators also
+  reject the POI-as-origin title pattern. This follows the 2026-10-11
+  00:48 CST development observation: `INVALID_ORIGIN_OR_INTERIOR`
+  in `description` was correctly rejected and the safe card fallback
+  remained visible. No retry or relaxed origin validation was introduced.
+- **Deterministic cross-route presentation.** Each route's model output is
+  validated independently as before; the Mini Program then compares final
+  card titles in current route order. Exact and sufficiently similar
+  normalized titles cannot be displayed together. The later collision
+  displays a deterministic grounded fallback, with a distinct verified-POI
+  or route-type/position title if necessary. `copySource` reflects what
+  was actually displayed. All three copy fields fall back together.
+- **Shared Routes/Detail decision.** Both pages read the same in-memory
+  session presentation. Reordering, progressive cards, add/replace,
+  confirmed edits and async responses recalculate titles from current
+  bindings; no old copy may overwrite newer route facts. Preview/edit
+  fallbacks remain isolated from persisted business routes.
+
+Diversity screening is **presentation only**: accepted model output is not
+rewritten, uploaded or saved, and a collision is not a reason to send another
+LLM request. `MAX_COPY_CALLS=8`, single in-flight request, soft deadline,
+quotas, no retry on uncertain execution, existing routing, ranking and
+persistence are unchanged. A title cannot be uniquely grounded by the model
+when routes are factually very similar; UI fallback numbering identifies
+cards without claiming an invented geographic distinction.
+
+#86's cloud function is deployed independently. To activate the new prompt
+and server checks, a reviewed `routeCopyGenerator` revision requires an
+explicit deployment; GitHub merge **does not** deploy it. The Mini Program
+client contract provides the matching fail-closed safeguard. Do not modify
+CloudBase config or quotas as part of #110. Validate with Jest and a separate
+real WeChat DevTools smoke before release.
+
 ## Integration and ownership
 
 `routes.js` binds the current business routes to an in-memory copy session. Its
@@ -81,7 +132,7 @@ field names), never model transport errors, the prompt or identity.
 `COPY_INVALID_OUTPUT` now emits `ROUTE_COPY_REJECTED` with a fixed `reason`
 and optional `field` (examples: `INVALID_JSON`, `INVALID_LENGTH`,
 `INVALID_ORIGIN_OR_INTERIOR`, `UNSUPPORTED_FACT`, `WRONG_MEASUREMENT`,
-`INVALID_POI`, `WRONG_POI_ORDER`). The user-facing contract and
+`INVALID_POI`, `WRONG_POI_ORDER`, `UNSUPPORTED_TIME_CONTEXT`). The user-facing contract and
 one-model-send/no-retry behavior are unchanged. A rejection from the existing
 deployment *before this change* cannot be reconstructed from old logs.
 

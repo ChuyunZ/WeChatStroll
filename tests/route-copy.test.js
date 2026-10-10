@@ -1,4 +1,4 @@
-const { createSession, createScheduler, getSession, presentation } = require('../miniprogram/services/route-copy');
+const { createSession, createScheduler, getSession, presentation, titlesCollide } = require('../miniprogram/services/route-copy');
 const { preferences, history, copy, route, deferred, flush } = require('./helpers/route-copy');
 let live;
 beforeEach(() => { jest.useFakeTimers(); live = []; });
@@ -150,4 +150,73 @@ test.each(['COPY_QUOTA_EXCEEDED', 'COPY_QUOTA_UNAVAILABLE'])('terminal server qu
   expect(request).toHaveBeenCalledTimes(2);
   expect(session.get(routes[0])).toBeNull();
   expect(scheduler.inspect()).toEqual({ inFlight: false, paused: false, queued: 0 });
+});
+
+test('cross-route title comparison normalizes punctuation and catches near matches', () => {
+  expect(titlesCollide('换换心情，去散步！', '换换心情去散步')).toBe(true);
+  expect(titlesCollide('午后走走：换换心情', '午后走走·换换心情')).toBe(true);
+  expect(titlesCollide('换换心情去散步', '一起走走换换心情')).toBe(true);
+  expect(titlesCollide('人民公园换换心情', '滨河广场换换心情')).toBe(false);
+  expect(titlesCollide('前往人民公园的散步', '沿着滨河广场的探索')).toBe(false);
+});
+
+test('three independent accepted copies with the same title display only one AI overlay', async () => {
+  const { session, request } = setup();
+  const routes = [1, 2, 3].map(i => route(`route-${i}`, { distanceMeters: 1800 + i }));
+  const originals = routes.map(r => JSON.stringify(r));
+  surface(session, routes); await flush();
+  expect(request).toHaveBeenCalledTimes(3);
+  expect(routes.map(r => session.get(r))).toEqual([copy, copy, copy]);
+  const display = routes.map(r => presentation(r, session));
+  expect(display.map(c => c.copySource)).toEqual(['ai', 'fallback', 'fallback']);
+  expect(new Set(display.map(c => c.title)).size).toBe(3);
+  expect(display.every((c, i) => c.copySource !== 'fallback' || c.description === routes[i].description)).toBe(true);
+  expect(routes.map(r => JSON.stringify(r))).toEqual(originals);
+});
+
+test('accepted genuinely different titles stay AI without extra inference', async () => {
+  const variants = [
+    { ...copy, title: '途经人民公园散散心' },
+    { ...copy, title: '给自己留一点探索空间' },
+    { ...copy, title: '滨河广场的漫步选择' }
+  ];
+  let next = 0;
+  const request = jest.fn(() => Promise.resolve({ success: true, copy: variants[next++] }));
+  const { session } = setup(request);
+  const routes = [1, 2, 3].map(i => route(`unique-${i}`, { distanceMeters: 1900 + i }));
+  surface(session, routes); await flush();
+  expect(routes.map(r => presentation(r, session).copySource)).toEqual(['ai', 'ai', 'ai']);
+  expect(request).toHaveBeenCalledTimes(3);
+});
+
+test('title ownership follows current display order, not request-completion order', async () => {
+  const pending = [];
+  const { session, request } = setup(jest.fn(() => {
+    const p = deferred(); pending.push(p); return p.promise;
+  }));
+  const routes = [1, 2, 3].map(i => route(`async-${i}`, { distanceMeters: 2000 + i }));
+  surface(session, routes); await flush();
+  expect(presentation(routes[0], session).copySource).toBe('fallback');
+  pending[0].resolve({ success: true, copy }); await flush();
+  pending[1].resolve({ success: true, copy: { ...copy, title: copy.title + '！' } }); await flush();
+  pending[2].resolve({ success: true, copy }); await flush();
+  expect(routes.map(r => presentation(r, session).copySource)).toEqual(['ai', 'fallback', 'fallback']);
+  surface(session, [routes[2], routes[0], routes[1]]); await flush();
+  expect([routes[2], routes[0], routes[1]].map(r => presentation(r, session).copySource))
+    .toEqual(['ai', 'fallback', 'fallback']);
+  expect(request).toHaveBeenCalledTimes(3);
+});
+
+test('colliding fallback titles get a grounded distinct label without mutating business routes', async () => {
+  const sameTitle = { ...copy, title: '默认路线标题' };
+  const { session, request } = setup(jest.fn().mockResolvedValue({ success: true, copy: sameTitle }));
+  const r1 = route('label1'), r2 = route('label2', { distanceMeters: 1900 });
+  surface(session, [r1, r2]); await flush();
+  expect(presentation(r1, session).copySource).toBe('ai');
+  const second = presentation(r2, session);
+  expect(second).toMatchObject({ copySource: 'fallback', description: r2.description });
+  expect(second.title).not.toBe(r2.title);
+  expect(second.title).toContain('人民公园');
+  expect(r2.title).toBe('默认路线标题');
+  expect(request).toHaveBeenCalledTimes(2);
 });
