@@ -22,11 +22,26 @@ Only real local-time start date, translated route/status, requested minutes and
 actual elapsed duration are shown. Elapsed duration is not verified exercise time.
 No route title, distance, POIs, calories, planned geometry or speed is inferred.
 
-Feedback is read-only: rating, crowd, recommendation, translated allowlisted
-positive/negative tags and optional plain-text comment. The current service
-contract represents absent tag choices as empty arrays and missing comments as
-null; malformed payloads fail safely. Null feedback shows “这次散步还没有留下评价。”
-There is no submission, editing or navigation into the editable feedback form.
+Feedback is read-only: rating, crowd, recommendation and translated allowlisted
+positive/negative tags. The optional legacy `feedback.comment` is now presented
+separately as a personal **“散步日志”** card when nonempty, rather than within the
+evaluation card. The existing service contract is unchanged: absent tag choices
+are empty arrays, a missing journal is null, and malformed payloads fail safely.
+Null feedback shows “这次散步还没有留下评价。” There is no submission or
+editing on History Detail.
+
+On the Feedback form, the journal is explicitly labeled as optional, personal
+writing **not used for AI recommendations**. In the current compatible storage
+model it remains the `comment` field in the owner's `feedback` record, saved
+**together with** a valid evaluation. It cannot yet be independently saved,
+revised after submission, or retained if the user skips feedback; the form and
+skip confirmation say so. Existing saved comments continue to render as
+personal journals without a database migration. The preference-profile DB
+projection intentionally excludes `comment`, and both AI planner and route-copy
+generation receive structured preferences rather than user-authored journal
+text. If standalone/editable journal functionality is later requested, it
+requires a separate persistence and lifecycle design—not merely relabeling
+this field.
 
 ## Independent states and lifecycle
 
