@@ -329,7 +329,18 @@ subsequent pages pass the returned cursor and receive `totals: null`. See the
 count semantics, errors, validation, privacy and concurrency limits. Phase 2's
 [Profile UI](profile-ui.md) consumes this unchanged action for lifetime statistics
 and paginated history, and independently calls `refreshProfile()` for explainable
-preferences. GPS and History Detail remain Phase 3.
+preferences. History Detail and GPS display remain Phase 3B.
+
+## Historical GPS query (Issue #87 Phase 3A, local implementation)
+
+`trackProvider` accepts only `{ action: 'searchWalkTrace', walkId }` as application
+fields, authorizes the persisted owner/terminal state/consent and derives the time
+range from startTime and trajectoryEndTimeMs. It returns `{ success: true, trace }`;
+the dedicated `history-trace.searchWalkTrace({ walkId })` Service returns the
+validated trace with bounded empty-result retries. Generic public `searchTrace`
+range requests are retired. See the [complete trace contract](history-trace.md)
+for exact point/metric fields, errors, boundary filtering, shared-Entity isolation
+limitations and legacy migration. No UI integration or deployment is included.
 
 # Walk (all fields are required)
 

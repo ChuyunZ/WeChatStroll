@@ -2,6 +2,7 @@ const cloud = require("wx-server-sdk");
 const axios = require("axios");
 const { loadConfig } = require("./config");
 const { createTrackClient } = require("./track-client");
+const { createWalkStore } = require('./walk-store');
 const {
   createTrackHandler,
   publicFailure
@@ -26,6 +27,8 @@ exports.main = async event => {
     const handler = createTrackHandler({
       config,
       client,
+      // Lazy: active uploads/entity preparation do not acquire new database dependencies.
+      walkStore: { getWalk: walkId => createWalkStore(cloud.database({ throwOnNotFound: false })).getWalk(walkId) },
       getOpenId: () => {
         const context = cloud.getWXContext();
         return context && context.OPENID;
@@ -35,12 +38,18 @@ exports.main = async event => {
         console.info("[Track Provider]", record)
     });
 
+    // CloudBase may inject userInfo. It is transport metadata, never authentication.
+    // All other unexpected fields still reach the strict action validator.
+    if (action === 'searchWalkTrace' && event && typeof event === 'object') {
+      const { userInfo, ...request } = event;
+      return await handler(request);
+    }
     return await handler(event);
   } catch (error) {
     console.info("[Track Provider]", {
       event: "gateway_unavailable",
       action:
-        typeof action === "string" && action.trim() !== ""
+        ['ensureEntity', 'uploadTrace', 'searchTrace', 'searchWalkTrace'].includes(action)
           ? action
           : "unknown"
     });

@@ -325,3 +325,9 @@ it stores lifecycle/questionnaire metadata plus a provider-neutral application
 payloads. This does not establish permission to persist a planned-route summary later.
 Actual GPS trajectory via Track Cloud is a separate data flow; its separation does not
 resolve permission for Tencent planned-route data.
+
+Issue #87 Phase 3A adds a local-only [walk-authorized Track Cloud query](history-trace.md).
+It reuses existing credentials/signatures and stores no GPS in CloudBase. Generic
+public range searches are retired; review the documented migration, seconds-level
+isolation limits and development deployment checks before rollout. No map-provider
+configuration or actual deployment is changed by Phase 3A.

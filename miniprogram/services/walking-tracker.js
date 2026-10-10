@@ -1,13 +1,13 @@
 const { callCloudFunction } = require("./cloud-function-client");
 const { isValidGeoPoint } = require("../utils/geo");
 const { createCodedError } = require("../utils/errors");
+const historyTrace = require('./history-trace');
 
 const TRACKING_STORAGE_KEY = "activeWalkTracking";
 const TRACKING_VERSION = 1;
 const MIN_UPLOAD_INTERVAL_MS = 15000;
 const MAX_PENDING_RETRY_ATTEMPTS = 1;
 const MAX_TRACKING_SESSION_AGE_MS = 12 * 60 * 60 * 1000;
-const TRACE_SEARCH_RETRY_DELAYS_MS = [500, 1000];
 
 const ERROR_CODES = {
   INVALID_SESSION: "INVALID_TRACKING_SESSION",
@@ -695,63 +695,13 @@ function stopTrackingForSession(session) {
   }
 }
 
-function wait(ms) {
-  return new Promise(resolve => {
-    setTimeout(resolve, ms);
-  });
-}
-
-function isRetryableEmptyTrace(result) {
-  return Boolean(
-    result &&
-    result.success === true &&
-    result.trace &&
-    result.trace.retryable === true &&
-    Array.isArray(result.trace.points) &&
-    result.trace.points.length === 0
-  );
-}
-
-async function searchTrace({ startTimeMs, endTimeMs, trajectoryPartial = false }) {
-  if (
-    !Number.isFinite(startTimeMs) ||
-    !Number.isFinite(endTimeMs) ||
-    startTimeMs <= 0 ||
-    endTimeMs <= startTimeMs
-  ) {
-    throw createCodedError(
-      ERROR_CODES.INVALID_SESSION,
-      "Invalid walking trajectory time range."
-    );
+// Deprecated name retained for callers migrating to walk-scoped authorization.
+// No current application page calls this method; arbitrary ranges are retired.
+async function searchTrace(input) {
+  if (!input || !Object.prototype.hasOwnProperty.call(input, 'walkId')) {
+    throw createCodedError('TRACK_WALK_REQUIRED', 'Trajectory queries require an authorized walk ID.');
   }
-
-  const search = () =>
-    callCloudFunction(
-      "trackProvider",
-      {
-        action: "searchTrace",
-        startTimeMs,
-        endTimeMs,
-        ...(trajectoryPartial ? { trajectoryPartial: true } : {})
-      },
-      {
-        fallbackCode: "TRACK_SEARCH_FAILED",
-        fallbackMessage: "Unable to query walking trajectory."
-      }
-    );
-
-  let result = await search();
-
-  for (const delayMs of TRACE_SEARCH_RETRY_DELAYS_MS) {
-    if (!isRetryableEmptyTrace(result)) {
-      return result;
-    }
-
-    await wait(delayMs);
-    result = await search();
-  }
-
-  return result;
+  return { success: true, trace: await historyTrace.searchWalkTrace(input) };
 }
 
 function isTracking(session = null) {

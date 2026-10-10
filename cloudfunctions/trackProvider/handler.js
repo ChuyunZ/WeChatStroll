@@ -1,4 +1,6 @@
 const { createEntityId } = require("./entity-id");
+const { MESSAGES, safeCode, traceError, validPoint, validMetadata, OPTIONAL_POINT_KEYS } = require('./trace-schema');
+const { authorizeWalk, normalizeWalkTrace } = require('./walk-trace');
 
 const MAX_TRACE_QUERY_MS = 24 * 60 * 60 * 1000;
 
@@ -88,14 +90,15 @@ function normalizeSearchPoint(point) {
     return null;
   }
 
-  const latitude = Number(point.lat);
-  const longitude = Number(point.lng);
-  const loctime = Number(point.loctime);
+  const number = value => typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
+  const latitude = number(point.lat);
+  const longitude = number(point.lng);
+  const loctime = number(point.loctime);
 
   if (
     !isValidLatitude(latitude) ||
     !isValidLongitude(longitude) ||
-    !Number.isFinite(loctime) ||
+    !Number.isSafeInteger(loctime) ||
     loctime <= 0
   ) {
     return null;
@@ -107,17 +110,20 @@ function normalizeSearchPoint(point) {
     timestampMs: Math.floor(loctime * 1000)
   };
 
-  ["accuracy", "speed", "direction", "altitude", "type"].forEach(
+  OPTIONAL_POINT_KEYS.forEach(
     key => {
-      const value = Number(point[key]);
+      if (!Object.prototype.hasOwnProperty.call(point, key)) return;
+      const value = number(point[key]);
 
-      if (Number.isFinite(value)) {
+      if (validMetadata(key, value)) {
         normalized[key] = value;
+      } else {
+        normalized[key] = NaN; // Invalid optional metadata invalidates this sample too.
       }
     }
   );
 
-  return normalized;
+  return validPoint(normalized) ? normalized : null;
 }
 
 function validateWalkContext(event) {
@@ -187,40 +193,13 @@ function validateSearchRange(
 }
 
 function publicFailure(error) {
-  const code = isNonEmptyString(error && error.code)
-    ? error.code
-    : "TRACK_PROVIDER_FAILED";
-
-  const publicMessages = {
-    INVALID_ACTION: "Unsupported track provider operation.",
-    UNAUTHENTICATED: "Unable to identify the current user.",
-    INVALID_TRACKING_SESSION: "Invalid walking tracking session.",
-    INVALID_TRACK_POINT: "Invalid walking trajectory point.",
-    INVALID_TRACK_RANGE: "Invalid walking trajectory time range.",
-    TRACK_RANGE_TOO_LARGE:
-      "Walking trajectory queries cannot exceed 24 hours.",
-    TRACK_ENTITY_FAILED:
-      "Unable to prepare walking trajectory storage.",
-    TRACK_UPLOAD_FAILED: "Unable to upload walking trajectory.",
-    TRACK_UPLOAD_REJECTED: "Walking trajectory point was rejected.",
-    TRACK_SEARCH_FAILED: "Unable to query walking trajectory.",
-    TRACK_SEARCH_TOO_LARGE:
-      "Walking trajectory is too large to query safely.",
-    TRACK_SEARCH_PAGINATION_FAILED:
-      "Unable to complete walking trajectory query.",
-    TRACK_PROVIDER_REJECTED:
-      "Tencent Track Cloud rejected the request.",
-    TRACK_PROVIDER_UNAVAILABLE:
-      "Tencent Track Cloud is temporarily unavailable."
-  };
+  const code = safeCode(error);
 
   return {
     success: false,
     error: {
       code,
-      message:
-        publicMessages[code] ||
-        "Walking trajectory service is temporarily unavailable."
+      message: MESSAGES[code]
     }
   };
 }
@@ -229,6 +208,7 @@ function createTrackHandler({
   config,
   client,
   getOpenId,
+  walkStore,
   ensuredEntityIds = new Set(),
   log = () => {},
   getNowMs = () => Date.now()
@@ -237,16 +217,7 @@ function createTrackHandler({
     throw new Error("Track handler dependencies are required.");
   }
 
-  async function resolveEntity() {
-    const openid = getOpenId();
-
-    if (!isNonEmptyString(openid)) {
-      throw codedError(
-        "UNAUTHENTICATED",
-        "Missing authenticated OpenID."
-      );
-    }
-
+  async function resolveEntity(openid) {
     const entityId = createEntityId(
       openid,
       config.entitySecret
@@ -265,7 +236,7 @@ function createTrackHandler({
 
     try {
       if (
-        !["ensureEntity", "uploadTrace", "searchTrace"].includes(
+        !["ensureEntity", "uploadTrace", "searchTrace", "searchWalkTrace"].includes(
           action
         )
       ) {
@@ -275,7 +246,18 @@ function createTrackHandler({
         );
       }
 
-      const entityId = await resolveEntity();
+      const openid = getOpenId();
+      if (!isNonEmptyString(openid)) throw traceError('UNAUTHENTICATED');
+      // No application page calls the old arbitrary-range query. Retire the bypass.
+      if (action === 'searchTrace') throw traceError('TRACK_WALK_REQUIRED');
+      if (action === 'searchWalkTrace') {
+        const range = await authorizeWalk(event, openid, walkStore, getNowMs(), validateSearchRange);
+        const entityId = await resolveEntity(openid);
+        const result = await client.searchTrace(entityId, range.startTimeSeconds, range.endTimeSeconds);
+        return { success: true, trace: normalizeWalkTrace(result, range, normalizeSearchPoint) };
+      }
+
+      const entityId = await resolveEntity(openid);
 
       if (action === "ensureEntity") {
         return {
@@ -300,52 +282,15 @@ function createTrackHandler({
         };
       }
 
-      const range = validateSearchRange(
-        event,
-        getNowMs()
-      );
-      const result = await client.searchTrace(
-        entityId,
-        range.startTimeSeconds,
-        range.endTimeSeconds
-      );
-
-      const points = Array.isArray(result.points)
-        ? result.points
-            .map(normalizeSearchPoint)
-            .filter(Boolean)
-        : [];
-
-      return {
-        success: true,
-        trace: {
-          points,
-          mileageMeters:
-            Number.isFinite(result.mileageMeters) &&
-            result.mileageMeters >= 0
-              ? result.mileageMeters
-              : 0,
-          durationSeconds:
-            Number.isFinite(result.durationSeconds) &&
-            result.durationSeconds >= 0
-              ? result.durationSeconds
-              : 0,
-          available: points.length > 0,
-          // An empty result is not treated as permanently unavailable.
-          // Track Cloud may accept an upload before that point becomes
-          // immediately visible to a subsequent search.
-          retryable: points.length === 0,
-          partial: event.trajectoryPartial === true ||
-            (Array.isArray(result.points) && points.length < result.points.length)
-        }
-      };
     } catch (error) {
+      if (action === 'searchWalkTrace' || action === 'searchTrace') {
+        log({ event: 'request_failed', action, code: safeCode(error) });
+        return publicFailure(error);
+      }
       log({
         event: "request_failed",
-        action: isNonEmptyString(action) ? action : "unknown",
-        code: isNonEmptyString(error && error.code)
-          ? error.code
-          : "TRACK_PROVIDER_FAILED",
+        action: ['ensureEntity', 'uploadTrace'].includes(action) ? action : "unknown",
+        code: safeCode(error),
         providerStatus:
           Number.isFinite(error && error.providerStatus)
             ? error.providerStatus

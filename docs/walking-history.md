@@ -171,4 +171,7 @@ environment variables or CloudBase configuration and deploys no function.
 The Phase 2 handoff reports successful Phase 1 development CloudBase E2E for
 counts, pagination, ratings and invalid cursors. Phase 2 consumes this unchanged
 contract in the [Profile UI](profile-ui.md); its native UI acceptance is separate.
-Phase 3 remains unimplemented.
+Phase 3A now adds a local-only [walk-authorized trajectory API](history-trace.md)
+and dedicated client Service. It does not change this list contract or fetch GPS
+on Profile load. History Detail, explicit trajectory loading and map UI remain
+Phase 3B. The new trajectory API has not been deployed or live-tested.

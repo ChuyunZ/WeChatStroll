@@ -83,6 +83,10 @@ Current planned-route cloud architecture:
 - `aiRoutePlanner`: verified POI selection; real route facts come from the map provider and Route Engine.
 - `amapProvider`: historical/rollback implementation, not the current planned-route provider.
 - `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
+  Phase 3A locally adds an authorized `searchWalkTrace` action and retires generic
+  range reads. It adds server-side reads of existing `walks` documents; no new
+  collection/index/configuration is needed. See [trace review and rollout](history-trace.md)
+  for caller migration, read-access requirements and pending development E2E.
 - `walkStore`: durable walk lifecycle persistence for Issue #79. It owns the
   `walks` and `active_walks` collections, derives ownership from
   `cloud.getWXContext().OPENID`, and stores only allowlisted lifecycle/questionnaire
