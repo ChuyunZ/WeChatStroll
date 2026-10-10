@@ -2,7 +2,9 @@ const crypto = require('crypto');
 const ownerKey = crypto.createHash('sha256').update('user').digest('hex');
 function walk(index, overrides = {}) {
   const walkId = `walk-${String(index).padStart(3, '0')}`;
-  return { _id: walkId, walkId, ownerKey, status: index % 2 ? 'ended_early' : 'completed',
+  const status = overrides.status === undefined ? (index % 2 ? 'ended_early' : 'completed') : overrides.status;
+  return { _id: walkId, walkId, ownerKey, schemaVersion: 1, status,
+    completionStatus: status === 'active' ? null : status,
     startTime: '2026-10-09T00:00:00.000Z', endTime: '2026-10-09T00:30:00.000Z',
     actualDurationSeconds: 1800, routeType: 'loop', requestedDurationMinutes: 30,
     trajectoryEnabled: false, trajectoryPartial: false, trajectoryEndTimeMs: Date.parse('2026-10-09T00:30:00.000Z'),
