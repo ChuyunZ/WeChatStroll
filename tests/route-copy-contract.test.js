@@ -257,7 +257,7 @@ test('live C004: four known park POIs and generic “途经几处公园” do no
   const generated = {
     title: '慢行环线，偷得半日闲趣',
     description: '从起点出发，途经静安河畔公园、闵行滨水绿道休闲生态公园、梅陇生态园与海心园，兜转一圈回到原处。不妨把脚步交还给心情，随意看看沿路绿意。',
-    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空一下午。'
+    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空心情。'
   };
   expect(contract.validateCopyDetailed(generated, p))
     .toEqual({ copy: generated, reason: null, field: null });
@@ -304,7 +304,7 @@ test.each([
       ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
     }));
     const result = contract.validateCopyDetailed({
-      title: '适合今天散步的轻松时光',
+      title: '适合随时散步的轻松时光',
       description: '从起点出发，慢慢走上一段路。可以按自己喜欢的节奏散步，留点时间给日常生活，感受这次探索的轻松自由。',
       recommendationReason: `${phrase}。你可以慢慢欣赏周围，在这段时间里按自己的节奏探索。`
     }, p);
@@ -428,7 +428,7 @@ test('C018: generic “途经点” is not an invented POI; unverified 顺路 cl
   p.preferences.durationMinutes = 120;
   p.preferences.crowdPreference = 'high';
   const base = {
-    title: '午后慢行：两处公园随心探索',
+    title: '闲时慢行：两处公园随心探索',
     description: '从起点出发，途经生态防护林公园北区观景入口，再前往夏景园。换换心情的短途走走，不妨放慢脚步，留意路边的小风景。',
     recommendationReason: '想轻松散心时，这两处途经点顺路又好逛，不用赶时间，适合随意探索，给平淡日子添一点温柔的停顿。'
   };
@@ -471,7 +471,7 @@ test('live audit100 C003: generic “途经过几个公园” with three park PO
     { ref: 'P3', name: '夏景园', category: 'park' }
   ];
   const proposed = {
-    title: '午后慢走：防护林与生态园的小循环',
+    title: '随心慢走：防护林与生态园的小循环',
     description: '从起点出发，途经静安河畔防护林休闲绿地公园、生态园绿地公园与夏景园，再回到原点。不妨把脚步交给自己，一路看看绿意，换换日常的心情。',
     recommendationReason: '想散散心又不愿走太远时，这条环线刚好。途经过几个公园，可以自主停下张望，给脑子放个假，慢慢踱回出发的地方。'
   };
@@ -495,7 +495,7 @@ test.each([
       ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
     }));
     const proposed = {
-      title: '适合今天的慢走放松时光',
+      title: '适合随时出发的放松散步',
       description: '从起点出发，慢慢走上一段路。可以按喜欢的节奏给自己一点时间，留意日常周围的小变化。',
       recommendationReason: `${phrase}给自己一些悠闲和自由，换换心情，感受散步的乐趣。`
     };
@@ -663,5 +663,64 @@ test('audit100 C057: abbreviated pocket-park name in recommendationReason remain
       '想轻松走走、透口气时，这条路线够简单。途经口袋公园，沿途看看周围，给自己一点慢下来的空隙。' };
   expect(contract.validateCopyDetailed(c, p)).toMatchObject({
     copy: null, reason: 'INVALID_POI', field: 'recommendationReason'
+  });
+});
+
+test.each([
+  ['title', '午后途经人民公园散步'],
+  ['title', '清晨去人民公园走一走'],
+  ['description', '今晚出发。'],
+  ['description', '春日散步。'],
+  ['description', '雨后散步。'],
+  ['recommendationReason', '夜晚散步。'],
+  ['recommendationReason', '晴天漫步。'],
+  ['recommendationReason', '今天出发。']
+])('rejects unsupported time/weather context in %s: %s', (field, phrase) => {
+  const proposal = { ...copy, [field]: field === 'title' ? phrase : phrase + copy[field] };
+  expect(contract.validateCopyDetailed(proposal, payload())).toMatchObject({
+    copy: null, reason: 'UNSUPPORTED_TIME_CONTEXT', field
+  });
+});
+
+test('time-like words within an exact verified POI name are not interpreted as departure time', () => {
+  const p = payload();
+  p.routeFacts.orderedPois[0].name = '清晨公园';
+  const proposal = {
+    ...copy,
+    description: copy.description.replace('人民公园', '清晨公园'),
+    recommendationReason: copy.recommendationReason.replace('人民公园', '清晨公园')
+  };
+  expect(contract.validateCopyDetailed(proposal, p).copy).toEqual(proposal);
+});
+
+test('neutral walk wording and true route duration checks remain unchanged', () => {
+  const p = payload();
+  expect(contract.validateCopy({ ...copy, title: '途经人民公园散散心' }, p)).not.toBeNull();
+  expect(contract.validateCopyDetailed({ ...copy, title: '步行99分钟慢慢走走' }, p))
+    .toMatchObject({ reason: 'WRONG_MEASUREMENT', field: 'title' });
+});
+
+test('regression 00:48: a point-to-point route does not start at its first known POI', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.preferences.routeType = 'point_to_point';
+  const safe = {
+    title: '途经人民公园与滨河广场的探索',
+    description: '从当前位置出发，依次途经人民公园与滨河广场。可以按自己的步调走走，留意周边变化，感受这段散步带来的自由空间。',
+    recommendationReason: '你偏好公园环境，可以把这些途经点作为散步时的观察对象，按自己的步调慢慢探索。'
+  };
+  expect(contract.validateCopyDetailed(safe, p)).toEqual({
+    copy: safe, reason: null, field: null
+  });
+  expect(contract.validateCopyDetailed({
+    ...safe, title: '从人民公园到滨河广场慢走'
+  }, p)).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'title'
+  });
+  expect(contract.validateCopyDetailed({
+    ...safe, description: '点对点路线，从人民公园出发，途经滨河广场。沿着路线自行移动，留意周遭变化，按自己的步调探索。'
+  }, p)).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description'
   });
 });

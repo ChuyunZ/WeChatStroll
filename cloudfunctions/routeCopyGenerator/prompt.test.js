@@ -53,3 +53,25 @@ test('audit100 C041/C052: prompt prevents abbreviated POI names and unsupported 
   const serialized = text.split('UNTRUSTED_ROUTE_DATA_JSON\n')[1].split('\nEND_UNTRUSTED_ROUTE_DATA_JSON')[0];
   expect(JSON.parse(serialized)).toEqual(p);
 });
+
+test('prompt requests grounded route-specific titles without device-time assumptions', () => {
+  const prompt = buildPrompt(projectRoute(route(), preferences, history).payload);
+  for (const fragment of [
+    '优先用本条路线可验证的差异', '完整的 orderedPois 地点名',
+    '不要反复套用', '没有提供计划出发日期',
+    '与出发时间无关', '不要猜测设备时钟', '不要为了独特性'
+  ]) expect(prompt).toContain(fragment);
+  expect(prompt).toContain('完整名称放不下');
+  expect(prompt).toContain('三个字段均不要提任何步行时长或路线距离');
+});
+
+test('regression 00:48: point-to-point waypoint names do not establish trip origin or destination', () => {
+  const r = route('sample-single', { routeType: 'point_to_point', returnsToStart: false });
+  const prompt = buildPrompt(projectRoute(r, preferences, history).payload);
+  for (const fragment of [
+    'point_to_point', '最后一个 POI 也不一定是实际终点',
+    '“从XX出发”', '“从XX到YY散步”', '即使 XX 和 YY 都是真实完整 POI 名',
+    '从起点出发，依次途经XX、YY'
+  ]) expect(prompt).toContain(fragment);
+  expect(prompt).toContain('绝不截断');
+});

@@ -90,6 +90,62 @@ function createScheduler() {
 }
 const sharedScheduler = createScheduler();
 
+
+function normalizeTitle(value) {
+  return typeof value === 'string'
+    ? value.normalize('NFKC').toLowerCase().replace(/[^\u3400-\u9fffa-z0-9]/g, '') : '';
+}
+function titlesCollide(a, b) {
+  const left = normalizeTitle(a), right = normalizeTitle(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const shortest = Math.min(left.length, right.length);
+  if (shortest >= 6 && Math.abs(left.length - right.length) <= 4 &&
+      (left.includes(right) || right.includes(left))) return true;
+  const grams = value => {
+    const result = new Set();
+    for (let i = 0; i < value.length - 1; i++) result.add(value.slice(i, i + 2));
+    return result;
+  };
+  if (shortest >= 6) {
+    const aa = grams(left), bb = grams(right);
+    const shared = [...aa].filter(part => bb.has(part)).length;
+    if (shared >= 4 && 2 * shared / (aa.size + bb.size) >= 0.75) return true;
+  }
+  // Detect repetitive stock framing only when neither title has useful
+  // distinguishing content (e.g. different verified POI names).
+  const stock = ['换换心情', '放松心情', '散步时光', '自由探索', '悠闲漫步', '轻松漫步'];
+  const shared = stock.find(phrase => left.includes(phrase) && right.includes(phrase));
+  if (!shared) return false;
+  const strip = value => value.replace(/换换心情|放松心情|散步时光|自由探索|悠闲漫步|轻松漫步|去|来|一起|走走|散步|慢慢|路线|给自己|一点|的|小/g, '');
+  return strip(left).length <= 3 && strip(right).length <= 3;
+}
+function uniqueFallback(route, index, usedTitles) {
+  const base = { title: route.title, description: route.description,
+    recommendationReason: route.recommendationReason, copySource: 'fallback' };
+  const occupied = candidate => usedTitles.some(title => titlesCollide(candidate, title));
+  if (!occupied(base.title)) return base;
+  const typeLabel = { loop: '环形路线', out_and_back: '往返路线', point_to_point: '单程路线' }[route.routeType] || '散步路线';
+  const ids = route.routeOrder && route.routeOrder.orderedWaypointIds;
+  const pois = Array.isArray(ids) && Array.isArray(route.pointsOfInterest)
+    ? ids.map(id => route.pointsOfInterest.find(p => p.poiId === id)).filter(Boolean) : [];
+  const candidates = [];
+  for (const poi of pois) {
+    if (typeof poi.name !== 'string' || !poi.name.trim()) continue;
+    const title = `途经${poi.name}的${typeLabel}`;
+    if (Array.from(title).length <= 22) candidates.push(title);
+  }
+  for (const title of candidates) {
+    if (!occupied(title)) return { ...base, title };
+  }
+  // Position is only a visual distinction, not an AI ranking or route fact.
+  // Try further serials when an unusual AI title already used this label.
+  for (let serial = index + 1; ; serial++) {
+    const title = `路线${serial} · ${typeLabel}`;
+    if (!occupied(title)) return { ...base, title };
+  }
+}
+
 function createSession({ scheduler = sharedScheduler, request = requestCopy,
   softTimeoutMs = COPY_SOFT_TIMEOUT_MS } = {}) {
   const id = `copy-session-${++nextSessionId}`;
@@ -186,6 +242,24 @@ function createSession({ scheduler = sharedScheduler, request = requestCopy,
       const entry = binding && entries.get(binding.fingerprint);
       return !disposed && binding && binding.route === route && entry && entry.state === 'accepted' ? entry.copy : null;
     },
+    present(route, fallbackOnly = false) {
+      if (disposed || !route) return null;
+      // Resolve from the entire current display order, not request-completion
+      // order. Both Routes and Detail call this same derivation.
+      const displayed = [...bindings.values()];
+      const usedTitles = [];
+      for (let index = 0; index < displayed.length; index++) {
+        const current = displayed[index].route;
+        const candidate = current === route && fallbackOnly ? null : api.get(current);
+        let selected = candidate ? { ...candidate, copySource: 'ai' } : null;
+        if (!selected || usedTitles.some(title => titlesCollide(selected.title, title))) {
+          selected = uniqueFallback(current, index, usedTitles);
+        }
+        usedTitles.push(selected.title);
+        if (current === route) return selected;
+      }
+      return null;
+    },
     prioritize(route) {
       const binding = route && bindings.get(route.routeId);
       const entry = binding && binding.route === route && entries.get(binding.fingerprint);
@@ -213,9 +287,11 @@ function createSession({ scheduler = sharedScheduler, request = requestCopy,
   return api;
 }
 function presentation(route, session, fallbackOnly = false) {
+  const selected = session && session.present && session.present(route, fallbackOnly);
+  if (selected) return selected;
   const copy = !fallbackOnly && session && session.get(route);
   return { title: copy ? copy.title : route.title, description: copy ? copy.description : route.description,
     recommendationReason: copy ? copy.recommendationReason : route.recommendationReason, copySource: copy ? 'ai' : 'fallback' };
 }
 module.exports = { MAX_COPY_CALLS, COPY_SOFT_TIMEOUT_MS, projectRoute, createScheduler, createSession,
-  getSession: id => sessions.get(id) || null, presentation };
+  getSession: id => sessions.get(id) || null, presentation, titlesCollide };
