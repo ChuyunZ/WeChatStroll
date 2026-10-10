@@ -100,6 +100,23 @@ test('young session does not trigger launch cleanup', async () => {
   expect(await sessions.cleanupStaleActiveWalk()).toBe(false);
   expect(records.getWalk).not.toHaveBeenCalled();
 });
+test('foreground resume awaits cold-launch cleanup for the same old Walk', async () => {
+  const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+  storage.activeWalkSession = walk;
+  let resolve;
+  records.getWalk.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const cold = sessions.cleanupStaleActiveWalk();
+  const foreground = sessions.reconcileActiveWalk();
+  expect(records.getWalk).toHaveBeenCalledTimes(1);
+  resolve(terminal(walk));
+  await cold;
+  await expect(foreground).resolves.toBeNull();
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(storage.pendingWalkResult).not.toHaveProperty('route');
+  expect(records.getWalk).toHaveBeenCalledTimes(1);
+  expect(records.getActiveWalk).toHaveBeenCalledTimes(1);
+});
+
 test('late cloud response cannot erase newer active Walk identity', async () => {
   const old = local(); storage.activeWalkSession = old;
   let resolve;
