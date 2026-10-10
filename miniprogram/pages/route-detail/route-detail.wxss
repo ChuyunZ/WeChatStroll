@@ -40,6 +40,15 @@ page {
   color: #999999;
 }
 
+.ai-copy-label,
+.ai-copy-disclaimer {
+  display: block;
+  margin-top: 12rpx;
+  color: #687780;
+  font-size: 22rpx;
+  line-height: 34rpx;
+}
+
 .route-title {
   margin-top: 8rpx;
 

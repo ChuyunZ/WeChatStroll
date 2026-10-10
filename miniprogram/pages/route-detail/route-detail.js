@@ -8,6 +8,7 @@ const {
 } = require("../../constants/route-types");
 
 const walkRecords = require("../../services/walk-records");
+const routeCopy = require("../../services/route-copy");
 
 const ACTIVE_WALK_REDIRECT_LOCK_MS = 3000;
 
@@ -76,29 +77,32 @@ Page({
         typeof eventChannel.on === "function"
       ) {
         this._eventChannel = eventChannel;
-        eventChannel.on("routePreferences", value => {
+        this._copyContextHandler = value => this.receiveCopyContext(value);
+        eventChannel.on("routeCopyContext", this._copyContextHandler);
+        this._preferencesHandler = value => {
+          if (this._unloaded) return;
           this._routePreferences = walkRecords.preferencesSnapshot(value);
-        });
+        };
+        eventChannel.on("routePreferences", this._preferencesHandler);
         this._previewHandler = result => this.receiveRoutePreview(result);
         this._confirmHandler = result => this.receiveRouteConfirmation(result);
         eventChannel.on("routePreviewResult", this._previewHandler);
         eventChannel.on("routeConfirmResult", this._confirmHandler);
-        eventChannel.on(
-          "selectedRoute",
-          (route) => {
-            if (
-              routeId &&
-              route &&
-              route.routeId &&
-              route.routeId !== routeId
-            ) {
-              this.showRouteError();
-              return;
-            }
-
-            this.loadRoute(route);
+        this._selectedRouteHandler = route => {
+          if (this._unloaded) return;
+          if (
+            routeId &&
+            route &&
+            route.routeId &&
+            route.routeId !== routeId
+          ) {
+            this.showRouteError();
+            return;
           }
-        );
+
+          this.loadRoute(route);
+        };
+        eventChannel.on("selectedRoute", this._selectedRouteHandler);
 
         return;
       }
@@ -209,7 +213,24 @@ Page({
     this.displayRoute(route);
   },
 
-  displayRoute(route) {
+  receiveCopyContext(value = {}) {
+    if (this._unloaded) return;
+    if (this._copyUnsubscribe) this._copyUnsubscribe();
+    this._copySession = routeCopy.getSession(value.sessionId);
+    this._copyUnsubscribe = this._copySession
+      ? this._copySession.subscribe(() => this.refreshCopyPresentation()) : null;
+    this.refreshCopyPresentation();
+  },
+
+  refreshCopyPresentation() {
+    if (this._unloaded || !this._confirmedRoute || !this.data.route || this._previewRoute) return;
+    const copy = routeCopy.presentation(this._confirmedRoute, this._copySession);
+    const updates = {};
+    Object.keys(copy).forEach(key => { updates[`route.${key}`] = copy[key]; });
+    this.setData(updates);
+  },
+
+  displayRoute(route, fallbackOnly = false) {
     this.setData({
       loading: true,
       error: false
@@ -221,7 +242,7 @@ Page({
     }
 
     const preparedRoute =
-      this.prepareRoute(route);
+      this.prepareRoute(route, fallbackOnly);
 
     const polyline =
       route.polyline;
@@ -260,6 +281,8 @@ Page({
       ],
 
       markers: routeMap.markers
+    }, () => {
+      if (fallbackOnly) this.refreshCopyPresentation();
     });
   },
 
@@ -296,7 +319,7 @@ Page({
     });
   },
 
-  prepareRoute(route) {
+  prepareRoute(route, fallbackOnly = false) {
     const crowdTextMap = {
       low: "安静",
       medium: "适中",
@@ -324,6 +347,7 @@ Page({
 
     return {
       ...route,
+      ...routeCopy.presentation(route, this._copySession, fallbackOnly || route !== this._confirmedRoute),
       durationDifference: Number.isFinite(route.recommendedDurationMinutes)
         ? route.durationMinutes - route.recommendedDurationMinutes : null,
       durationDifferenceAbs: Number.isFinite(route.recommendedDurationMinutes)
@@ -440,14 +464,14 @@ Page({
     this.setData({ previewLoading: false, hasPreview: true, editMessage: "预览已更新，确认后生效" });
   },
 
-  cancelRouteEdit() {
+  cancelRouteEdit(fallbackOnly = false) {
     if (this.data.confirming) return;
     this._previewRequestId = (this._previewRequestId || 0) + 1;
     this._previewRoute = null;
     this._eventChannel.emit("invalidateRoutePreview");
     this.setData({ editing: false, previewLoading: false, hasPreview: false,
       draftWaypointIds: [], activeWaypoints: [], removedWaypoints: [], editMessage: "" });
-    this.displayRoute(this._confirmedRoute);
+    this.displayRoute(this._confirmedRoute, fallbackOnly === true);
   },
 
   confirmRouteEdit() {
@@ -469,11 +493,13 @@ Page({
       return;
     }
     this._confirmedRoute = result.route;
-    this.cancelRouteEdit();
+    this.cancelRouteEdit(true);
   },
 
   onUnload() {
     this._unloaded = true;
+    if (this._copyUnsubscribe) this._copyUnsubscribe();
+    this._copyUnsubscribe = this._copySession = null;
     this._startPromptOpen = false;
     this._startingWalk = false;
     this._activeWalkRedirecting = false;
@@ -484,6 +510,9 @@ Page({
     if (this._eventChannel && typeof this._eventChannel.off === "function") {
       this._eventChannel.off("routePreviewResult", this._previewHandler);
       this._eventChannel.off("routeConfirmResult", this._confirmHandler);
+      this._eventChannel.off("routeCopyContext", this._copyContextHandler);
+      this._eventChannel.off("routePreferences", this._preferencesHandler);
+      this._eventChannel.off("selectedRoute", this._selectedRouteHandler);
     }
     this._eventChannel = null;
     this._previewRoute = null;

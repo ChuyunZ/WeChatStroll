@@ -27,3 +27,39 @@
     <view class="value">{{errorMessage}}</view>
   </view>
 </view>
+<view class="benchmark">
+  <view class="benchmark-heading">
+    <view class="benchmark-heading-title">AI 文案自动测试</view>
+    <view class="benchmark-tag">仅开发工具</view>
+  </view>
+  <view class="benchmark-lead">
+    编译后进入 Cloud Test 即可直接测试，无需先生成 Routes。首次测试会以模拟定位及周边四个搜索中心获取真实腾讯 POI 候选池，同一页面内后续测试复用。
+  </view>
+  <view class="benchmark-summary">串行 AI 请求 · 请求结束后间隔约 15 秒 · 自动保存测试报告</view>
+
+  <button class="benchmark-help-toggle" size="mini" bindtap="toggleBenchmarkHelp">
+    {{benchmarkHelpExpanded ? '收起详细说明' : '展开详细说明与限制'}}
+  </button>
+  <view class="benchmark-details" wx:if="{{benchmarkHelpExpanded}}">
+    <view class="benchmark-note">POI 池来自现有 mapProvider，中心及东南西北各一处（相距约 700 米）；每处搜索半径仍为 1 公里，最多 3 类 Explore 查询，总计最多 15 次 Explore 查询。仅用于模拟文案输入，不代表这些地点可由真实路线抵达。离开页面或重新编译后需重新获取；不会调用 Walking API 或 AI 路线规划。</view>
+    <view class="benchmark-note">每轮随机选择 1–8 个 POI，组合模拟路线事实与问卷偏好。模拟路线不保证真实可走，模拟距离和时长也不能用于验证实际路径。</view>
+    <view class="benchmark-note">hy3 串行执行，每个请求结束后等待约 15 秒以降低共享资源池限流风险。每轮最多 500 次；仅开发环境每日单用户上限 1000 次、全局上限 2000 次（UTC 日期）。</view>
+    <view class="benchmark-note">30/60 分钟模式遇首次失败即停止；200 次验收最长 75 分钟、至少需要 16 个去重 POI、最多允许 1 次文案验证失败，第 2 次判定 FAIL。上游 RATE_LIMIT、请求异常或执行状态不明会立即终止，结果为 INCONCLUSIVE，不会自动重试。</view>
+    <view class="benchmark-note">200 次验收仅评估自动验证通过率，不能替代人工事实抽查。报告只保留原因、字段、脱敏文案与安全的路线事实摘要，不包含真实 POI 名称、坐标或原始 Prompt。详细诊断依赖云函数的两个 Debug 环境变量。</view>
+  </view>
+
+  <view class="benchmark-actions">
+    <button data-minutes="30" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 30 分钟</button>
+    <button data-minutes="60" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">运行 60 分钟（首次失败停止）</button>
+    <button data-audit="200" bindtap="startCopyBenchmark" disabled="{{benchmarkRunning}}">验收 200 次（最多错 1 次）</button>
+    <button bindtap="stopCopyBenchmark" disabled="{{!benchmarkRunning}}">停止测试</button>
+  </view>
+
+  <view class="benchmark-results">
+    <view class="benchmark-progress">已完成：{{benchmarkCompleted}} · 失败：{{benchmarkFailures}}</view>
+    <view class="benchmark-status" wx:if="{{benchmarkMessage}}">{{benchmarkMessage}}</view>
+    <view class="benchmark-note benchmark-file" wx:if="{{benchmarkFile}}">报告本地路径：{{benchmarkFile}}</view>
+    <button bindtap="copyBenchmarkReport" disabled="{{!benchmarkHasReport}}">复制 JSON 报告</button>
+  </view>
+  <view class="benchmark-footnote">请仅在开发环境运行，出现上游异常不要立即重试。测试未完成前请保持页面打开。</view>
+</view>

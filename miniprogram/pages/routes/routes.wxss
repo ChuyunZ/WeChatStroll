@@ -288,6 +288,14 @@ page {
   color: #555555;
 }
 
+.ai-copy-label {
+  display: block;
+  margin: 8rpx 0;
+  color: #687780;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
 .reason-text {
   margin-top: 12rpx;
   font-size: 25rpx;

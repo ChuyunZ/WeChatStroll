@@ -1,1 +1,95 @@
-/* pages/cloud-test/cloud-test.wxss */
+/* Cloud Test benchmark — developer-only controls */
+.benchmark {
+  margin: 28rpx 24rpx 48rpx;
+  padding: 28rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  box-sizing: border-box;
+}
+.benchmark-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.benchmark-heading-title {
+  font-size: 34rpx;
+  line-height: 1.4;
+  color: #202b3b;
+  font-weight: 600;
+}
+.benchmark-tag {
+  margin-left: 14rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+  background: #ecf4ff;
+  color: #31639c;
+  font-size: 22rpx;
+}
+.benchmark-lead {
+  margin-top: 20rpx;
+  color: #303b49;
+  font-size: 28rpx;
+  line-height: 1.6;
+}
+.benchmark-summary {
+  margin: 14rpx 0 20rpx;
+  color: #626d7a;
+  font-size: 26rpx;
+  line-height: 1.55;
+}
+.benchmark .benchmark-help-toggle {
+  display: inline-block;
+  margin: 0 0 14rpx;
+  font-size: 24rpx;
+  color: #315d8d;
+}
+.benchmark-details {
+  padding: 16rpx 20rpx;
+  margin: 0 0 22rpx;
+  border-radius: 12rpx;
+  background: #f6f8fa;
+}
+.benchmark-note {
+  margin: 12rpx 0;
+  font-size: 26rpx;
+  color: #5c6470;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.benchmark-actions {
+  margin-top: 10rpx;
+}
+.benchmark-actions button,
+.benchmark-results button {
+  margin: 14rpx 0;
+  font-size: 29rpx;
+}
+.benchmark-results {
+  margin-top: 24rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #e9edf1;
+}
+.benchmark-progress {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #233042;
+  line-height: 1.55;
+}
+.benchmark-status {
+  margin-top: 12rpx;
+  font-size: 27rpx;
+  line-height: 1.6;
+  color: #3d5266;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.benchmark-file {
+  font-size: 24rpx;
+}
+.benchmark-footnote {
+  margin-top: 12rpx;
+  color: #77808a;
+  font-size: 24rpx;
+  line-height: 1.6;
+}

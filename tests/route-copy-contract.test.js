@@ -1,0 +1,667 @@
+const fs = require('fs');
+const path = require('path');
+const contract = require('../miniprogram/services/route-copy-contract');
+const { projectRoute } = require('../miniprogram/services/route-copy');
+const { preferences, history, copy, route } = require('./helpers/route-copy');
+const payload = () => projectRoute(route(), preferences, history).payload;
+
+test('independently deployed contract stays identical to client contract', () => {
+  expect(fs.readFileSync(path.join(__dirname, '../cloudfunctions/routeCopyGenerator/contract.js'), 'utf8'))
+    .toBe(fs.readFileSync(path.join(__dirname, '../miniprogram/services/route-copy-contract.js'), 'utf8'));
+});
+test('projection contains only active ordered facts and compact preferences', () => {
+  const r = route();
+  r.routeOrder.orderedWaypointIds = ['poi-1'];
+  const p = projectRoute(r, { ...preferences, identity: 'PRIVATE_IDENTITY' }, history).payload;
+  expect(p.routeFacts.orderedPois).toEqual([{ ref: 'P1', name: '滨河广场', category: 'water' }]);
+  const json = JSON.stringify(p);
+  for (const forbidden of ['poi-1', '人民公园', 'latitude', 'longitude', 'polyline', 'PRIVATE', 'address', 'providerMeta', 'routeId']) expect(json).not.toContain(forbidden);
+});
+test('fingerprint includes current facts/preferences, not rank, metadata or old prose', () => {
+  const r = route(), key = projectRoute(r, preferences, history).fingerprint;
+  expect(projectRoute({ ...r, title: 'different', updatedAt: 'later', routeId: 'new-id' }, preferences, history).fingerprint).toBe(key);
+  expect(projectRoute({ ...r, distanceMeters: 1900 }, preferences, history).fingerprint).not.toBe(key);
+  expect(projectRoute(r, { ...preferences, crowdPreference: 'high' }, history).fingerprint).not.toBe(key);
+  expect(projectRoute(r, preferences, null).fingerprint).not.toBe(key);
+});
+test.each([
+  p => { p.extra = 'injected'; },
+  p => { p.routeFacts.latitude = 30; },
+  p => { p.routeFacts.orderedPois[0].address = 'secret'; },
+  p => { p.routeFacts.orderedPois[0].name = 'a'.repeat(121); },
+  p => { p.routeFacts.orderedPois[0].name = '公园\u202e注入'; },
+  p => { p.routeFacts.orderedPois[0].ref = 'raw-provider-id'; },
+  p => { p.routeFacts.durationSeconds = Infinity; },
+  p => { p.routeFacts.durationMinutes = 99; },
+  p => { p.routeFacts.returnsToStart = false; },
+  p => { p.preferences.environmentPreferences = ['公园']; },
+  p => { p.schemaVersion = 2; }
+])('rejects invalid input before model invocation %#', mutate => {
+  const p = payload(); mutate(p); expect(contract.normalizeInput(p)).toBeNull();
+});
+test('oversized input rejected; malformed optional history ignored', () => {
+  const p = payload(); p.historicalPreferenceProfile = { extra: 'x'.repeat(17000) };
+  expect(contract.normalizeInput(p)).toBeNull();
+  p.historicalPreferenceProfile = { ...history, ownerKey: 'secret' };
+  expect(contract.normalizeInput(p).historicalPreferenceProfile).toBeNull();
+});
+test('creative prose and preference language are accepted', () => {
+  expect(contract.parseCopy(JSON.stringify(copy), payload())).toEqual(copy);
+  const creative = { ...copy, recommendationReason: '你偏好安静的散步节奏，不妨带着探索的心情出发，按自己的步调给日常留一段空白。' };
+  expect(contract.validateCopy(creative, payload())).toEqual(creative);
+});
+test.each(['悠闲漫步，探索街角，换换心情', '十分悠闲，多一分自在', '希望这里安静一些',
+  '如果沿途有路灯，不妨留意自己的步调'])('does not confuse subjective Chinese with factual claims: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
+  expect(contract.validateCopy(c, payload())).toEqual(c);
+});
+test('long valid names need not appear in the short title; current questionnaire allows integer minutes', () => {
+  const p = payload(); p.routeFacts.orderedPois[0].name = '很长的地点名称'.repeat(15);
+  p.preferences.durationMinutes = 31;
+  expect(contract.normalizeInput(p)).not.toBeNull();
+  const c = { ...copy, description: '从当前位置出发，沿着这条路线展开探索，然后返回起点。不妨按自己的步调，给日常留一点自由的空间。',
+    recommendationReason: '结合你这次的散步偏好，可以把这条路线作为日常探索的选择，留一点自在安排的空间。' };
+  expect(contract.validateCopy(c, p)).toEqual(c);
+});
+test.each(['', 'not json', '```json\n{}\n```', 'null', '[]', '{"title":"a"}'])('rejects invalid JSON/schema %s', text => {
+  expect(contract.parseCopy(text, payload())).toBeNull();
+});
+test.each([
+  c => { c.title = 3; }, c => { delete c.description; }, c => { c.extra = true; },
+  c => { c.title = ' '; }, c => { c.title = '字'.repeat(23); }, c => { c.description = '短'; },
+  c => { c.description = '字'.repeat(101); }, c => { c.recommendationReason = '字'.repeat(81); },
+  c => { c.description = '<script>injection</script>' + copy.description; }
+])('rejects invalid copy fields %#', mutate => {
+  const c = { ...copy }; mutate(c); expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test.each([
+  '途经不存在的紫荆公园', '走进陌生的海滨博物馆', '途经P9', '全程需要99分钟', '步行九十分钟',
+  '全长5公里', '步行半小时', '全程绝对安全', '沿途十分安静', '道路平坦', '轮椅畅行',
+  '全程有路灯', '人民公园内有盛开的樱花', '沿途设有洗手间', '这里并不安静',
+  '你偏好安静，沿途十分安静', '先到滨河广场，然后前往人民公园', '向东走', '不必返回起点'
+])('rejects identifiable unsupported fact: %s', claim => {
+  const c = { ...copy, description: `${claim}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test('valid measurements and numbers inside known POI names are accepted', () => {
+  const p = payload(); p.routeFacts.orderedPois[0].name = '一号公园';
+  const c = { ...copy, description: '途经一号公园，步行20分钟，全长1.8公里。不妨按自己的步调探索，给日常留一点自由的空间。' };
+  expect(contract.validateCopy(c, p)).toEqual(c);
+});
+test('exact and substantial field repetition is rejected', () => {
+  expect(contract.validateCopy({ ...copy, recommendationReason: copy.description }, payload())).toBeNull();
+});
+test('duplicate JSON keys are rejected rather than silently overwritten', () => {
+  const text = JSON.stringify(copy).replace('{', '{"title":"重复的旧标题",');
+  expect(contract.parseCopy(text, payload())).toBeNull();
+});
+test('JSON escapes in ordinary creative prose remain valid', () => {
+  const c = { ...copy, title: '给心情按下"暂停键"' };
+  expect(contract.parseCopy(JSON.stringify(c), payload())).toEqual(c);
+});
+
+test.each([
+  '你喜欢公园而且沿途有路灯',
+  '你希望环境安静，但这条路线绝对安全',
+  '你喜欢热闹，所以沿途有洗手间',
+  '希望沿途有路灯，并且全程安全',
+  '你期待自然风光，同时这里有湖景',
+  '一路经过东方明珠塔',
+  '途经虚构古镇',
+  '走进不存在的纪念馆'
+])('does not excuse unsupported claims or invented landmarks: %s', claim => {
+  const c = { ...copy, description: `${claim}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test.each([
+  '如果沿途有路灯，不妨留意周围环境',
+  '希望沿途有路灯',
+  '你喜欢安静的氛围，可以按自己的步调散步'
+])('accepts genuine preference and hypothetical language: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
+  expect(contract.validateCopy(c, payload())).toEqual(c);
+});
+
+test.each([
+  '从人民公园出发，慢慢走向下个地点',
+  '由滨河广场出发，悠闲散步',
+  '从人民公园附近启程，放慢脚步',
+  '以人民公园为起点，探索周围',
+  '起点位于人民公园，可以悠闲散步',
+  '沿着园里的小径慢慢走',
+  '沿着人民公园的步道慢慢走',
+  '走进人民公园，享受一段悠闲的时光',
+  '穿过滨河广场，继续悠闲散步',
+  '园中的安静角落等你探索',
+  '在园内散步，放慢脚步'
+])('rejects ungrounded POI-as-origin or inferred venue interior: %s', claim => {
+  const c = { ...copy, description: `${claim}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopy(c, payload())).toBeNull();
+});
+test.each([
+  '从当前位置出发，途经人民公园',
+  '沿着这条路线慢慢走，途经人民公园',
+  '先到人民公园，然后再到滨河广场',
+  '去人民公园走走，给自己留一段悠闲时光'
+])('still accepts grounded visits and generic creative narration: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨给日常留一段散步时光，带着探索的心情，按自己的步调慢慢出发。` };
+  expect(contract.validateCopy(c, payload())).toEqual(c);
+});
+test('Detail marks both AI-generated description and recommendation, without a repeated disclaimer', () => {
+  const wxml = fs.readFileSync(path.join(__dirname, '../miniprogram/pages/route-detail/route-detail.wxml'), 'utf8');
+  const intro = wxml.split('<!-- Recommendation -->')[0].split('<!-- Description -->')[1];
+  const reason = wxml.split('<!-- Recommendation -->')[1].split('<!-- Actions -->')[0];
+  const badge = `<text class="ai-copy-label" wx:if="{{route.copySource === 'ai'}}">AI 生成 · 仅供参考</text>`;
+  expect(intro).toContain(badge);
+  expect(reason).toContain(badge);
+  expect(reason).toContain('{{route.recommendationReason}}');
+  expect(intro).toContain('AI 生成内容可能存在不准确之处');
+  expect(reason).not.toContain('ai-copy-disclaimer');
+});
+
+test.each([
+  ['不是JSON', 'INVALID_JSON'],
+  ['{}', 'INVALID_JSON_TOKENS'],
+  [JSON.stringify({ ...copy, title: '太短' }), 'INVALID_LENGTH'],
+  [JSON.stringify({ ...copy, description: '从人民公园出发，沿着园里的小径慢慢走。'.repeat(2) }), 'INVALID_ORIGIN_OR_INTERIOR'],
+  [JSON.stringify({ ...copy, description: '沿途有路灯。'.repeat(6) }), 'UNSUPPORTED_FACT'],
+  [JSON.stringify({ ...copy, description: '步行99分钟，给自己留些闲暇。'.repeat(2) }), 'WRONG_MEASUREMENT']
+])('detailed parsing explains rejection without changing fallback contract: %s', (raw, reason) => {
+  const detailed = contract.parseCopyDetailed(raw, payload());
+  expect(detailed).toMatchObject({ copy: null, reason });
+  expect(contract.parseCopy(raw, payload())).toBeNull();
+});
+test('detailed validation also preserves accepted copy unchanged', () => {
+  expect(contract.validateCopyDetailed(copy, payload())).toEqual({ copy, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(copy), payload())).toEqual({ copy, reason: null, field: null });
+});
+
+test.each([
+  '想轻松散个步时，这条途经商街再到公园外的路线挺合适，中途可自主探索，到了尽头处静静待一会儿，挺治愈。',
+  '从起点出发，途经商街再到公园外的路线，不必赶时间。',
+  '途经商街，然后去公园外走走，按自己的节奏散步。',
+  '沿途可以自由探索，经过商街与公园周边的路线。',
+  '途经公园外的路线，随心看看街景，放慢脚步。'
+])('does not mistake generic places or the word 路线 for invented named POIs: %s', phrase => {
+  const c = { ...copy, recommendationReason: phrase.slice(0, 80) };
+  expect(contract.validateCopyDetailed(c, payload()).reason).not.toBe('INVALID_POI');
+});
+test.each([
+  '途经不存在的紫荆公园',
+  '走进陌生的海滨博物馆',
+  '一路经过东方明珠塔',
+  '前往虚构的海滨大道',
+  '经过陌生的小龙桥'
+])('continues rejecting recognisable invented named places: %s', phrase => {
+  const c = { ...copy, description: `${phrase}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  expect(contract.validateCopyDetailed(c, payload()).reason).toBe('INVALID_POI');
+});
+
+test.each([
+  { name: 'Chinese half hour rounded from 29m16s', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '半小时放松心情慢慢走', accepted: true },
+  { name: 'decimal half hour rounded from 29m16s', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '0.5小时放松心情慢慢走', accepted: true },
+  { name: 'one hour rounded from 59m59s', seconds: 3599, expectedMinutes: 60,
+    requestedMinutes: 30, title: '一小时放松心情慢慢走', accepted: true },
+  { name: 'one and a half hours rounded from 89m59s', seconds: 5399, expectedMinutes: 90,
+    requestedMinutes: 45, title: '1.5小时放松心情慢慢走', accepted: true },
+  { name: 'mismatched full hour against a 30-minute route', seconds: 1756, expectedMinutes: 30,
+    requestedMinutes: 15, title: '一小时放松心情慢慢走', accepted: false },
+  { name: 'mismatched half hour against a 31-minute route', seconds: 1801, expectedMinutes: 31,
+    requestedMinutes: 30, title: '半小时放松心情慢慢走', accepted: false },
+  { name: 'requested half hour must not override actual 60-minute route', seconds: 3599, expectedMinutes: 60,
+    requestedMinutes: 30, title: '半小时放松心情慢慢走', accepted: false }
+])('hour-based claims follow routeFacts display duration, not exact-second drift or requested time: $name',
+  ({ seconds, expectedMinutes, requestedMinutes, title, accepted }) => {
+    const p = payload();
+    p.routeFacts.durationSeconds = seconds;
+    p.routeFacts.durationMinutes = expectedMinutes;
+    p.preferences.durationMinutes = requestedMinutes;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (accepted) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({ copy: null, reason: 'WRONG_MEASUREMENT', field: 'title' });
+  });
+
+test('live C001 rejection is a rounded half-hour false positive, not a 15-minute preference claim', () => {
+  const p = payload();
+  p.routeFacts.distanceMeters = 1920;
+  p.routeFacts.durationSeconds = 1756;
+  p.routeFacts.durationMinutes = 30;
+  p.preferences.durationMinutes = 15;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '人民公园', category: 'park' }];
+  const proposed = {
+    title: '人民公园慢环：半小时换换心情',
+    description: '从起点出发，途经人民公园，沿环线走回原处。不用赶时间，就当随意溜达一圈，看看路边的绿意，让身体和呼吸都松下来。',
+    recommendationReason: '想抽空透口气时，这条短环线刚好。途经人民公园，回路轻松，适合慢走放空，自己留意沿途的小变化就好。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});
+
+test('live C004: four known park POIs and generic “途经几处公园” do not invent a named destination', () => {
+  const p = payload();
+  p.routeFacts.distanceMeters = 3140;
+  p.routeFacts.durationSeconds = 3070;
+  p.routeFacts.durationMinutes = 52;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '静安河畔公园', category: 'park' },
+    { ref: 'P2', name: '闵行滨水绿道休闲生态公园', category: 'park' },
+    { ref: 'P3', name: '梅陇生态园', category: 'park' },
+    { ref: 'P4', name: '海心园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 60;
+  p.preferences.environmentPreferences = ['水边', '街道', '商街', '公园'];
+  const generated = {
+    title: '慢行环线，偷得半日闲趣',
+    description: '从起点出发，途经静安河畔公园、闵行滨水绿道休闲生态公园、梅陇生态园与海心园，兜转一圈回到原处。不妨把脚步交还给心情，随意看看沿路绿意。',
+    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空一下午。'
+  };
+  expect(contract.validateCopyDetailed(generated, p))
+    .toEqual({ copy: generated, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(generated), p).copy).toEqual(generated);
+});
+
+test.each([
+  '途经几个公园慢慢逛',
+  '经过两座公园放松心情',
+  '途经四处公园，给生活留点空白',
+  '途经一些公园，随心散步',
+  '经过许多公园，慢慢探索',
+  '途经几处公园，然后前往人民公园'
+])('does not misclassify generic quantified place categories as new proper names: %s', phrase => {
+  const c = { ...copy, recommendationReason:
+    `${phrase}，按自己的步调慢慢走，给日常留一段轻松的时光。` };
+  expect(contract.validateCopyDetailed(c, payload()).reason).not.toBe('INVALID_POI');
+});
+
+test.each([
+  '途经紫荆公园',
+  '途经老三桥',
+  '经过陌生的海滨博物馆',
+  '途经几个紫荆公园',
+  '途经几处公园，然后前往虚构的海滨广场',
+  '走进几处公园'
+])('generic quantity exclusion does not excuse identifiable unknown places or unverified entry: %s', phrase => {
+  const c = { ...copy, description:
+    `${phrase}。不妨带着探索的心情出发，在这次散步中给日常留一点自由的空间。` };
+  const verdict = contract.validateCopyDetailed(c, payload());
+  expect(verdict).toMatchObject({ copy: null, reason: 'INVALID_POI', field: 'description' });
+});
+
+test.each([
+  ['途经几处公园，给散步留点乐趣', 1, false],
+  ['途经几处公园，给散步留点乐趣', 2, true],
+  ['途经四处公园，给散步留点乐趣', 3, false],
+  ['途经四处公园，给散步留点乐趣', 4, true],
+  ['途经一处公园，给散步留点乐趣', 1, true]
+])('only accepts generic park counts grounded in ordered park POIs: %s with %i parks',
+  (phrase, parkCount, accepted) => {
+    const p = payload();
+    p.routeFacts.orderedPois = Array.from({ length: parkCount }, (_, i) => ({
+      ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
+    }));
+    const result = contract.validateCopyDetailed({
+      title: '适合今天散步的轻松时光',
+      description: '从起点出发，慢慢走上一段路。可以按自己喜欢的节奏散步，留点时间给日常生活，感受这次探索的轻松自由。',
+      recommendationReason: `${phrase}。你可以慢慢欣赏周围，在这段时间里按自己的节奏探索。`
+    }, p);
+    if (accepted) expect(result.reason).toBeNull();
+    else expect(result).toMatchObject({ reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null });
+  });
+
+test.each([
+  { title: '约半小时的轻松步行', minutes: 24, allowed: true },
+  { title: '大概半小时放松一下', minutes: 24, allowed: true },
+  { title: '大约半小时散散心情', minutes: 24, allowed: true },
+  { title: '差不多半小时走一走', minutes: 24, allowed: true },
+  { title: '半小时左右放空心情', minutes: 24, allowed: true },
+  { title: '约30分钟的散步时光', minutes: 24, allowed: true },
+  { title: '约半小时的轻松步行', minutes: 23, allowed: false },
+  { title: '半小时的轻松步行时光', minutes: 24, allowed: false },
+  { title: '大概半小时散步时光', minutes: 15, allowed: false },
+  { title: '大概一小时散步时光', minutes: 24, allowed: false },
+  { title: '半小时放松心情慢慢走', minutes: 30, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 54, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 51, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 50, allowed: true },
+  { title: '差不多一小时散步时光', minutes: 49, allowed: false },
+  { title: '差不多一小时散步时光', minutes: 39, allowed: false },
+  { title: '大概一小时散步时光', minutes: 53, allowed: false }
+])('approximate time expressions have tightly bounded tolerance: $title, $minutes minutes',
+  ({ title, minutes, allowed }) => {
+    const p = payload();
+    p.routeFacts.durationMinutes = minutes;
+    p.routeFacts.durationSeconds = minutes * 60 - 5;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({ copy: null, reason: 'WRONG_MEASUREMENT', field: 'title' });
+  });
+
+test('normal Routes E2E: “用大概半小时” for a displayed 24-minute walking route', () => {
+  const p = payload();
+  p.routeFacts.durationSeconds = 1420;
+  p.routeFacts.durationMinutes = 24;
+  p.preferences.durationMinutes = 30;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '桂花园', category: 'park' }];
+  const proposed = {
+    title: '慢走桂花园，换换每日的心情',
+    description: '从起点出发，途经桂花园。用大概半小时散散步，不赶时间，看看绿意，让紧绷的神经松一松，享受属于自己的悠闲片刻。',
+    recommendationReason: '想离开日常节奏时，这里适合随意走走。不必计划太多，跟着脚步去探索，或许就能遇见舒服的好心情。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});
+
+test.each([
+  ['用不到半小时慢慢走', 28, true],
+  ['不到半小时的轻松散步', 29, true],
+  ['不到半小时的轻松散步', 30, false],
+  ['不到半小时的轻松散步', 40, false],
+  ['不足30分钟的散步', 28, true],
+  ['未满30分钟的散步', 30, false],
+  ['少于30分钟的散步', 29, true],
+  ['少于30分钟的散步', 30, false],
+  ['半小时以内走一走', 30, true],
+  ['不超过半小时慢慢走', 30, true],
+  ['不超过半小时慢慢走', 31, false],
+  ['至少半小时走一走', 30, true],
+  ['不少于半小时放空一下', 29, false],
+  ['超过半小时再歇一会', 30, false],
+  ['超过半小时再歇一会', 31, true],
+  ['大于30分钟慢慢走', 31, true],
+  ['30分钟以上悠闲慢走', 30, true],
+  ['30分钟以上悠闲慢走', 29, false],
+  ['不到60秒就能走完', 2, false]
+])('duration bounds are validated as inequalities, not exact equalities: %s, %i displayed minutes',
+  (title, minutes, allowed) => {
+    const p = payload();
+    p.routeFacts.durationMinutes = minutes;
+    p.routeFacts.durationSeconds = minutes * 60 - 1;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, title };
+    const result = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(result).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(result).toMatchObject({
+      copy: null, reason: 'WRONG_MEASUREMENT', field: 'title'
+    });
+  });
+
+test('live benchmark C041: displayed 28m is less than half an hour, despite user requesting 90m', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.distanceMeters = 1740;
+  p.routeFacts.durationSeconds = 1672;
+  p.routeFacts.durationMinutes = 28;
+  p.routeFacts.orderedPois = [{ ref: 'P1', name: '桂花园', category: 'park' }];
+  p.preferences.durationMinutes = 90;
+  p.preferences.routeType = 'point_to_point';
+  p.preferences.crowdPreference = 'low';
+  p.preferences.environmentPreferences = ['街道', '商街', '公园', '水边'];
+  const proposed = {
+    title: '慢行桂花园，换换心情的小散步',
+    description: '从起点出发，途经桂花园。用不到半小时的从容步调，在城市的角落里松弛一下，不必赶路，只是随意走走，听听风声。',
+    recommendationReason: '想轻松换换心情时，这条短途路线刚好。途经桂花园，沿途留给自己发呆和探索的空间，很适合悠闲地散个小步。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});
+
+test('C018: generic “途经点” is not an invented POI; unverified 顺路 claim remains rejected', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.durationSeconds = 1970;
+  p.routeFacts.durationMinutes = 33;
+  p.routeFacts.distanceMeters = 2060;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '生态防护林公园北区观景入口', category: 'park' },
+    { ref: 'P2', name: '夏景园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 120;
+  p.preferences.crowdPreference = 'high';
+  const base = {
+    title: '午后慢行：两处公园随心探索',
+    description: '从起点出发，途经生态防护林公园北区观景入口，再前往夏景园。换换心情的短途走走，不妨放慢脚步，留意路边的小风景。',
+    recommendationReason: '想轻松散心时，这两处途经点顺路又好逛，不用赶时间，适合随意探索，给平淡日子添一点温柔的停顿。'
+  };
+  // Do not “fix” an unsupported route ease claim by marking it valid.
+  expect(contract.validateCopyDetailed(base, p)).toMatchObject({
+    reason: 'UNSUPPORTED_FACT', field: 'recommendationReason', copy: null
+  });
+  const safe = { ...base, recommendationReason: base.recommendationReason.replace('顺路又好逛', '可以慢慢探索') };
+  expect(contract.validateCopyDetailed(safe, p)).toEqual({ copy: safe, reason: null, field: null });
+});
+test.each([
+  '这两处途经点顺路又好逛',
+  '两处途经点顺路方便',
+  '几个途经点顺路好走'
+])('does not confuse 途经点 with a proper POI name: %s', phrase => {
+  const result = contract.validateCopyDetailed({ ...copy,
+    recommendationReason: `${phrase}，按自己的节奏探索街角，换换心情，感受自在。`
+  }, payload());
+  expect(result.reason).not.toBe('INVALID_POI');
+  expect(result.reason).toBe('UNSUPPORTED_FACT');
+});
+test('invented named park after generic transit phrase is still rejected', () => {
+  const c = { ...copy, description:
+    '这两个途经点可以自由探索，然后前往虚构的紫荆公园，按自己的步调感受一段轻松而自由的散步时光。' };
+  expect(contract.validateCopyDetailed(c, payload())).toMatchObject({ reason: 'INVALID_POI', copy: null });
+});
+
+test('live audit100 C003: generic “途经过几个公园” with three park POIs is not an invented destination', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'loop';
+  p.routeFacts.returnsToStart = true;
+  p.routeFacts.distanceMeters = 2980;
+  p.routeFacts.durationSeconds = 3069;
+  p.routeFacts.durationMinutes = 52;
+  p.preferences.durationMinutes = 45;
+  p.preferences.crowdPreference = 'low';
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '静安河畔防护林休闲绿地公园', category: 'park' },
+    { ref: 'P2', name: '生态园绿地公园', category: 'park' },
+    { ref: 'P3', name: '夏景园', category: 'park' }
+  ];
+  const proposed = {
+    title: '午后慢走：防护林与生态园的小循环',
+    description: '从起点出发，途经静安河畔防护林休闲绿地公园、生态园绿地公园与夏景园，再回到原点。不妨把脚步交给自己，一路看看绿意，换换日常的心情。',
+    recommendationReason: '想散散心又不愿走太远时，这条环线刚好。途经过几个公园，可以自主停下张望，给脑子放个假，慢慢踱回出发的地方。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p))
+    .toEqual({ copy: proposed, reason: null, field: null });
+  expect(contract.parseCopyDetailed(JSON.stringify(proposed), p).copy).toEqual(proposed);
+});
+
+test.each([
+  ['途经过几个公园，慢慢探索自己的步调。', 3, null],
+  ['途经过几处公园，慢慢探索自己的步调。', 2, null],
+  ['途经过几个公园，慢慢探索自己的步调。', 1, 'UNSUPPORTED_FACT'],
+  ['途经过四处公园，慢慢探索自己的步调。', 3, 'UNSUPPORTED_FACT'],
+  ['途经过虚构的紫荆公园，慢慢探索自己的步调。', 3, 'INVALID_POI'],
+  ['途经过陌生的海滨博物馆，慢慢探索自己的步调。', 3, 'INVALID_POI'],
+  ['途经紫荆公园，慢慢探索自己的步调。', 3, 'INVALID_POI']
+])('overlapping 途经过 prefix distinguishes generic park-count statements and invented names: %s with %i parks',
+  (phrase, count, reason) => {
+    const p = payload();
+    p.routeFacts.orderedPois = Array.from({ length: count }, (_, i) => ({
+      ref: `P${i + 1}`, name: `第${i + 1}号公园`, category: 'park'
+    }));
+    const proposed = {
+      title: '适合今天的慢走放松时光',
+      description: '从起点出发，慢慢走上一段路。可以按喜欢的节奏给自己一点时间，留意日常周围的小变化。',
+      recommendationReason: `${phrase}给自己一些悠闲和自由，换换心情，感受散步的乐趣。`
+    };
+    const checked = contract.validateCopyDetailed(proposed, p);
+    if (!reason) expect(checked.reason).toBeNull();
+    else expect(checked).toMatchObject({ reason, field: 'recommendationReason', copy: null });
+  });
+
+test.each([
+  { name: 'C002 incorrect 39m as almost 1h', seconds: 2334, displayMinutes: 39,
+    requestedMinutes: 30, accepted: false },
+  { name: 'C004 conversational 51m as almost 1h', seconds: 3004, displayMinutes: 51,
+    requestedMinutes: 60, accepted: true },
+  { name: '50m lower 10m boundary', seconds: 2999, displayMinutes: 50,
+    requestedMinutes: 60, accepted: true },
+  { name: '49m outside lower boundary', seconds: 2940, displayMinutes: 49,
+    requestedMinutes: 60, accepted: false },
+  { name: '70m upper 10m boundary', seconds: 4200, displayMinutes: 70,
+    requestedMinutes: 45, accepted: true },
+  { name: '71m outside upper boundary', seconds: 4260, displayMinutes: 71,
+    requestedMinutes: 45, accepted: false },
+  { name: '39m still wrong despite request for 60m', seconds: 2334, displayMinutes: 39,
+    requestedMinutes: 60, accepted: false }
+])('audit100 time grounding: $name', ({ seconds, displayMinutes, requestedMinutes, accepted }) => {
+  const p = payload();
+  p.routeFacts.durationSeconds = seconds;
+  p.routeFacts.durationMinutes = displayMinutes;
+  p.preferences.durationMinutes = requestedMinutes;
+  const proposed = { ...copy,
+    description: '从起点出发，顺着自己的心情慢慢散步。用差不多一小时的节奏给自己一点空闲，换换日常状态，沿途看看周围。' };
+  const checked = contract.validateCopyDetailed(proposed, p);
+  if (accepted) expect(checked).toEqual({ copy: proposed, reason: null, field: null });
+  else expect(checked).toMatchObject({
+    copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
+  });
+});
+
+test.each([
+  [24, true],
+  [23, false],
+  [36, true],
+  [37, false]
+])('差不多半小时 retains the tighter 20%% semantic bound for short durations: %i minutes',
+  (displayMinutes, allowed) => {
+    const p = payload();
+    p.routeFacts.durationSeconds = displayMinutes * 60 - 1;
+    p.routeFacts.durationMinutes = displayMinutes;
+    p.preferences.durationMinutes = 90;
+    const proposed = { ...copy, description:
+      '从起点出发，慢慢走一段路。差不多半小时的散步时光里，不妨换换心情，按喜欢的节奏看看周围。' };
+    const validated = contract.validateCopyDetailed(proposed, p);
+    if (allowed) expect(validated).toEqual({ copy: proposed, reason: null, field: null });
+    else expect(validated).toMatchObject({
+      copy: null, reason: 'WRONG_MEASUREMENT', field: 'description'
+    });
+  });
+
+test('audit100 C019: generic 途经点 is not a fabricated road, but invented scenery is rejected', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.routeFacts.durationSeconds = 2701;
+  p.routeFacts.durationMinutes = 46;
+  p.routeFacts.distanceMeters = 2470;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '翠云园', category: 'park' },
+    { ref: 'P2', name: '云翠休闲森林公园观景入口', category: 'park' },
+    { ref: 'P3', name: '杏花园', category: 'park' }
+  ];
+  p.preferences.durationMinutes = 15;
+  const base = {
+    title: '慢走途经三处绿意小憩一下',
+    description: '从起点出发，途经翠云园、云翠休闲森林公园观景入口与杏花园。不妨随性走走，换换心情，在城市的缝隙里看看树影摇曳，享受属于自己的悠闲片刻。',
+    recommendationReason: '想短暂抽离琐碎时，这几处途经点能让你不必赶路，自主探索身边的安静角落，随心停下张望，给日常松一松绑。'
+  };
+  expect(contract.validateCopyDetailed(base, p)).toMatchObject({
+    copy: null, reason: 'UNSUPPORTED_FACT', field: 'description'
+  });
+  const withoutShadows = { ...base,
+    description: base.description.replace('看看树影摇曳', '留意身边的小变化') };
+  expect(contract.validateCopyDetailed(withoutShadows, p)).toMatchObject({
+    copy: null, reason: 'UNSUPPORTED_FACT', field: 'recommendationReason'
+  });
+  const fullyGrounded = { ...withoutShadows,
+    recommendationReason: withoutShadows.recommendationReason.replace('自主探索身边的安静角落',
+      '按自己的节奏探索周围') };
+  expect(contract.validateCopyDetailed(fullyGrounded, p))
+    .toEqual({ copy: fullyGrounded, reason: null, field: null });
+});
+test.each([
+  ['这些途经点能让你不必赶路，按自己的节奏探索周围。', null],
+  ['这些途经点让人不赶路，给日常留一点轻松时光。', null],
+  ['希望能找到安静角落，按自己的节奏走走。', null],
+  ['这几处途经点能让你不必赶路，附近有安静角落。', 'UNSUPPORTED_FACT'],
+  ['留意路边树影摇曳，给日常留一点轻松时光。', 'UNSUPPORTED_FACT'],
+  ['途经点：虚构的紫荆公园，按自己的节奏探索周围。', 'INVALID_POI'],
+  ['随后途经虚构的紫荆公园，按自己的节奏探索周围。', 'INVALID_POI']
+])('C019 disambiguates generic waypoints and actual fabricated landmarks: %s',
+  (sentence, reason) => {
+    const p = payload();
+    const proposed = { ...copy,
+      recommendationReason: sentence + '不用赶时间，不妨换换心情。' };
+    const got = contract.validateCopyDetailed(proposed, p);
+    if (reason) expect(got).toMatchObject({ reason, field: 'recommendationReason', copy: null });
+    else expect(got).toEqual({ copy: proposed, reason: null, field: null });
+  });
+test('audit100 C029: entering two masked POIs is not supported by waypoint-only route input', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'loop';
+  p.routeFacts.returnsToStart = true;
+  p.routeFacts.distanceMeters = 3680;
+  p.routeFacts.durationSeconds = 3964;
+  p.routeFacts.durationMinutes = 67;
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '人民商街路步行街', category: 'shoppingStreet' },
+    { ref: 'P2', name: '沿河商业街区', category: 'shoppingStreet' },
+    { ref: 'P3', name: '花月园', category: 'park' },
+    { ref: 'P4', name: '芳菲生态绿地公园入口观景处', category: 'park' },
+    { ref: 'P5', name: '杏林公园', category: 'park' }
+  ];
+  const proposed = {
+    title: '穿街过林，慢逛人民商街路步行街一带',
+    description: '从起点出发，途经人民商街路步行街、沿河商业街区，再走进花月园、芳菲生态绿地公园入口观景处，最后前往杏林公园。沿路换换心情，随心看看街市与绿意。',
+    recommendationReason: '这条路线串起商街与几处公园，不用赶着走，适合想悠闲探索、在街头和林间自由切换氛围时，慢慢体会周边日常景致。'
+  };
+  expect(contract.validateCopyDetailed(proposed, p)).toMatchObject({
+    reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description', copy: null
+  });
+  const neutral = { ...proposed,
+    title: '沿途慢逛，探索街角的自在时光',
+    description: proposed.description.replace('再走进', '再途经'),
+    recommendationReason: '途经商街与几个公园，你可以按自己的节奏慢慢走，想停下时稍作休息，让散步成为一段自在的时光。'
+  };
+  expect(contract.validateCopyDetailed(neutral, p))
+    .toEqual({ copy: neutral, reason: null, field: null });
+});
+
+test('audit100 C041: a truncated POI label in a title remains invalid', () => {
+  const p = payload();
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '示例区防护林小公园', category: 'park' }
+  ];
+  const c = { ...copy, title: '午后慢行途经防护林小公园' };
+  expect(contract.validateCopyDetailed(c, p)).toMatchObject({
+    copy: null, reason: 'INVALID_POI', field: 'title'
+  });
+});
+
+test('audit100 C052: route must not imply park-entry avoidance without route evidence', () => {
+  const c = { ...copy, recommendationReason:
+    '这条路线串起商街和几座公园，途经点多而不重复。想轻松走走、自由探索时，很适合放慢脚步，看看周围而不必走进园里。' };
+  expect(contract.validateCopyDetailed(c, payload())).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'recommendationReason'
+  });
+});
+
+test('audit100 C057: abbreviated pocket-park name in recommendationReason remains invalid', () => {
+  const p = payload();
+  p.routeFacts.orderedPois = [
+    { ref: 'P1', name: '示例城市街角综合口袋公园', category: 'park' }
+  ];
+  const c = { ...copy,
+    description: '从起点出发，经过途经点后按自己的步调散步，不赶时间，留意周围的变化，享受一段悠闲的探索。',
+    recommendationReason:
+      '想轻松走走、透口气时，这条路线够简单。途经口袋公园，沿途看看周围，给自己一点慢下来的空隙。' };
+  expect(contract.validateCopyDetailed(c, p)).toMatchObject({
+    copy: null, reason: 'INVALID_POI', field: 'recommendationReason'
+  });
+});
