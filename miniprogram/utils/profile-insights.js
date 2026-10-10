@@ -39,7 +39,7 @@ function profileInsights(profile) {
   const duration = p.preferredDurationMinutes === null ? '还没有足够的时长选择记录。'
     : p.evidenceWalkCount < MIN_WALKS
       ? `目前仅有 ${p.evidenceWalkCount} 次散步样本，时长倾向暂约 ${p.preferredDurationMinutes} 分钟。`
-      : `根据过去的选择${durationEvidence ? '和反馈' : ''}，你的散步时长倾向约为 ${p.preferredDurationMinutes} 分钟。`;
+      : `根据过去的散步记录，你的时长倾向约为 ${p.preferredDurationMinutes} 分钟。`;
   const c = p.evidence.crowd;
   const negativeEvidence = Math.max(c.tooCrowdedCount, c.quietPositiveCount); // Overlap is unknown; never sum them.
   const contradictory = c.tooQuietCount > 0 && negativeEvidence > 0;
