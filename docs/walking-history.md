@@ -51,6 +51,11 @@ and zero totals. Subsequent pages always return `totals: null` and do not execut
 count queries. The client service removes `success` and returns
 `{ items, nextCursor, totals }`, rejecting malformed responses.
 
+Before creating a public history item, the server also checks the persisted
+`schemaVersion === 1` and `completionStatus === status` for each terminal walk,
+including the anchor used for a continuation cursor. These fields are read only
+for internal validation and are not included in the public item.
+
 All item fields are required, with these constraints:
 
 | Field | Contract |
