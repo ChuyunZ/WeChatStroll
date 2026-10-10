@@ -14,6 +14,17 @@ afterEach(() => { jest.useRealTimers(); delete global.wx; });
 test('client and cloud validators are identical', () => {
   expect(fs.readFileSync('cloudfunctions/trackProvider/trace-schema.js', 'utf8')).toBe(fs.readFileSync('miniprogram/utils/history-trace-schema.js', 'utf8'));
 });
+test('local retryEmpty=false sends exactly one empty query with unchanged authorization fields', async () => {
+  wx.cloud.callFunction.mockResolvedValue(respond(empty()));
+  expect(await searchWalkTrace({ walkId: 'w' }, { retryEmpty: false })).toEqual(empty());
+  expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1); expect(jest.getTimerCount()).toBe(0);
+  expect(wx.cloud.callFunction.mock.calls[0][0].data).toEqual({ action: 'searchWalkTrace', walkId: 'w' });
+});
+test.each(['TRACK_SEARCH_RATE_LIMITED', 'TRACK_RATE_LIMIT_STORE_FAILED'])('quota error %s is preserved and never auto-retried', async code => {
+  wx.cloud.callFunction.mockResolvedValue({ result: { success: false, error: { code, message: 'private database' } } });
+  await expect(searchWalkTrace({ walkId: 'w' }, { retryEmpty: true })).rejects.toMatchObject({ code });
+  expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1); expect(jest.getTimerCount()).toBe(0);
+});
 test('sends only action and walkId and returns a detached normalized trajectory', async () => {
   const trace = full(); wx.cloud.callFunction.mockResolvedValue(respond(trace));
   const result = await searchWalkTrace({ walkId: 'walk-1' });
@@ -27,6 +38,7 @@ test('accepts the actual authorized handler response after filtering, including 
   const { createTrackHandler } = require('../cloudfunctions/trackProvider/handler');
   const { testWalk, START_MS, END_MS } = require('../cloudfunctions/trackProvider/test-walk');
   const handler = createTrackHandler({ config: { entitySecret: 'synthetic-secret' },
+    historyLimiter: { reserve: jest.fn().mockResolvedValue() },
     getOpenId: () => 'openid-one', getNowMs: () => END_MS + 1000,
     walkStore: { getWalk: async () => testWalk() },
     client: { ensureEntity: jest.fn(), searchTrace: jest.fn().mockResolvedValue({

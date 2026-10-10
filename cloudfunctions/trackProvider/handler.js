@@ -209,6 +209,7 @@ function createTrackHandler({
   client,
   getOpenId,
   walkStore,
+  historyLimiter,
   ensuredEntityIds = new Set(),
   log = () => {},
   getNowMs = () => Date.now()
@@ -256,6 +257,8 @@ function createTrackHandler({
         if (range.startTimeSeconds === range.endTimeSeconds) {
           return { success: true, trace: normalizeWalkTrace({ points: [] }, { ...range, partial: true }, normalizeSearchPoint) };
         }
+        if (!historyLimiter) throw traceError('TRACK_RATE_LIMIT_STORE_FAILED');
+        await historyLimiter.reserve(openid);
         const entityId = await resolveEntity(openid);
         const result = await client.searchTrace(entityId, range.startTimeSeconds, range.endTimeSeconds);
         return { success: true, trace: normalizeWalkTrace(result, range, normalizeSearchPoint) };

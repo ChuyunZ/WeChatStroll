@@ -3,19 +3,22 @@ const feedbackRecords = require('../../services/feedback-records');
 const historyTrace = require('../../services/history-trace');
 const { validId } = require('../../utils/feedback-validation');
 const { validateTraceResponse } = require('../../utils/history-trace-schema');
-const { walkView, feedbackView } = require('../../utils/history-detail');
+const { walkView, feedbackView, isRecentCompletion } = require('../../utils/history-detail');
 const { traceMap } = require('../../utils/history-trace-map');
 
 Page({
-  data: { walkState: 'loading', feedbackState: 'loading', gpsState: 'idle', walk: null, feedback: null, map: null, tracePartial: false },
+  data: { walkState: 'loading', feedbackState: 'loading', gpsState: 'idle', walk: null, feedback: null, map: null, tracePartial: false,
+    gpsCooldown: false, gpsExhausted: false, gpsError: '' },
   onLoad(options = {}) {
     this._walkId = validId(options.walkId) ? options.walkId : null;
     this._active = false; this._disposed = false; this._versions = { walk: 0, feedback: 0, gps: 0 }; this._busy = {};
+    this._traceAttempts = 0; this._traceNextAt = 0;
     if (!this._walkId) this.setData({ walkState: 'unavailable', feedbackState: 'empty', gpsState: 'disabled' });
   },
   onShow() {
     if (this._disposed || this._active) return;
     this._active = true;
+    this.refreshTraceGate();
     if (!this._walkId) return;
     if (this.data.gpsState === 'loading') this.setData({ gpsState: 'idle' });
     return Promise.all([
@@ -25,6 +28,7 @@ Page({
   },
   onHide() {
     this._active = false;
+    clearTimeout(this._cooldownTimer); this._cooldownTimer = null;
     Object.keys(this._versions).forEach(key => this._versions[key]++);
     this._busy = {};
   },
@@ -65,12 +69,25 @@ Page({
   },
   retryWalk() { if (this.data.walkState === 'error') return this.loadWalk(); },
   retryFeedback() { if (this.data.feedbackState === 'error') return this.loadFeedback(); },
+  refreshTraceGate() {
+    clearTimeout(this._cooldownTimer); this._cooldownTimer = null;
+    if (!this._active || this._disposed) return;
+    const remaining = Math.max(0, this._traceNextAt - Date.now());
+    this.setData({ gpsCooldown: remaining > 0, gpsExhausted: this._traceAttempts >= 3 });
+    if (remaining > 0 && this._traceAttempts < 3) this._cooldownTimer = setTimeout(() => this.refreshTraceGate(), Math.min(remaining, 60000));
+  },
   loadTrace() {
+    if (!this._active || this._disposed || this._busy.gps || this._traceAttempts >= 3 || Date.now() < this._traceNextAt) return;
     if (this.data.walkState !== 'ready' || !this.data.walk.trajectoryEnabled || !['idle', 'empty', 'error'].includes(this.data.gpsState)) return;
-    return this.loadArea('gps', walkId => historyTrace.searchWalkTrace({ walkId }), value => {
+    this._traceAttempts++; this._traceNextAt = Date.now() + 60000;
+    this.refreshTraceGate(); this.setData({ gpsError: '' });
+    return this.loadArea('gps', walkId => historyTrace.searchWalkTrace({ walkId }, {
+      retryEmpty: isRecentCompletion(this.data.walk.endTime)
+    }), value => {
       const trace = validateTraceResponse({ success: true, trace: value });
       const map = traceMap(trace.points);
       return { gpsState: map.total ? 'ready' : 'empty', map: map.total ? map : null, tracePartial: trace.partial };
-    }, () => ({ gpsState: 'error', map: null, tracePartial: false }));
+    }, error => ({ gpsState: 'error', map: null, tracePartial: false,
+      gpsError: error && error.code === 'TRACK_SEARCH_RATE_LIMITED' ? '定位记录查询过于频繁，请稍后再试。' : '定位记录暂时无法加载。' }));
   }
 });

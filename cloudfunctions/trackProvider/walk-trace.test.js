@@ -6,13 +6,14 @@ function fixture(changes = {}, openid = 'openid-one') {
   const walkStore = { getWalk: jest.fn().mockResolvedValue(walk) };
   const client = { ensureEntity: jest.fn().mockResolvedValue({}), searchTrace: jest.fn().mockResolvedValue({ points: [], mileageMeters: 0, durationSeconds: 0 }) };
   const log = jest.fn();
+  const historyLimiter = { reserve: jest.fn().mockResolvedValue() };
   const handler = createTrackHandler({ config: { entitySecret: 'synthetic-secret' }, client, walkStore,
-    getOpenId: () => openid, getNowMs: () => END_MS + MAX_TRACE_QUERY_MS * 2, log });
-  return { handler, client, walkStore, walk, log };
+    getOpenId: () => openid, getNowMs: () => END_MS + MAX_TRACE_QUERY_MS * 2, log, historyLimiter });
+  return { handler, client, walkStore, walk, log, historyLimiter };
 }
 const request = { action: 'searchWalkTrace', walkId: 'walk-1' };
 const rawPoint = (timestampMs = START_MS + 1000, extra = {}) => ({ lat: 31, lng: 121, loctime: timestampMs / 1000, ...extra });
-function noProvider(f) { expect(f.client.ensureEntity).not.toHaveBeenCalled(); expect(f.client.searchTrace).not.toHaveBeenCalled(); }
+function noProvider(f) { expect(f.client.ensureEntity).not.toHaveBeenCalled(); expect(f.client.searchTrace).not.toHaveBeenCalled(); expect(f.historyLimiter.reserve).not.toHaveBeenCalled(); }
 test.each([null, '', ' ', 42, {}])('invalid authentication %j never reads data or prepares an entity', async openid => {
   const f = fixture({}, openid); expect((await f.handler(request)).error.code).toBe('UNAUTHENTICATED');
   expect(f.walkStore.getWalk).not.toHaveBeenCalled(); noProvider(f);
@@ -137,6 +138,7 @@ test('extending Walk A metadata cannot expose later Walk B points from the share
   const client = { ensureEntity: jest.fn(), searchTrace: jest.fn().mockResolvedValue({
     points: ['10:05', '10:20', '11:05', '11:15'].map(time => rawPoint(at(time))), mileageMeters: 1000, durationSeconds: 3000 }) };
   const handler = createTrackHandler({ config: { entitySecret: 'synthetic-secret' }, client,
+    historyLimiter: { reserve: jest.fn().mockResolvedValue() },
     getOpenId: () => 'openid-one', getNowMs: () => at('12:00'),
     walkStore: { getWalk: async id => ({ 'walk-A': a, 'walk-B': b })[id] } });
   const result = await handler({ action: 'searchWalkTrace', walkId: 'walk-A' });

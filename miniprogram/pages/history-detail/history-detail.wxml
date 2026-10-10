@@ -26,7 +26,7 @@
       <view class="tags"><text wx:for="{{feedback.positiveTags}}" wx:key="key" class="tag">{{item.text}}</text></view>
       <text wx:if="{{feedback.negativeTags.length}}" class="label">希望改进的</text>
       <view class="tags"><text wx:for="{{feedback.negativeTags}}" wx:key="key" class="tag negative">{{item.text}}</text></view>
-      <text wx:if="{{feedback.comment}}" class="comment" selectable>{{feedback.comment}}</text>
+      <text wx:if="{{feedback.comment}}" class="comment" user-select="{{true}}">{{feedback.comment}}</text>
     </view>
   </view>
   <view class="card">
@@ -37,10 +37,10 @@
       <text class="note">仅在你点击后加载本次散步的历史定位，不获取当前位置。</text>
       <text wx:if="{{walk.lateCleanup}}" class="note">正式结束后的收尾采样不在展示范围内。</text>
       <text wx:if="{{walk.recordedPartial}}" class="note">本次记录被标记为可能不完整，具体原因无法确定。</text>
-      <button wx:if="{{gpsState === 'idle'}}" class="primary" bindtap="loadTrace">查看实际轨迹</button>
+      <button wx:if="{{gpsState === 'idle'}}" class="primary" bindtap="loadTrace" disabled="{{gpsCooldown || gpsExhausted}}">查看实际轨迹</button>
       <button wx:elif="{{gpsState === 'loading'}}" loading disabled>正在加载定位记录</button>
-      <view wx:elif="{{gpsState === 'error'}}"><text class="note">定位记录暂时无法加载。</text><button bindtap="loadTrace">重试轨迹</button></view>
-      <view wx:elif="{{gpsState === 'empty'}}"><text class="note">本次暂无可显示的定位记录。</text><text class="note">可能是定位点较少，或部分记录未能显示。</text><button bindtap="loadTrace">重新查看</button></view>
+      <view wx:elif="{{gpsState === 'error'}}"><text class="note">{{gpsError}}</text><button bindtap="loadTrace" disabled="{{gpsCooldown || gpsExhausted}}">重试轨迹</button></view>
+      <view wx:elif="{{gpsState === 'empty'}}"><text class="note">本次暂无可显示的定位记录。</text><text class="note">可能是定位点较少，或部分记录未能显示。</text><button bindtap="loadTrace" disabled="{{gpsCooldown || gpsExhausted}}">重新查看</button></view>
       <view wx:elif="{{gpsState === 'ready'}}">
         <text wx:if="{{map.total === 1}}" class="note">本次记录到 1 个定位点。</text>
         <text wx:else class="note">展示 {{map.displayed}} / {{map.total}} 个定位点。</text>
@@ -50,6 +50,10 @@
         <text wx:if="{{map.segmented}}" class="note">无法确认连续的记录分段展示，断开处不补画路径。</text>
         <text wx:if="{{map.limited}}" class="note">记录较多，仅展示前一部分原始定位点，未展示部分不连线。</text>
       </view>
+      <block wx:if="{{gpsState !== 'ready' && gpsState !== 'loading'}}">
+        <text wx:if="{{gpsExhausted}}" class="note">本次查看次数已达上限，可以稍后重新进入查看。</text>
+        <text wx:elif="{{gpsCooldown}}" class="note">请稍后再试，每次查询开始后需间隔 60 秒。</text>
+      </block>
       <text wx:if="{{tracePartial}}" class="note">显示的是本次散步正式结束前的定位记录，部分采样可能未展示。</text>
       <text class="note">定位存在误差，展示结果不保证完整覆盖本次散步。</text>
     </view>

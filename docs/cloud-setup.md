@@ -84,9 +84,20 @@ Current planned-route cloud architecture:
 - `amapProvider`: historical/rollback implementation, not the current planned-route provider.
 - `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
   Phase 3A locally adds an authorized `searchWalkTrace` action and retires generic
-  range reads. It adds server-side reads of existing `walks` documents; no new
-  collection/index/configuration is needed. See [trace review and rollout](history-trace.md)
+  range reads. P1 adds atomic per-user quota reservations in the dedicated
+  `history_trace_rate_limits` collection, alongside reads of existing `walks`.
+  This new collection must be manually created before deployment; no new compound
+  index or environment variable is needed. See [trace review and rollout](history-trace.md)
   for caller migration, read-access requirements and pending development E2E.
+  Configure `history_trace_rate_limits` as ADMINONLY/server-only. Document IDs are
+  SHA-256 hashes of authenticated OpenIDs; records contain only requestTimesMs
+  (at most 20 server timestamps) and updatedAtMs. The function needs transaction
+  read/write access. No GPS, walk IDs, plaintext OpenIDs or provider payloads belong
+  here. Missing collection/storage failure denies historical queries; no bypass or
+  runtime collection creation exists. After review and user-approved Git workflow,
+  create/verify the development collection, then deploy revised trackProvider,
+  compile the Mini Program and run controlled quota/cooldown plus upload/finalization
+  E2E. This task performs no remote creation, permissions change or deployment.
 - `walkStore`: durable walk lifecycle persistence for Issue #79. It owns the
   `walks` and `active_walks` collections, derives ownership from
   `cloud.getWXContext().OPENID`, and stores only allowlisted lifecycle/questionnaire

@@ -1,9 +1,11 @@
 const { testWalk, START_MS } = require('./test-walk');
-let cloud, client, document, main;
+let cloud, client, document, main, quotaDocument, transaction;
 beforeEach(() => {
   jest.resetModules();
   document = { field: jest.fn(), get: jest.fn().mockResolvedValue({ data: testWalk() }) }; document.field.mockReturnValue(document);
-  const db = { collection: jest.fn(() => ({ doc: jest.fn(() => document) })) };
+  quotaDocument = { get: jest.fn().mockResolvedValue({ data: null }), set: jest.fn().mockResolvedValue({}) };
+  transaction = { collection: jest.fn(() => ({ doc: jest.fn(() => quotaDocument) })), commit: jest.fn().mockResolvedValue(), rollback: jest.fn().mockResolvedValue() };
+  const db = { collection: jest.fn(() => ({ doc: jest.fn(() => document) })), startTransaction: jest.fn().mockResolvedValue(transaction) };
   cloud = { init: jest.fn(), DYNAMIC_CURRENT_ENV: 'dynamic', getWXContext: jest.fn(() => ({ OPENID: 'openid-one' })), database: jest.fn(() => db) };
   client = { ensureEntity: jest.fn().mockResolvedValue({}), uploadTrace: jest.fn().mockResolvedValue({ uploadedCount: 1 }),
     searchTrace: jest.fn().mockResolvedValue({ points: [{ lat: 31, lng: 121, loctime: START_MS / 1000 + 1 }], mileageMeters: 10, durationSeconds: 1 }) };
@@ -49,4 +51,11 @@ test('database errors stay fixed and contain no server details', async () => {
   const result = await main({ action: 'searchWalkTrace', walkId: 'walk-1' });
   expect(result.error.code).toBe('TRACK_WALK_READ_FAILED'); expect(JSON.stringify(result)).not.toContain('secret');
   expect(client.searchTrace).not.toHaveBeenCalled();
+});
+test('quota transaction failure in the actual entry point prevents Entity and search', async () => {
+  transaction.commit.mockRejectedValue(new Error('collection private failure'));
+  const result = await main({ action: 'searchWalkTrace', walkId: 'walk-1' });
+  expect(result.error.code).toBe('TRACK_RATE_LIMIT_STORE_FAILED'); expect(JSON.stringify(result)).not.toContain('private');
+  expect(client.ensureEntity).not.toHaveBeenCalled(); expect(client.searchTrace).not.toHaveBeenCalled();
+  expect(transaction.rollback).toHaveBeenCalled();
 });

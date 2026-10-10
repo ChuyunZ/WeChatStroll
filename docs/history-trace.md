@@ -53,13 +53,15 @@ A lifecycle regression covers completion response loss, retry five minutes later
 and cleanup metadata update: only pre-completion samples are returned. No lifecycle,
 final sampling, upload, recovery or metadata writer is changed by this fix.
 
-Only after authorization is the existing HMAC-derived per-user Tencent Entity
-ensured and searched through the existing signed client. The entity cache cannot
-bypass authorization. Upload/entity actions retain their previous lifecycle and
-do not acquire a new database dependency.
+Only after authorization and a committed quota reservation is the existing
+HMAC-derived per-user Tencent Entity ensured and searched. Same-second intervals
+return their empty result before quota or Entity operations. The entity cache
+cannot bypass authorization or quota. Upload/entity actions retain their previous
+lifecycle and do not acquire a new database dependency.
 
-No GPS, planned route, POI, provider response, ownership key or credential is
-persisted by this flow. GPS stays in Tencent Track Cloud and is returned transiently.
+No GPS, planned route, POI, provider response, plaintext identity or credential is
+persisted by this flow. Quota bookkeeping stores only a hashed document ID and
+request timestamps. GPS stays in Tencent Track Cloud and is returned transiently.
 Server projections read only the lifecycle fields needed for authorization. New
 action failure logs contain only fixed action/error codes, no walk IDs or points.
 
@@ -124,7 +126,7 @@ when the provider returns them despite the bounded query. No interpolation is pe
 Positive intervals whose start/end floor to the same second return an empty,
 partial, retryable trace with null metrics after authorization, without Entity or
 provider calls. No end-time extension is used to manufacture a positive provider
-query. The unchanged client may retry this empty result within its existing budget.
+query. The client may retry this empty result only under its selected local retry policy.
 Zero-duration intervals remain invalid.
 
 Points are sorted by timestamp, then latitude/longitude for deterministic same-second
@@ -149,14 +151,75 @@ upload/finalization migration; it cannot be reconstructed from current timestamp
 
 ## Client retry and errors
 
-`miniprogram/services/history-trace.js` validates the request, reuses
-`callCloudFunction`, validates each response and returns a detached trace. Only a
-successful, validated, empty/retryable trace receives another request, after 500ms
-then 1000ms: at most three queries. Nonempty results stop immediately; authorization,
-provider and schema errors are not automatically retried. After exhaustion the
-empty/retryable result remains retryable for a later explicit user action.
+`miniprogram/services/history-trace.js` accepts `searchWalkTrace({walkId},
+{retryEmpty: boolean})`, validates the request, reuses `callCloudFunction`, validates
+each response and returns a detached trace. The optional second argument is local
+policy only; Cloud Function input remains exactly `{action:'searchWalkTrace', walkId}`.
+For backward compatibility, omitting the second argument retains bounded empty
+retries. Only literal `retryEmpty: true` enables them.
+
+History Detail derives this option from the already validated Walk endTime at each
+click: age in [0, 300000] ms enables 500ms then 1000ms retries of successful,
+validated, empty/retryable responses (at most three calls). Older, future or invalid
+completion timestamps do not enable automatic retries. Nonempty results and every
+error, including both quota errors below, stop immediately. A retry option or
+completion time is never sent as authorization input. A client can change its clock
+or bypass its local policy; server quota enforcement remains authoritative.
+
+History Detail allows an initial click and two additional manual attempts per page
+instance across empty and error results. Each accepted click consumes one local
+attempt and starts a 60-second wall-clock cooldown, including failed/hidden work.
+Automatic service retries do not consume extra manual attempts but each authorized
+server search reserves its own quota slot. Hide/show preserves the local budget;
+a new instance resets only the frontend budget. One boundary timer (cleared on hide
+and recomputed on show) enables retries without polling/countdowns. Exhausted quota
+does not provide an exact server retry time; UI uses neutral fixed Chinese messages.
 The Service neither starts tracking nor uploads, changes active sessions, queries
 on Profile load, or writes local/CloudBase GPS data.
+
+## Rolling server quota (Phase 3B P1, local only)
+
+`history_trace_rate_limits` is a dedicated **ADMINONLY/server-only** collection,
+not accessible to Mini Program clients. It must be created manually before this
+version is deployed. The implementation never creates a collection at runtime.
+Each `_id` is `sha256(authenticated OpenID)` in hex, consistent with Walk ownership.
+Only two application fields are written:
+
+```javascript
+{ requestTimesMs: [/* at most 20 positive safe-integer server timestamps */], updatedAtMs: 0 }
+```
+
+Actual writes set updatedAtMs to the newly appended timestamp. Arrays must be
+ordered, bounded and internally consistent; future/unsafe/unknown fields or other
+malformed persisted state fail closed before expiry pruning. Lookup uses only the
+document ID; no compound index is needed. There is no TTL requirement. Old entries
+are pruned on successful reservation; idle documents remain bounded at 20 entries.
+These pseudonymous query timestamps are usage metadata, not anonymous data.
+
+Maximum **20 reservations per user in (server now − 60 minutes, server now]**.
+An entry exactly 60 minutes old expires. A transaction reads the document, prunes
+expired timestamps, rejects a full window or appends server now and writes the
+bounded record. Missing documents are initialized within the transaction. Commit
+must succeed before Entity initialization or Tencent search. Explicit rollback and
+at most four total attempts on recognized transaction conflicts follow the existing
+walkStore pattern, with 10/20/40ms exponential bases plus bounded jitter. Independent
+instances contend on the same document, so two callers cannot reserve the final
+slot. No in-memory limiter, non-atomic fallback or client bypass is used.
+
+Each committed reservation counts once even for Entity failure, empty/partial
+results, search errors or failed pagination. Pagination's multiple Tencent HTTP
+requests consume one logical search slot, not one slot per HTTP page or GPS point.
+This is a per-user rolling quota, not a shared QPS limiter. Unauthorized, malformed,
+non-consented or same-second/no-provider requests reserve nothing. Upload/final
+flush/standalone ensureEntity never use this limiter; old searchTrace stays disabled.
+
+Missing/unavailable collection, malformed state, clock rollback behind saved time,
+transaction exhaustion or unknown storage failures return TRACK_RATE_LIMIT_STORE_FAILED
+without Tencent requests. Quota exhaustion separately returns TRACK_SEARCH_RATE_LIMITED.
+No quota record, hash or raw database details are returned/logged. Ambiguous commit
+acknowledgement failure can consume a slot without a Tencent call; fail closed rather
+than refunding or risking duplicate capacity. Concurrent tests use the repository's
+optimistic transaction fake; real CloudBase conflict behavior still needs E2E.
 
 Errors use `{ success: false, error: { code, message } }` with fixed public messages.
 The client preserves allowlisted codes and reconstructs safe messages without raw
@@ -170,6 +233,8 @@ error bodies or `originalError`. Unknown codes become `TRACK_PROVIDER_FAILED`.
 | TRACK_NOT_ENABLED | Owned terminal Walk did not opt in |
 | INVALID_WALK_TRACE_METADATA | Invalid identity/version/state/quality/time |
 | TRACK_WALK_READ_FAILED | Authorization document read failed |
+| TRACK_SEARCH_RATE_LIMITED | 20 authorized search reservations already in the rolling hour |
+| TRACK_RATE_LIMIT_STORE_FAILED | Quota infrastructure/state unavailable; no provider access |
 | TRACK_WALK_REQUIRED | Retired arbitrary-range query attempted |
 | TRACK_RANGE_TOO_LARGE | Formal startTime-to-endTime interval exceeds 24 hours |
 | TRACK_INVALID_RESPONSE | Malformed provider/public trace or no usable samples after invalid-data loss |
@@ -211,11 +276,25 @@ deployment/E2E of Phase 3A; other environments must independently verify their v
 
 ## Review and future development rollout
 
-No new index, collection, schema, permission, environment variable or provider
-configuration is required. `trackProvider` now needs server-side read access to the
-existing ADMINONLY walks collection via its existing SDK identity. Deploy the
-updated trackProvider package only after review; publish migrated callers together
-if any external consumers exist. No deployment is performed in this phase.
+P1 adds the collection dependency above. No new environment variable, provider
+credential or compound index is required. `trackProvider` retains server reads of
+existing ADMINONLY walks and needs transaction read/write access to the new quota
+collection. The revised limiter has not been deployed or live-tested in this task.
+
+Rollout: Code Review/full Jest → user-approved Git workflow → manually create
+`history_trace_rate_limits` in development with ADMINONLY access → verify collection
+and transaction support → deploy revised development trackProvider → compile the
+Mini Program → controlled quota/cooldown E2E → upload/final-flush regression →
+remaining native acceptance → separate production rollout review. Never deploy this
+version while the collection is missing. No remote creation or deployment is done here.
+
+Controlled development E2E should verify 20 reservations followed by rejection,
+two instances competing for the last slot, expiration at the rolling-hour boundary,
+no quota writes on invalid requests or uploads, and no Tencent calls on quota/storage
+failure. Verify old empty Walks use one call; recent ones use at most three; local
+60-second cooldown and two manual retries survive hide/show. Inspect quota fields
+for timestamp-only data. Use development test identities and account for provider
+capacity consumed during validation; do not alter production quota documents.
 
 Development E2E must verify CloudBase event metadata, document projection, owner/
 consent rejection without provider requests, real Tencent empty-body shape,

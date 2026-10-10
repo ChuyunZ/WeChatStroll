@@ -1,9 +1,10 @@
 # Walking History Detail — Issue #87 Phase 3B
 
-Local native Mini Program implementation. No new backend, provider, schema,
-permissions or deployment configuration. Native rendering and device behavior
-still require WeChat Developer Tools/device acceptance; Jest is not that evidence.
-The Phase 3B handoff reports Phase 3A development CloudBase/Tencent E2E success.
+Native Mini Program implementation. The P1 handoff reports initial native E2E for
+navigation, metadata/read-only feedback, single marker, empty GPS, expanded history
+and scroll restoration, plus Phase 3A CloudBase/Tencent validation. New P1 rate limits
+remain local and require the [quota collection and rollout](history-trace.md).
+Remaining native/device acceptance is separate from Jest evidence.
 
 ## Entry and data
 
@@ -32,8 +33,25 @@ There is no submission, editing or navigation into the editable feedback form.
 
 GPS is queried only by “查看实际轨迹” or its explicit manual retry controls, using
 `history-trace.searchWalkTrace({walkId})`. Neither onLoad/onShow nor other loads
-start a trace query. The Service's existing 500/1000ms empty retries remain the
-only automatic retries; the page adds none. Error/empty results permit manual retry.
+start a trace query. A validated Walk completion within the past five minutes
+(inclusive) enables the Service's 500/1000ms empty retries, at most three calls.
+Older, invalid or future completion times enable no automatic retry. Only successful
+empty/retryable responses retry; no error does. The retry option never enters the
+Cloud Function request or authorization fields.
+
+Initial click plus at most two manual retries are allowed per page instance,
+across empty and error states. Each accepted click starts a 60-second cooldown;
+its internal service calls count as one manual attempt. Disabled buttons and fixed
+Chinese hints explain cooldown/exhaustion. A single boundary timeout replaces any
+countdown polling. Hide clears the timer, show recomputes it without resetting the
+budget, and unload releases it. Already sent service calls may finish and consume
+server quota while hidden. A new page instance resets only the local budget.
+Server quota exhaustion displays “定位记录查询过于频繁，请稍后再试。” Infrastructure
+failure uses the generic safe query-error message. Both consume the local attempt,
+neither triggers an automatic retry, and no exact server retry time is promised.
+The frontend is a usability/cost control; authoritative protection is the server's
+transactional 20-reservations-per-rolling-hour limit. Native comment selection uses
+`user-select` instead of the deprecated `selectable` attribute.
 
 Per-area request generations, busy flags and ID checks prevent double requests
 and stale success/error/finally callbacks. Hide invalidates pending work; show
@@ -90,7 +108,8 @@ record with unknown cause. For trace.partial, use “显示的是本次散步正
 部分采样可能未展示。” Never equate every partial flag with GPS loss.
 Even partial=false does not certify completeness or accuracy.
 
-Backend ownership/consent/formal-end boundaries are unchanged. Shared user Entity,
+Backend ownership/consent/formal-end boundaries are unchanged; quota reservation now
+precedes any provider request. Shared user Entity,
 overlapping formal intervals, multiple devices and inaccurate/forged timestamps
 still prevent definitive per-Walk point attribution. Display segmentation is not
 an authorization mechanism and cannot reconstruct missing historical evidence.
@@ -110,7 +129,12 @@ an authorization mechanism and cannot reconstruct missing historical evidence.
 7. Use synthetic multi-point responses to inspect gaps, same-second groups, jumps,
    bounds and large-trace truncation on the actual native map.
 8. Check small screens, long text, safe areas, marker assets and map gesture behavior.
+9. After the dedicated development quota collection and revised function are ready,
+   test old/recent empty queries, 60-second cooldown, two manual retries across
+   errors/empty states, hide/show budget preservation and server rate-limit messaging.
+   Confirm no automatic page-entry queries or upload/finalization regression.
 
 The handoff reports seven real historical Walks, two with GPS, plus existing
-feedback. These are acceptance inputs, not evidence that this UI was manually
-verified. Continuous trajectory rendering still needs a separate real-device walk.
+feedback. Initial native acceptance is reported in the P1 handoff; this local
+limiter revision still needs its own E2E. Continuous trajectory rendering still
+needs a separate real-device walk.

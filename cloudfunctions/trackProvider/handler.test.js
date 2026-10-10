@@ -6,6 +6,7 @@ const {
 const { createEntityId } = require("./entity-id");
 const { testWalk } = require('./test-walk');
 const createTrackHandler = options => makeTrackHandler({
+  historyLimiter: { reserve: jest.fn().mockResolvedValue() },
   walkStore: { getWalk: jest.fn().mockResolvedValue(testWalk({}, options.getOpenId())) }, ...options
 });
 

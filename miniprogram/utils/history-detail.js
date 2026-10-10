@@ -9,7 +9,7 @@ const TAG_LABELS = {
 function walkView(walk, walkId) {
   if (!walk || walk.walkId !== walkId || walk.schemaVersion !== 1 || walk.completionStatus !== walk.status) throw new Error('Invalid walk.');
   const item = historyItem(Object.fromEntries(ITEM_KEYS.map(key => [key, key === 'rating' ? null : walk[key]])));
-  return { ...historyCard(item), elapsedText: durationText(item.actualDurationSeconds),
+  return { ...historyCard(item), endTime: item.endTime, elapsedText: durationText(item.actualDurationSeconds),
     trajectoryEnabled: item.trajectoryEnabled, lateCleanup: item.trajectoryEndTimeMs > Date.parse(item.endTime),
     recordedPartial: item.trajectoryPartial };
 }
@@ -22,4 +22,10 @@ function feedbackView(record, walkId) {
     recommendText: value.wouldRecommend ? '会' : '不会', positiveTags: labels(value.positiveTags),
     negativeTags: labels(value.negativeTags), comment: value.comment };
 }
-module.exports = { walkView, feedbackView };
+function isRecentCompletion(endTime, now = Date.now()) {
+  if (typeof endTime !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(endTime)) return false;
+  const end = Date.parse(endTime);
+  return Number.isSafeInteger(end) && end > 0 && new Date(end).toISOString() === endTime &&
+    Number.isSafeInteger(now) && now >= end && now - end <= 5 * 60 * 1000;
+}
+module.exports = { walkView, feedbackView, isRecentCompletion };

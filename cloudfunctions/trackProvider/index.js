@@ -3,6 +3,7 @@ const axios = require("axios");
 const { loadConfig } = require("./config");
 const { createTrackClient } = require("./track-client");
 const { createWalkStore } = require('./walk-store');
+const { createQuotaStore, createHistoryLimiter } = require('./history-limiter');
 const {
   createTrackHandler,
   publicFailure
@@ -29,6 +30,9 @@ exports.main = async event => {
       client,
       // Lazy: active uploads/entity preparation do not acquire new database dependencies.
       walkStore: { getWalk: walkId => createWalkStore(cloud.database({ throwOnNotFound: false })).getWalk(walkId) },
+      historyLimiter: createHistoryLimiter({ store: {
+        transaction: work => createQuotaStore(cloud.database({ throwOnNotFound: false })).transaction(work)
+      } }),
       getOpenId: () => {
         const context = cloud.getWXContext();
         return context && context.OPENID;

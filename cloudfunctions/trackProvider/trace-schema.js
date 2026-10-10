@@ -18,6 +18,8 @@ const MESSAGES = {
   TRACK_UPLOAD_FAILED: 'Unable to upload walking trajectory.',
   TRACK_UPLOAD_REJECTED: 'Walking trajectory point was rejected.',
   TRACK_SEARCH_FAILED: 'Unable to query walking trajectory.',
+  TRACK_SEARCH_RATE_LIMITED: 'Walking trajectory query limit reached. Try again later.',
+  TRACK_RATE_LIMIT_STORE_FAILED: 'Walking trajectory query quota is temporarily unavailable.',
   TRACK_SEARCH_TOO_LARGE: 'Walking trajectory is too large to query safely.',
   TRACK_SEARCH_PAGINATION_FAILED: 'Unable to complete walking trajectory query.',
   TRACK_PROVIDER_REJECTED: 'Tencent Track Cloud rejected the request.',

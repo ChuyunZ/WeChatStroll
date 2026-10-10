@@ -342,7 +342,21 @@ the dedicated `history-trace.searchWalkTrace({ walkId })` Service returns the
 validated trace with bounded empty-result retries. Generic public `searchTrace`
 range requests are retired. See the [complete trace contract](history-trace.md)
 for exact point/metric fields, errors, boundary filtering, shared-Entity isolation
-limitations and legacy migration. No UI integration or deployment is included.
+limitations and legacy migration. UI and rollout requirements are described below.
+
+Phase 3B now provides the [native detail UI](history-detail.md). P1 keeps the exact
+Cloud Function request unchanged and adds a local second Service argument
+`{retryEmpty: boolean}` (default true for compatibility). Detail enables empty
+500/1000ms retries only for validated completion age 0–5 minutes; older walks use
+one call. Each detail visit permits an initial click plus two manual retries with
+60 seconds between accepted clicks. Server authorization precedes an atomic
+20-per-user rolling-hour reservation in ADMINONLY `history_trace_rate_limits`,
+before Entity/search. Same-second/no-provider results use no quota; failures after
+reservation still count. One logical search slot may involve multiple HTTP pages.
+New safe errors: `TRACK_SEARCH_RATE_LIMITED` (quota full) and
+`TRACK_RATE_LIMIT_STORE_FAILED` (infrastructure/state failure). Neither auto-retries.
+See the trace contract for schema, conflict retries and mandatory development
+collection creation before deploying P1. No remote change is performed by this work.
 
 # Walk (all fields are required)
 

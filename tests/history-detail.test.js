@@ -28,7 +28,7 @@ beforeEach(() => {
     setData: jest.fn(function (values) { Object.assign(this.data, values); }) }; };
   require('../miniprogram/pages/history-detail/history-detail');
 });
-afterEach(() => { jest.useRealTimers(); delete global.wx; delete global.Page; });
+afterEach(() => { clearTimeout(page._cooldownTimer); jest.useRealTimers(); delete global.wx; delete global.Page; });
 test.each(['completed', 'ended_early'])('real service validates and displays %s without loading GPS', async status => {
   walk.status = walk.completionStatus = status;
   await enter();
@@ -100,18 +100,20 @@ test('explicit GPS query, double tap guard, singleton map and no persistence or 
   for (const name of ['setStorage', 'setStorageSync', 'getLocation', 'startLocationUpdateBackground']) expect(wx[name]).not.toHaveBeenCalled();
 });
 test('GPS error is safe and isolated; manual retry succeeds', async () => {
+  jest.useFakeTimers();
   await enter(); const basic = page.data.walk, review = page.data.feedback;
   wx.cloud.callFunction.mockRejectedValueOnce(new Error('provider secret')); await page.loadTrace();
   expect(page.data.gpsState).toBe('error'); expect(page.data.walk).toBe(basic); expect(page.data.feedback).toBe(review);
+  await jest.advanceTimersByTimeAsync(60000);
   await page.loadTrace(); expect(page.data.gpsState).toBe('ready'); expect(JSON.stringify(page.data)).not.toContain('secret');
 });
 test.each([0, 1, 3])('partial trace with %i points stays neutral and empty retry is bounded', async count => {
-  jest.useFakeTimers(); await enter();
+  jest.useFakeTimers(); jest.setSystemTime(Date.parse(walk.endTime) + 1000); await enter();
   trace = resultTrace(Array.from({ length: count }, (_, i) => ({ ...point, latitude: 31 + i * .00001, timestampMs: point.timestampMs + i * 15000 })), true);
   const query = page.loadTrace(); await jest.advanceTimersByTimeAsync(1500); await query;
   expect(page.data.tracePartial).toBe(true); expect(page.data.gpsState).toBe(count ? 'ready' : 'empty');
   expect(calls('trackProvider')).toHaveLength(count ? 1 : 3);
-  if (!count) { trace = resultTrace(); await page.loadTrace(); expect(page.data.gpsState).toBe('ready'); }
+  if (!count) { trace = resultTrace(); await jest.advanceTimersByTimeAsync(58500); await page.loadTrace(); expect(page.data.gpsState).toBe('ready'); }
 });
 test.each(['onHide', 'onUnload'])('late trace after %s never updates or retains GPS', async lifecycle => {
   await enter(); const pending = deferred(); wx.cloud.callFunction.mockImplementationOnce(() => pending.promise);
@@ -150,8 +152,10 @@ test.each([null, { ...resultTrace(), partial: 'true' }, resultTrace([{ ...point,
   expect(page.data.walkState).toBe('ready'); expect(page.data.feedbackState).toBe('ready'); expect(calls('trackProvider')).toHaveLength(1);
 });
 test('an older GPS query cannot overwrite a newer result after hide/show', async () => {
+  jest.useFakeTimers();
   await enter(); const pending = deferred(); wx.cloud.callFunction.mockImplementationOnce(() => pending.promise);
   const old = page.loadTrace(); page.onHide(); await page.onShow(); expect(page.data.gpsState).toBe('idle');
+  await jest.advanceTimersByTimeAsync(60000);
   await page.loadTrace(); const current = page.data.map; page.setData.mockClear();
   pending.resolve({ result: { success: true, trace: resultTrace([{ ...point, latitude: 32 }], true) } }); await old;
   expect(page.data.map).toBe(current); expect(page.data.tracePartial).toBe(false); expect(page.setData).not.toHaveBeenCalled();
@@ -172,4 +176,49 @@ test('late cleanup and recorded partial are independent explanations', async () 
   walk.trajectoryEndTimeMs += 3314; walk.trajectoryPartial = false; await enter();
   expect(page.data.walk).toMatchObject({ lateCleanup: true, recordedPartial: false });
   expect(calls('trackProvider')).toHaveLength(0);
+});
+test.each([0, 299999, 300000, 300001, -1])('completion age %i selects bounded automatic empty retries', async age => {
+  jest.useFakeTimers(); jest.setSystemTime(Date.parse(walk.endTime) + age);
+  await enter(); trace = resultTrace([], true);
+  const query = page.loadTrace(); await jest.advanceTimersByTimeAsync(1500); await query;
+  expect(calls('trackProvider')).toHaveLength(age >= 0 && age <= 300000 ? 3 : 1);
+  expect(page._traceAttempts).toBe(1);
+  expect(calls('trackProvider').every(([args]) => Object.keys(args.data).sort().join(',') === 'action,walkId')).toBe(true);
+});
+test.each(['bad', '2026-02-30T00:00:00.000Z', null, 42])('invalid completion %j cannot enable empty retries', value => {
+  const { isRecentCompletion } = require('../miniprogram/utils/history-detail');
+  expect(isRecentCompletion(value)).toBe(false);
+  expect(isRecentCompletion(walk.endTime, NaN)).toBe(false);
+});
+test('manual budget spans empty and errors; exact 60-second boundaries and hide/show retain it', async () => {
+  jest.useFakeTimers(); jest.setSystemTime(Date.parse(walk.endTime) + 3600000); await enter(); trace = resultTrace([]);
+  await page.loadTrace(); expect(calls('trackProvider')).toHaveLength(1); expect(page.data.gpsCooldown).toBe(true);
+  await page.loadTrace(); page.onHide(); await jest.advanceTimersByTimeAsync(59999); await page.onShow();
+  await page.loadTrace(); expect(calls('trackProvider')).toHaveLength(1);
+  await jest.advanceTimersByTimeAsync(1); expect(page.data.gpsCooldown).toBe(false);
+  wx.cloud.callFunction.mockRejectedValueOnce(new Error('network')); await page.loadTrace();
+  expect(page.data.gpsState).toBe('error'); expect(page._traceAttempts).toBe(2);
+  await jest.advanceTimersByTimeAsync(60000); await page.loadTrace();
+  expect(page.data.gpsExhausted).toBe(true); expect(calls('trackProvider')).toHaveLength(3);
+  page.onHide(); await jest.advanceTimersByTimeAsync(3600000); await page.onShow(); await page.loadTrace();
+  expect(calls('trackProvider')).toHaveLength(3); expect(page.data.gpsExhausted).toBe(true);
+  expect(wx.setStorageSync).not.toHaveBeenCalled();
+});
+test('a genuinely new page instance has its own budget without entry GPS calls', async () => {
+  jest.useFakeTimers(); await enter(); await page.loadTrace(); page.onUnload();
+  jest.resetModules(); require('../miniprogram/pages/history-detail/history-detail'); await enter();
+  expect(page._traceAttempts).toBe(0); expect(page.data.gpsExhausted).toBe(false); expect(calls('trackProvider')).toHaveLength(1);
+  await page.loadTrace(); expect(calls('trackProvider')).toHaveLength(2);
+});
+test.each(['TRACK_SEARCH_RATE_LIMITED', 'TRACK_RATE_LIMIT_STORE_FAILED'])('server quota error %s uses safe Chinese and cooldown', async code => {
+  jest.useFakeTimers(); await enter();
+  wx.cloud.callFunction.mockResolvedValueOnce({ result: { success: false, error: { code, message: 'secret hash' } } });
+  await page.loadTrace(); expect(page.data.gpsError).toBe(code === 'TRACK_SEARCH_RATE_LIMITED' ? '定位记录查询过于频繁，请稍后再试。' : '定位记录暂时无法加载。');
+  expect(page.data.gpsCooldown).toBe(true); await page.loadTrace(); expect(calls('trackProvider')).toHaveLength(1);
+  expect(JSON.stringify(page.data)).not.toContain('secret');
+});
+test('retry controls are disabled by cooldown/budget and text uses user-select', () => {
+  const wxml = fs.readFileSync('miniprogram/pages/history-detail/history-detail.wxml', 'utf8');
+  expect((wxml.match(/disabled="\{\{gpsCooldown \|\| gpsExhausted\}\}"/g) || [])).toHaveLength(3);
+  expect(wxml).toContain('本次查看次数已达上限'); expect(wxml).toContain('user-select="{{true}}"'); expect(wxml).not.toMatch(/\sselectable[\s>]/);
 });
