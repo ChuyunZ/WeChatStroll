@@ -229,6 +229,9 @@ function hasUnsupportedParkCount(text, r) {
   return false;
 }
 function hasUnsupportedOriginOrInterior(text) {
+  // An ordered waypoint is never verified as the user's origin, including a
+  // point-to-point route's first stop. “从POI甲到POI乙” implies otherwise.
+  if (/(?:从|由|自)【已知地点】(?:附近)?(?:到|至|前往|走向|抵达)/.test(text)) return true;
   if (/(?:从|由|自)【已知地点】(?:附近)?(?:出发|启程|起步|开始)|以【已知地点】(?:作为|为)起点|(?:起点|出发点)(?:是|位于|设在|在)【已知地点】|(?:起于|始于)【已知地点】/.test(text)) return true;
   // A POI category/name is not verified evidence of a traversed park footpath,
   // a quiet inner corner or even entering the venue.
