@@ -1,14 +1,26 @@
 const fs = require('fs');
 let page;
 beforeEach(() => {
-  jest.resetModules(); global.wx = { navigateTo: jest.fn() };
+  jest.resetModules();
+  // A fresh Home should still open Preferences when reconciliation finds no active walk.
+  jest.doMock('../miniprogram/services/active-walk-session', () => ({
+    reconcileActiveWalk: jest.fn().mockResolvedValue(null)
+  }));
+  global.wx = {
+    navigateTo: jest.fn(({ success }) => { if (success) success(); }),
+    showToast: jest.fn()
+  };
   global.Page = definition => { page = definition; };
   require('../miniprogram/pages/home/home');
+  page.onLoad();
+  page.onShow();
 });
 afterEach(() => { delete global.wx; delete global.Page; });
-test('Home opens Profile and retains the original planning navigation', () => {
-  page.goProfile(); expect(wx.navigateTo).toHaveBeenLastCalledWith({ url: '/pages/profile/profile' });
-  page.goPreference(); expect(wx.navigateTo).toHaveBeenLastCalledWith({ url: '/pages/preferences/preferences' });
+test('Home opens Profile and retains the original planning navigation', async () => {
+  await page.goPreference();
+  expect(wx.navigateTo).toHaveBeenLastCalledWith(expect.objectContaining({ url: '/pages/preferences/preferences' }));
+  page.goProfile();
+  expect(wx.navigateTo).toHaveBeenLastCalledWith({ url: '/pages/profile/profile' });
   const config = JSON.parse(fs.readFileSync('miniprogram/app.json', 'utf8'));
   expect(config.pages).toContain('pages/profile/profile'); expect(config.tabBar).toBeUndefined();
 });
