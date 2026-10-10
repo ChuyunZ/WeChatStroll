@@ -156,7 +156,19 @@ test('8 excluded singleton sets: real Add/Correction/Optimizer/Validator finds v
   const { page, generated } = await startAndPrepare()
   const beforeMap = getWalkingSegment.mock.calls.length
   const beforeAI = calls.filter(c => c.name === 'aiRoutePlanner').length
-  await page.showOtherRoutes()
+  const logSpy = jest.spyOn(console, 'log')
+  let acceptedLogs
+  try {
+    await page.showOtherRoutes()
+    acceptedLogs = logSpy.mock.calls.filter(([label]) =>
+      label === '[Manual AI Planning] Route accepted:')
+  } finally {
+    logSpy.mockRestore()
+  }
+  expect(acceptedLogs).toEqual([[
+    '[Manual AI Planning] Route accepted:',
+    { attempt: 0, action: 'add', source: 'deterministic-correction' }
+  ]])
   const newMapCalls = getWalkingSegment.mock.calls.length - beforeMap
   const newAICalls = calls.filter(c => c.name === 'aiRoutePlanner').length - beforeAI
   expect(newAICalls).toBe(0)
