@@ -903,7 +903,7 @@ Page({
               this._rawRoutes = this.rankCurrentRoutes(newRawRoutes);
               this.rememberSurfacedRoute(resultRoute);
               this._manualAlternativeActionCount++;
-              this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+              this.renderRoutes();
               // Aggregate-only acceptance event; never expose route IDs or POI details.
               console.log('[Manual AI Planning] Route accepted:', {
                 attempt: round,
