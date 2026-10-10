@@ -290,8 +290,14 @@ feedback object when already saved. The walk must exist and belong to the caller
 ~~~
 
 Required: valid walkId, integer rating 1-5, observedCrowdLevel low/medium/high,
-real boolean wouldRecommend, and both tag arrays (empty allowed). Comment is
-optional, trimmed, empty becomes null, maximum input length 500 characters.
+real boolean wouldRecommend, and both tag arrays (empty allowed). The optional
+`comment` field is now presented in the Mini Program as a personal **散步日志**
+rather than AI feedback; the API field name and version-1 schema are unchanged.
+It is trimmed, empty becomes null, and the maximum input length is 500 UTF-16
+code units. The journal is saved only together with a valid evaluation, remains
+read-only in History Detail, and is not submitted to AI personalization. Choosing
+Skip saves neither evaluation nor unsaved journal; the terminal walk remains.
+See [History Detail](history-detail.md) for the UI and storage limitations.
 Positive tags: nice_view, quiet, comfortable_route, duration_good.
 Negative tags: too_crowded, too_quiet, distance_too_long, distance_too_short,
 duration_too_long, duration_too_short, route_hard_to_walk, pois_not_interesting.

@@ -26,8 +26,12 @@
       <view class="tags"><text wx:for="{{feedback.positiveTags}}" wx:key="key" class="tag">{{item.text}}</text></view>
       <text wx:if="{{feedback.negativeTags.length}}" class="label">希望改进的</text>
       <view class="tags"><text wx:for="{{feedback.negativeTags}}" wx:key="key" class="tag negative">{{item.text}}</text></view>
-      <text wx:if="{{feedback.comment}}" class="comment" user-select="{{true}}">{{feedback.comment}}</text>
     </view>
+  </view>
+  <view wx:if="{{feedbackState === 'ready' && feedback.comment}}" class="card">
+    <view class="row"><text class="section-title">散步日志</text><text class="badge">个人记录</text></view>
+    <text class="note">留给自己回顾的文字，不参与 AI 路线推荐。</text>
+    <text class="comment" user-select="{{true}}">{{feedback.comment}}</text>
   </view>
   <view class="card">
     <text class="section-title">实际定位记录</text>

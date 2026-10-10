@@ -76,7 +76,9 @@ Page({
       this.data.skipping
     ) return;
     this.setData({ skipping: true });
-    wx.showModal({ title: '跳过本次评价？', content: '本次散步记录仍会保留，但这次评价不会保存。',
+    wx.showModal({ title: '跳过本次评价？', content: this.data.comment.trim()
+      ? '跳过后，本次评价和未保存的散步日志都会丢失；散步记录仍会保留。'
+      : '本次散步记录仍会保留，但这次评价不会保存。',
       success: result => {
         if (!result.confirm) return;
         try {
