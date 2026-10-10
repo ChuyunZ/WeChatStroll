@@ -228,7 +228,15 @@ function restoreCloudWalk(walk, route) {
   return result.session;
 }
 
+// Foreground Home/Walking recovery waits for a cold-launch stale check, so the
+// same old Walk cannot race itself into a misleading navigation error.
+let startupStaleCheck = null;
 async function reconcileActiveWalk(route = null) {
+  if (startupStaleCheck) await startupStaleCheck;
+  return reconcileActiveWalkImpl(route);
+}
+
+async function reconcileActiveWalkImpl(route = null) {
   const records = require("./walk-records");
   const local = getActiveWalkSession();
   if (local) {
@@ -273,10 +281,14 @@ async function reconcileActiveWalk(route = null) {
 async function cleanupStaleActiveWalk() {
   const local = getActiveWalkSession();
   if (!local || Date.now() - local.startTimeMs < MAX_ACTIVE_WALK_AGE_MS) return false;
+  const check = reconcileActiveWalkImpl();
+  startupStaleCheck = check;
   try {
-    await reconcileActiveWalk();
+    await check;
   } catch (error) {
     if (!error || error.code !== "WALK_ABANDONED") throw error;
+  } finally {
+    if (startupStaleCheck === check) startupStaleCheck = null;
   }
   return true;
 }
