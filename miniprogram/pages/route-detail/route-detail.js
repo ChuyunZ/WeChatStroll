@@ -172,9 +172,15 @@ Page({
     } else {
       // Feedback is optional. Once the user chooses to view another route,
       // discard only the previous local feedback handoff, never the walk record.
-      const pending = activeWalkSessionService.getPendingWalkResult();
-      if (pending && pending.walkId) {
-        activeWalkSessionService.clearPendingWalkResult(pending.walkId);
+      try {
+        const pending = activeWalkSessionService.getPendingWalkResult();
+        if (pending && pending.walkId) {
+          activeWalkSessionService.clearPendingWalkResult(pending.walkId);
+        }
+      } catch (error) {
+        // An optional local handoff must not break viewing the selected route.
+        // Keep the durable walk record untouched; cleanup can be retried later.
+        console.warn("[Route Detail] Could not clear pending feedback handoff.", error);
       }
     }
   },
