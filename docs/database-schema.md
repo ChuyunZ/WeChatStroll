@@ -280,8 +280,10 @@ geometry remains exclusively in Tencent Track Cloud; no segment cache is introdu
 
 1. Create walks and active_walks in the intended CloudBase environment.
 2. Configure these collections for server-only access (deny direct Mini Program reads
-   and writes); ownership enforcement is in walkStore. No custom query index is
-   required: operations use document IDs.
+   and writes); ownership enforcement is in walkStore. Lifecycle operations use
+   document IDs and do not require custom query indexes. Issue #87 History queries
+   and counts additionally depend on the existing Issue #81 compound walk/feedback
+   indexes (see [Walking History](walking-history.md)).
 3. Deploy cloudfunctions/walkStore with its locked dependencies, then release the
    client changes together. It uses DYNAMIC_CURRENT_ENV and needs no new variables.
 4. On a test account, verify Start/retry, concurrent Start, app recreation, Finish/End
