@@ -2,9 +2,10 @@
 
 ## What the real observation establishes
 
-The reported CloudBase `hy3` experiment used 12 verified POIs, a 30-minute
-out-and-back request and five raw candidates per variant. Baseline retained
-five candidates; treatment retained three. These counts alone do **not** identify
+An earlier CloudBase `hy3` experiment used 12 verified POIs, a 30-minute
+out-and-back request and five raw candidates per variant. The earlier control
+retained five candidates; the initial treatment retained three. These counts
+alone do **not** identify
 the two removal reasons. No raw user payload has been copied into this repository.
 Cloud contract acceptance also does not establish real walking-route validity.
 
@@ -105,20 +106,46 @@ Commands: `npm test -- --runInBand`,
 All benchmark outcome/request metrics match the prior recorded synthetic results.
 No real model or map improvement is claimed.
 
-## Next experiment (requires explicit authorization)
+## Completed exploratory provider tests (2026-10-10)
 
-A new controlled real-model A/B is justified to test whether whole-batch guidance
-reduces contract attrition, but it has **not** been run. Hold model, verified pool,
-preferences and generation settings fixed; alternate baseline/treatment order over
-repeated trials. Use identical diagnostics in both variants so only the prompt
-differs. Record aggregate retained-count distribution, primary removal reasons,
-multi-POI retention, invalid/empty batch rates and model latency. Keep raw inputs
-and outputs out of public CI/issue logs. Choose repetitions and paid-call budget
-with the owner before running.
+After the earlier five-raw-to-three-retained result, the prompt was refined with
+whole-batch self-check guidance. An authorized, temporary CloudBase deployment
+of `aiRoutePlannerIssue91AB` was used for **live** `hy3` prompt A/B tests
+and Tencent Walking API evaluations in WeChat DevTools. The separately deployed
+test function is **not** the production `aiRoutePlanner`.
 
-Only after that structural check should an authorized real-map comparison assess
-time to first valid route, walking-segment calls and actual validation outcomes.
-More retained/multi-POI candidates alone does not prove better routes or latency.
-Keep PR #108 Draft pending real evidence. Production `aiRoutePlanner` and the
-shared `aiRoutePlannerIssue91AB` have not been deployed, altered or invoked by this
-change; any use of that test function requires separate explicit permission.
+In four model-only draws per variant using the same nominal 12 verified Guangzhou
+POIs and 30-minute out-and-back request, the pinned prior-prompt control
+(`72f8155`) retained 11/20 raw sets (4 multi-POI), while the whole-batch
+self-check treatment (`3f0134a`) retained 20/20 (18 multi-POI). Retention
+means structural cloud-contract acceptance, **not** that a walking route passes
+real duration validation. In an excluded-set stress test, 3/15 treatment
+proposals still repeated previously excluded complete sets across rounds.
+
+Three additional live HY3/Tencent first-route DevTools trials per prompt variant
+recorded mean generation-to-first-valid-route latency of **22.709 s control vs
+17.135 s treatment**. The first AI candidate succeeded in 2/3 control runs and
+3/3 treatment runs; all six sessions obtained a valid route with one initial HY3
+request each. These are descriptive small, nonrandomized samples: provider
+latencies and model draws vary, and the control is an **older experimental prompt
+on this PR**, not a pinned `develop` implementation. This is neither a causal
+performance estimate nor end-user screen-paint latency.
+
+A separate sparse-POI simulated-location check found one verified park POI and
+produced a valid 20-minute loop request (18-minute / 1,202-meter route). At a
+nearby starting point, the only POI was approximately 4 meters away; its
+8-meter loop had zero reported duration and failed the unchanged validator.
+This is a route-coverage boundary case, not evidence for relaxing validation.
+
+## Remaining acceptance and rollout conditions
+
+The exploratory provider tests above **have been run**, but device acceptance,
+broader durations, controlled `develop` versus PR comparisons, and a production
+rollout decision are still outstanding. The PR is ready for **code review**, not
+approved for production deployment or merge on the strength of these samples.
+The production `aiRoutePlanner` has **not** been deployed with this PR's prompt;
+the temporary `aiRoutePlannerIssue91AB` was deployed and invoked only for
+the separate tests described above. Preserve strict validation and provider
+budgets; keep raw prompts, POI identifiers and precise locations out of shared
+test reports. See the PR description for the full test matrix, caveats, and
+temporary-function cleanup requirements.
