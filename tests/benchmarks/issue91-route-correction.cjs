@@ -3,8 +3,8 @@
 /*
  * Issue #91: deterministic, reproducible, OFFLINE correction microbenchmark.
  * Run inside the real repository (after applying Issue #91 changes):
- *   node tests/benchmarks/issue91_route_correction_benchmark.cjs
- * Or: WECHATSTROLL_ROOT=/path/to/WeChatStroll node issue91_route_correction_benchmark.cjs
+ *   node tests/benchmarks/issue91-route-correction.cjs
+ * Or: WECHATSTROLL_ROOT=/path/to/WeChatStroll node tests/benchmarks/issue91-route-correction.cjs
  *
  * Loads the ACTUAL route-correction and route-graph modules from the selected
  * checkout. The Walking Segment provider and candidate builder are MOCKED.
