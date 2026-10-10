@@ -3,6 +3,15 @@ const SESSION = {
   status: 'active',
   walkId: 'walk-existing',
   routeId: 'saved route/& 123',
+  route: {
+    routeId: 'saved route/& 123',
+    durationMinutes: 20,
+    distanceMeters: 1200,
+    polyline: [
+      { latitude: 30.3798, longitude: 120.0295 },
+      { latitude: 30.3800, longitude: 120.0297 }
+    ]
+  },
   startTimeMs: Date.parse('2026-10-10T12:00:00Z')
 };
 
@@ -55,6 +64,43 @@ test('Home CTA resumes an existing walk without requesting new preferences or ro
     url: '/pages/walking/walking?routeId=saved%20route%2F%26%20123'
   }));
   expect(wx.showToast).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['route only has identity', { routeId: SESSION.routeId }],
+  ['polyline missing', { ...SESSION.route, polyline: undefined }],
+  ['polyline only has one point', { ...SESSION.route, polyline: [SESSION.route.polyline[0]] }],
+  ['invalid coordinate', { ...SESSION.route, polyline: [{ latitude: NaN, longitude: 120 }, SESSION.route.polyline[1]] }],
+  ['invalid duration', { ...SESSION.route, durationMinutes: undefined }],
+  ['invalid distance', { ...SESSION.route, distanceMeters: -1 }],
+  ['mismatched route identity', { ...SESSION.route, routeId: 'different-route' }]
+])('Home refuses incomplete active route snapshot: %s', async (_reason, badRoute) => {
+  const storedSession = { ...SESSION, route: badRoute };
+  reconcileActiveWalk.mockResolvedValue(storedSession);
+
+  await page.goPreference();
+
+  expect(reconcileActiveWalk).toHaveBeenCalledTimes(1);
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(wx.showToast).toHaveBeenCalledWith({
+    title: '原路线数据缺失，暂时无法恢复散步',
+    icon: 'none'
+  });
+  expect(storedSession.route).toBe(badRoute);
+  expect(storedSession.walkId).toBe('walk-existing');
+});
+
+test('incomplete route does not block retry after its saved geometry is repaired', async () => {
+  reconcileActiveWalk.mockResolvedValueOnce({
+    ...SESSION, route: { routeId: SESSION.routeId }
+  }).mockResolvedValueOnce(SESSION);
+
+  await page.goPreference();
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+
+  await page.goPreference();
+  expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+  expect(wx.navigateTo.mock.calls[0][0].url).toContain('/pages/walking/walking?routeId=');
 });
 
 test('Home CTA follows existing questionnaire flow when no active walk exists', async () => {
