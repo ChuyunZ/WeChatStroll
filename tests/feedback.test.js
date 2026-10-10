@@ -5,7 +5,7 @@ beforeEach(() => {
   jest.resetModules(); storage = { pendingWalkResult: { ...pending } };
   records = { getFeedback: jest.fn().mockResolvedValue(null), submitFeedback: jest.fn().mockResolvedValue({ created: true, feedback: { walkId: 'walk-1' } }) };
   jest.doMock('../miniprogram/services/feedback-records', () => records);
-  global.wx = { getStorageSync: key => storage[key], removeStorageSync: jest.fn(key => { delete storage[key]; }), showModal: jest.fn(), reLaunch: jest.fn() };
+  global.wx = { getStorageSync: key => storage[key], setStorageSync: jest.fn((key, value) => { storage[key] = value; }), removeStorageSync: jest.fn(key => { delete storage[key]; }), showModal: jest.fn(), reLaunch: jest.fn() };
   global.Page = definition => { page = { ...definition, data: JSON.parse(JSON.stringify(definition.data)), setData(change) { Object.assign(this.data, change); } }; };
   require('../miniprogram/pages/feedback/feedback');
   sessions = require('../miniprogram/services/active-walk-session');
