@@ -3,8 +3,9 @@
 This describes the current repository implementation and the development validation
 completed on 2026-10-04. Direct CloudBase smoke tests, legacy-wrapper forwarding and
 a Mini Program end-to-end route-generation check passed in the development environment.
-Technical API functionality does not establish permission for data use, AI processing
-or persistence; that remains a separate release checkpoint.
+Technical API functionality alone does not establish permission for data use.
+Tencent's 2026-10-08 and 2026-10-09 written replies clarify the POI storage
+restriction and a narrow temporary device-side recovery exception; see below.
 
 ## Architecture
 
@@ -312,14 +313,31 @@ distinct from a genuine route-not-found result.
 
 ## Data-use and deployment checkpoint
 
-Until Tencent confirms the intended WebService data-use terms, do not add raw
-provider response/payload persistence or a persistent segment L2 cache. Planned-route
-persistence and AI-use policy remain subject to confirmation. Normalization removes
-raw fields but does not itself confer permission to store or process derived data.
+Tencent Location Service replied on 2026-10-08: **“经核实 Poi 不允许存储，其他没限制。”**
+The original inquiry included AI use and provider persistence. Interpret this
+conservatively: do not persist Tencent POIs or infer blanket authorization for
+provider-derived permanent caches. On 2026-10-09 Tencent separately confirmed
+**“经核实这种使用方法是可以的”** to a specific follow-up: temporary **on-device**
+POI/route caching only during an active Mini Program Walk, solely to resume an
+interrupted Walk, followed by removal after completion. This does not authorize
+CloudBase POI persistence, permanent route/segment caches or indefinite local
+history. Never add persistent segment L2 caches on this limited confirmation.
 
-`activeWalkSession` currently stores a route snapshot locally. That existing behavior
-is unchanged and must be reviewed as a deployment/data-policy checkpoint, not treated
-as an approved exception. Issue #79's `walkStore` persistence is deliberately narrower:
+`activeWalkSession.route` is stored locally for an active Walk. Home and Walking
+reconcile local and CloudBase walk identity on resume. The existing backend
+12-hour abandonment boundary is supplemented by a best-effort **cold-launch**
+verification of aged local sessions. The full route is deleted only after
+CloudBase confirms terminal/abandoned status; local clock expiry alone or a
+network error never silently removes an active lock. Offline periods cannot
+execute background cleanup. The terminal `pendingWalkResult` now retains only
+allowlisted Feedback/recovery metadata: walkId, application routeId,
+start/end time, duration, completion state and optional trajectory flags/time
+boundary. No route geometry/POIs/polyline is persisted after confirmed
+completion. On first read after upgrading, legacy full-route pending snapshots
+are rewritten without Route fields; transient device-write failures retry
+on the next read. Existing optional Feedback submit/skip/leave cleanup remains.
+
+Issue #79's `walkStore` persistence is deliberately narrower:
 it stores lifecycle/questionnaire metadata plus a provider-neutral application
 `routeId`, but no Tencent POI IDs, route geometry, planned coordinates, or provider
 payloads. This does not establish permission to persist a planned-route summary later.
