@@ -567,7 +567,10 @@ describe('bounded manual alternatives', () => {
           { attempt: 1, candidateCount: 0, novelCandidateCount: 0, emptyBatch: true },
           { attempt: 2, candidateCount: 0, novelCandidateCount: 0, emptyBatch: true }
         ]);
-      expect(warn).toHaveBeenCalledWith('[Manual AI Planning] Exhausted:', { maxAttempts: 3 });
+      expect(warn).toHaveBeenCalledWith('[Manual AI Planning] Exhausted:', {
+        attemptedAiBatches: 2, maxAttempts: 3
+      });
+      expect(wx.showToast).toHaveBeenCalledWith({ title: '暂无更多可用路线', icon: 'none' });
       expect(log).not.toHaveBeenCalledWith('[Manual AI Planning] Route accepted:', expect.anything());
     } finally {
       log.mockRestore();
