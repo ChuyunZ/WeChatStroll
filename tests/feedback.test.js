@@ -107,3 +107,49 @@ test('storage cleanup failure still displays confirmed cloud success', async () 
   await load(); fill(); wx.removeStorageSync.mockImplementation(() => { throw new Error('storage'); });
   await page.submitFeedback(); expect(page.data.state).toBe('success'); expect(storage.pendingWalkResult).toBeTruthy();
 });
+
+test('leaving optional feedback without submitting discards only the matching pending handoff', async () => {
+  await load(); fill();
+  page.onUnload();
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(records.submitFeedback).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+});
+
+test('app backgrounding does not implicitly skip feedback', async () => {
+  await load();
+  expect(page.onHide).toBeUndefined();
+  expect(storage.pendingWalkResult).toBeTruthy();
+  expect(records.submitFeedback).not.toHaveBeenCalled();
+});
+
+test('feedback unload cannot clear a different newer walk identity', async () => {
+  await load();
+  storage.pendingWalkResult = { ...pending, walkId: 'walk-later' };
+  page.onUnload();
+  expect(storage.pendingWalkResult.walkId).toBe('walk-later');
+  expect(records.submitFeedback).not.toHaveBeenCalled();
+});
+
+test('leaving while submit is in flight retains retry handoff until outcome', async () => {
+  await load(); fill();
+  let resolve;
+  records.submitFeedback.mockImplementation(() => new Promise(done => { resolve = done; }));
+  const writing = page.submitFeedback();
+  page.onUnload();
+  expect(storage.pendingWalkResult).toBeTruthy();
+  resolve({ created: true });
+  await writing;
+  expect(storage.pendingWalkResult).toBeUndefined();
+});
+
+test('late feedback lookup cannot show form after unload', async () => {
+  let resolve;
+  records.getFeedback.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  const loading = load();
+  page.onUnload();
+  resolve(null);
+  await loading;
+  expect(page.data.state).toBe('loading');
+  expect(storage.pendingWalkResult).toBeUndefined();
+});
