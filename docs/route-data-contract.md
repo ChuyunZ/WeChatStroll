@@ -267,8 +267,17 @@ Future contract extensions require verified data support and review of permitted
 
 New fields should be added without unnecessarily renaming the existing MVP fields.
 
-This shape is not a grant of persistence or AI-use permission. Tencent WebService
-data-use boundaries remain unconfirmed; do not add raw response persistence or a
-persistent segment L2 cache. `activeWalkSession` currently stores a route snapshot
-locally and remains a deployment/data-policy checkpoint. Actual GPS trajectory via
-Track Cloud is a separate flow. See [deployment and data boundaries](map-provider-deployment.md).
+This runtime shape is **not** a grant of permanent storage permission. Tencent's
+2026-10-08 reply prohibits POI storage; the 2026-10-09 follow-up confirms
+**only temporary device-side route/POI caching during an active Walk** for
+interruption recovery. `activeWalkSession.route` must be removed once CloudBase
+confirms terminal or abandoned state (including the 12-hour abandonment check
+after a cold launch). A local clock expiry or network failure must not erase
+a still-unverified active Walk. After completion, `pendingWalkResult` is a
+metadata-only optional Feedback handoff containing walkId, application routeId,
+start/end times, actual duration, completion status and optional trajectory
+metadata; it never stores POIs, route coordinates or polylines. Valid legacy
+full-route terminal handoffs are rewritten at their next read. No raw provider
+responses or persistent planned-route L2 segment cache are authorized. Actual
+user GPS collected with consent through Track Cloud remains a separate flow.
+See [deployment and data boundaries](map-provider-deployment.md).
