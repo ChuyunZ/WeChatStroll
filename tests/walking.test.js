@@ -632,7 +632,6 @@ describe("Walking page", () => {
     expect(wx.getStorageSync("pendingWalkResult")).toEqual(
       expect.objectContaining({
         routeId: TEST_ROUTE.routeId,
-        route: TEST_ROUTE,
         startTime: "2026-10-01T12:00:00.000Z",
         endTime: "2026-10-01T12:12:30.000Z",
         actualDurationSeconds: 750,
@@ -643,6 +642,7 @@ describe("Walking page", () => {
       })
     );
 
+    expect(wx.getStorageSync("pendingWalkResult")).not.toHaveProperty("route");
     expect(page.data.ended).toBe(true);
     expect(page.data.finishing).toBe(true);
     expect(page.data.elapsedSeconds).toBe(750);
