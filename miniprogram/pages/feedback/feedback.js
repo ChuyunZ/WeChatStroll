@@ -11,7 +11,7 @@ Page({
     positiveOptions: options(POSITIVE_TAGS, ['风景不错', '很安静', '路线舒服', '时长刚好']),
     negativeOptions: options(NEGATIVE_TAGS, ['太拥挤', '太安静', '距离太长', '距离太短', '时间太长', '时间太短', '不太好走', '途经地点没意思'])
   },
-  onLoad(query = {}) { this._walkId = query.walkId; return this.loadFeedback(); },
+  onLoad(query = {}) { this._unloaded = false; this._walkId = query.walkId; return this.loadFeedback(); },
   async loadFeedback() {
     if (this._loading) return;
     this._loading = true;
@@ -22,10 +22,12 @@ Page({
       pending = sessions.getPendingWalkResult();
       if (pending && pending.walkId !== this._walkId) { this.setData({ state: 'empty' }); return; }
       const existing = await records.getFeedback(this._walkId);
+      if (this._unloaded) return;
       if (existing) { this.showSuccess(); return; }
       if (!pending) { this.setData({ state: 'empty' }); return; }
       this.setData({ state: 'form', canSkip: true, summary: `${pending.completionStatus === 'completed' ? '已完成散步' : '提前结束'} · ${Math.floor(pending.actualDurationSeconds / 60)} 分钟` });
     } catch (_) {
+      if (this._unloaded) return;
       this.setData({
         state: 'error',
         error: '暂时无法读取评价，请重试。散步记录已保留。',
@@ -90,6 +92,14 @@ Page({
       },
       complete: () => this.setData({ skipping: false })
     });
+  },
+  // Leaving the optional form is an implicit skip, not an incomplete
+  // obligation. Do not clear onHide: app backgrounding isn't a skip.
+  onUnload() {
+    this._unloaded = true;
+    if (this.data.submitting) return; // Keep retry state until cloud confirms outcome.
+    try { sessions.clearPendingWalkResult(this._walkId); }
+    catch (_) { /* Old local handoff cannot block a future walk. */ }
   },
   returnHome() { wx.reLaunch({ url: '/pages/home/home' }); }
 });
