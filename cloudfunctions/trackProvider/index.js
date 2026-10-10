@@ -38,10 +38,11 @@ exports.main = async event => {
         console.info("[Track Provider]", record)
     });
 
-    // CloudBase may inject userInfo. It is transport metadata, never authentication.
-    // All other unexpected fields still reach the strict action validator.
+    // CloudBase injects transport fields. Never use these for authentication:
+    // only cloud.getWXContext().OPENID can identify the current user.
+    // All other unexpected application fields still reach strict validation.
     if (action === 'searchWalkTrace' && event && typeof event === 'object') {
-      const { userInfo, ...request } = event;
+      const { userInfo, tcbContext, ...request } = event;
       return await handler(request);
     }
     return await handler(event);

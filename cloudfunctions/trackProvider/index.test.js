@@ -14,17 +14,27 @@ beforeEach(() => {
   main = require('./index').main;
 });
 afterEach(() => { jest.restoreAllMocks(); jest.dontMock('wx-server-sdk'); jest.dontMock('./config'); jest.dontMock('./track-client'); });
-test('entry point derives context identity and ignores only CloudBase userInfo transport metadata', async () => {
-  const result = await main({ action: 'searchWalkTrace', walkId: 'walk-1', userInfo: { openId: 'forged', appId: 'metadata' } });
+test('entry point ignores CloudBase userInfo and tcbContext, authenticating only via WXContext', async () => {
+  const transport = {
+    userInfo: { openId: 'forged', appId: 'metadata' },
+    tcbContext: { OPENID: 'forged', openId: 'forged', other: 'untrusted' }
+  };
+  const result = await main({ action: 'searchWalkTrace', walkId: 'walk-1', ...transport });
   expect(result.success).toBe(true); expect(cloud.database).toHaveBeenCalledWith({ throwOnNotFound: false });
   expect(result.trace.points).toHaveLength(1);
   cloud.getWXContext.mockReturnValue({ OPENID: 'other-user' });
   client.ensureEntity.mockClear(); client.searchTrace.mockClear();
-  expect((await main({ action: 'searchWalkTrace', walkId: 'walk-1', userInfo: { openId: 'openid-one' } })).error.code).toBe('WALK_NOT_FOUND');
+  expect((await main({ action: 'searchWalkTrace', walkId: 'walk-1',
+    userInfo: { openId: 'openid-one' }, tcbContext: { OPENID: 'openid-one' } })).error.code).toBe('WALK_NOT_FOUND');
   expect(client.ensureEntity).not.toHaveBeenCalled(); expect(client.searchTrace).not.toHaveBeenCalled();
 });
-test('entry point preserves rejection of client-controlled sensitive fields and retired range action', async () => {
-  expect((await main({ action: 'searchWalkTrace', walkId: 'walk-1', OPENID: 'forged' })).error.code).toBe('INVALID_WALK_TRACE_REQUEST');
+test('entry point still rejects unexpected application fields and retired range action', async () => {
+  for (const extra of [{ OPENID: 'forged' }, { ownerKey: 'forged' },
+    { startTimeMs: START_MS }, { endTimeMs: START_MS + 1000 }, { trajectoryPartial: false }]) {
+    expect((await main({ action: 'searchWalkTrace', walkId: 'walk-1',
+      userInfo: { openId: 'forged' }, tcbContext: { OPENID: 'forged' }, ...extra })).error.code)
+      .toBe('INVALID_WALK_TRACE_REQUEST');
+  }
   expect((await main({ action: 'searchTrace', startTimeMs: START_MS, endTimeMs: START_MS + 1000 })).error.code).toBe('TRACK_WALK_REQUIRED');
   expect(cloud.database).not.toHaveBeenCalled(); expect(client.ensureEntity).not.toHaveBeenCalled();
 });
