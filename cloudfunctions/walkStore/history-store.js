@@ -1,5 +1,7 @@
 const { ITEM_KEYS, historyRequest, compareHistory, historyItem, validTotals } = require('./history-schema');
-const WALK_FIELDS = Object.fromEntries(['_id', 'ownerKey', ...ITEM_KEYS.filter(key => key !== 'rating')].map(key => [key, true]));
+// Internal lifecycle guards are projected for validation but never returned to the Mini Program.
+const WALK_FIELDS = Object.fromEntries(['_id', 'ownerKey', 'schemaVersion', 'completionStatus',
+  ...ITEM_KEYS.filter(key => key !== 'rating')].map(key => [key, true]));
 const FEEDBACK_FIELDS = { _id: true, ownerKey: true, walkId: true, rating: true };
 const statuses = ['completed', 'ended_early'];
 function invalidCursor() { throw Object.assign(new Error('Invalid history cursor.'), { code: 'INVALID_HISTORY_CURSOR' }); }
@@ -9,6 +11,9 @@ function rows(result, limit) {
 }
 function publicItem(record, ownerKey) {
   if (!record || record.ownerKey !== ownerKey || record._id !== record.walkId) throw new Error('Invalid history ownership.');
+  if (record.schemaVersion !== 1 || record.completionStatus !== record.status) {
+    throw new Error('Invalid history lifecycle.');
+  }
   return historyItem(Object.fromEntries(ITEM_KEYS.map(key => [key, key === 'rating' ? null : record[key]])));
 }
 function createHistoryStore(db) {
