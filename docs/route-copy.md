@@ -22,6 +22,14 @@ measure** title diversity or departure-time accuracy. The #110 change adds:
 - **Route-specific prompt.** Favor exact verified full POI names, known
   route type and waypoint composition; avoid repetitive generic framing
   such as "换换心情". Never invent scenery or abbreviate location names.
+  A `point_to_point` route does **not** prove that the first waypoint is
+  the actual start or the last POI the user's destination. The prompt
+  explicitly prohibits "从[POI]出发" and "从[POI A]到[POI B]" copy,
+  even with exact verified place names. The mirrored validators also
+  reject the POI-as-origin title pattern. This follows the 2026-10-11
+  00:48 CST development observation: `INVALID_ORIGIN_OR_INTERIOR`
+  in `description` was correctly rejected and the safe card fallback
+  remained visible. No retry or relaxed origin validation was introduced.
 - **Deterministic cross-route presentation.** Each route's model output is
   validated independently as before; the Mini Program then compares final
   card titles in current route order. Exact and sufficiently similar
