@@ -13,5 +13,17 @@ App({
     })
 
     console.log('CloudBase initialized')
+
+    // Sanitize old terminal handoffs and verify old active walks after cold launch.
+    // Never clear an active lock on local time alone; CloudBase is authoritative.
+    try {
+      const sessions = require('./services/active-walk-session')
+      sessions.getPendingWalkResult()
+      void sessions.cleanupStaleActiveWalk().catch(() => {
+        console.warn('[Recovery] Stale walk verification deferred')
+      })
+    } catch (_) {
+      console.warn('[Recovery] Local cleanup deferred')
+    }
   }
 })
