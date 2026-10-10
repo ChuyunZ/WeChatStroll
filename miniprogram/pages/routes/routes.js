@@ -701,6 +701,7 @@ Page({
       let correctionRemainingCandidates = MAX_CORRECTION_CANDIDATES;
       let correctionRemainingSegments = MAX_CORRECTION_NEW_SEGMENTS;
       let consecutiveNoNovelBatches = 0;
+      let attemptedAiBatches = 0;
       for (let round = 0; round <= 3; round++) {
         if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
         let batch = unusedCandidates;
@@ -709,6 +710,7 @@ Page({
           console.log('[Manual AI Planning] Attempt start:', { attempt: round, maxAttempts: 3 });
           let batchCache;
           try {
+            attemptedAiBatches++;
             batchCache = await routeGenerationService.requestManualWaypointCandidates({
               location, preferences: this._routePreferences || {},
               nearbyPois: this._verifiedWaypointPool,
@@ -877,9 +879,11 @@ Page({
       }
       if (isCurrent()) {
         this._manualAlternativeExhausted = true;
-        console.warn('[Manual AI Planning] Exhausted:', { maxAttempts: 3 });
+        console.warn('[Manual AI Planning] Exhausted:', {
+          attemptedAiBatches, maxAttempts: 3
+        });
         wx.showToast({ title: this._verifiedWaypointPool?.length
-          ? "三轮尝试后暂无更多路线" : "暂无更多路线", icon: "none" });
+          ? "暂无更多可用路线" : "暂无更多路线", icon: "none" });
       }
     } catch (error) {
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });
