@@ -699,3 +699,28 @@ test('neutral walk wording and true route duration checks remain unchanged', () 
   expect(contract.validateCopyDetailed({ ...copy, title: '步行99分钟慢慢走走' }, p))
     .toMatchObject({ reason: 'WRONG_MEASUREMENT', field: 'title' });
 });
+
+test('regression 00:48: a point-to-point route does not start at its first known POI', () => {
+  const p = payload();
+  p.routeFacts.routeType = 'point_to_point';
+  p.routeFacts.returnsToStart = false;
+  p.preferences.routeType = 'point_to_point';
+  const safe = {
+    title: '途经人民公园与滨河广场的探索',
+    description: '从当前位置出发，依次途经人民公园与滨河广场。可以按自己的步调走走，留意周边变化，感受这段散步带来的自由空间。',
+    recommendationReason: '你偏好公园环境，可以把这些途经点作为散步时的观察对象，按自己的步调慢慢探索。'
+  };
+  expect(contract.validateCopyDetailed(safe, p)).toEqual({
+    copy: safe, reason: null, field: null
+  });
+  expect(contract.validateCopyDetailed({
+    ...safe, title: '从人民公园到滨河广场慢走'
+  }, p)).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'title'
+  });
+  expect(contract.validateCopyDetailed({
+    ...safe, description: '点对点路线，从人民公园出发，途经滨河广场。沿着路线自行移动，留意周遭变化，按自己的步调探索。'
+  }, p)).toMatchObject({
+    copy: null, reason: 'INVALID_ORIGIN_OR_INTERIOR', field: 'description'
+  });
+});
