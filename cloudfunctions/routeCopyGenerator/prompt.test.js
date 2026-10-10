@@ -59,7 +59,7 @@ test('prompt requests grounded route-specific titles without device-time assumpt
   for (const fragment of [
     '优先用本条路线可验证的差异', '完整的 orderedPois 地点名',
     '不要反复套用', '没有提供计划出发日期',
-    '与出发时间无关', '不要猜测设备时钟', '不能为了独特性'
+    '与出发时间无关', '不要猜测设备时钟', '不要为了独特性'
   ]) expect(prompt).toContain(fragment);
   expect(prompt).toContain('完整名称放不下');
   expect(prompt).toContain('三个字段均不要提任何步行时长或路线距离');
