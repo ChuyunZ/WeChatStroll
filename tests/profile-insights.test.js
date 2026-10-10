@@ -59,6 +59,17 @@ test('duration uses the server-adjusted preference and displays explicit feedbac
   const empty = preferenceProfile(3, { walkChanges: { requestedDurationMinutes: null, preferences: {} } });
   expect(profileInsights(empty).duration).toContain('还没有足够');
 });
+test('duration copy does not imply contradictory feedback affected the preference result', () => {
+  const p = preferenceProfile(3, { feedback: [{
+    positiveTags: ['duration_good'], negativeTags: ['duration_too_long']
+  }] });
+  // Conflicting duration tags are shown as evidence but ignored by the profile builder.
+  expect(p.preferredDurationMinutes).toBe(30);
+  const model = profileInsights(p);
+  expect(model.duration).toBe('根据过去的散步记录，你的时长倾向约为 30 分钟。');
+  expect(model.durationEvidence).toContain('“时长合适” 1 次');
+  expect(model.durationEvidence).toContain('“时间太长” 1 次');
+});
 test.each([-1, -0.35, -0.3499, 0, 0.3499, 0.35, 1, null])('crowd signal threshold and direction: %s', signal => {
   const negative = signal !== null && signal < 0;
   const p = preferenceProfile(3, { feedback: [0, 1].map(() => negative ? { positiveTags: ['quiet'] } : { negativeTags: ['too_quiet'] }) });
