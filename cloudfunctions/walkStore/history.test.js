@@ -82,6 +82,8 @@ test.each([{ ownerKey: 'other' }, { _id: 'wrong' }, { walkId: 'unknown' }, { rat
     expect(await f.list()).toEqual({ success: false, error: { code: 'WALK_STORE_FAILED', message: 'Walk storage is temporarily unavailable.' } });
   });
 test.each([{ ownerKey: 'other' }, { _id: 'wrong' }, { walkId: '../bad' }, { status: 'active' },
+  { schemaVersion: 2 }, { schemaVersion: null }, { completionStatus: null },
+  { completionStatus: 'ended_early' },
   { startTime: '2026-02-30T00:00:00.000Z' }, { endTime: 'bad' }, { actualDurationSeconds: -1 },
   { actualDurationSeconds: 1801 }, { actualDurationSeconds: '1800' }, { requestedDurationMinutes: 121 },
   { routeType: 'unknown' }, { trajectoryEnabled: 1 }, { trajectoryPartial: true }, { trajectoryEndTimeMs: null }])(
@@ -126,13 +128,15 @@ test.each([{}, '', { version: 0, walkId: 'walk-000', endTime: walk(0).endTime },
   expect((await f.list({ cursor })).error.code).toBe('INVALID_HISTORY_CURSOR');
   expect(f.calls).toHaveLength(0);
 });
-test.each(['missing', 'owner', 'time', 'status'])('stale or forged cursor anchor: %s', async mutation => {
+test.each(['missing', 'owner', 'time', 'status', 'schemaVersion', 'completionStatus'])('stale or forged cursor anchor: %s', async mutation => {
   const f = fixture([walk(0), walk(1)]);
   const first = await f.list({ limit: 1 });
   if (mutation === 'missing') f.data.walks.shift();
   if (mutation === 'owner') f.data.walks[0].ownerKey = 'other';
   if (mutation === 'time') first.nextCursor.endTime = '2026-10-09T00:31:00.000Z';
   if (mutation === 'status') f.data.walks[0].status = 'abandoned';
+  if (mutation === 'schemaVersion') f.data.walks[0].schemaVersion = 2;
+  if (mutation === 'completionStatus') f.data.walks[0].completionStatus = 'ended_early';
   expect((await f.list({ cursor: first.nextCursor })).error.code).toBe('INVALID_HISTORY_CURSOR');
 });
 test('authentication comes only from context; default and maximum limits are bounded', async () => {
