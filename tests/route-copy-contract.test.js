@@ -257,7 +257,7 @@ test('live C004: four known park POIs and generic “途经几处公园” do no
   const generated = {
     title: '慢行环线，偷得半日闲趣',
     description: '从起点出发，途经静安河畔公园、闵行滨水绿道休闲生态公园、梅陇生态园与海心园，兜转一圈回到原处。不妨把脚步交还给心情，随意看看沿路绿意。',
-    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空一下午。'
+    recommendationReason: '想换换心情时，这条环线刚好够散个短步。不赶时间，不盯地图，途经几处公园慢慢晃，挺适合放空心情。'
   };
   expect(contract.validateCopyDetailed(generated, p))
     .toEqual({ copy: generated, reason: null, field: null });
