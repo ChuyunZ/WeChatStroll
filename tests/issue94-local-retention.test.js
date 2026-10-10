@@ -80,7 +80,12 @@ test('terminal cloud status removes full route but recovers optional Feedback me
   records.getWalk.mockResolvedValue(terminal(walk));
   expect(await sessions.cleanupStaleActiveWalk()).toBe(true);
   expect(storage.activeWalkSession).toBeUndefined();
-  expect(storage.pendingWalkResult).toEqual(terminal(walk));
+  expect(storage.pendingWalkResult).toMatchObject({
+    walkId: walk.walkId, routeId: walk.routeId, completionStatus: 'completed',
+    actualDurationSeconds: 1
+  });
+  expect(storage.pendingWalkResult).not.toHaveProperty('route');
+  expect(storage.pendingWalkResult).not.toHaveProperty('status');
 });
 test('cloud outage leaves original stale Walk recoverable', async () => {
   const walk = local(Date.now() - 13 * 60 * 60 * 1000);
