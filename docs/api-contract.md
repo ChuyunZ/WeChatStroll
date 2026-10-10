@@ -521,9 +521,14 @@ Authorization: Bearer <OAuth Token>
 
 ---
 
-## GET /user/walk-history
+## GET /user/walk-history (historical proposal — not implemented)
 
-Returns the walking history of the current user.
+The HTTP endpoint and example fields below are an old proposal, **not** the current
+Mini Program history API. Use `walkStore.listHistory` as documented in
+[Walking History](walking-history.md). In particular, the current API does not
+persist or return planned-route distances or user IDs.
+
+The original proposal described returning the walking history of the current user.
 
 ### URL Params
 
