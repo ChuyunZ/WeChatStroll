@@ -27,6 +27,13 @@ remains independent and no automatic refresh hook or Profile UI is added. See
 
 ## 1. CloudBase Environment
 
+Issue #87 Phase 1 adds local `walkStore.listHistory` support. It reuses the
+Issue #81 walk/feedback indexes above, including their ordered range-query use;
+no new index, permission, environment variable or collection is introduced.
+History queries and lifetime counts require those indexes in the target environment.
+The cursor anchor uses `_id` equality with an owner filter. This phase is not
+deployed or live-validated; see [the History contract and bounds](walking-history.md).
+
 The project uses the following CloudBase development environment:
 
 - Environment name: `cloud1`
@@ -107,7 +114,8 @@ Before releasing the Issue #79 client changes, create `walks` and
 `active_walks` in the intended CloudBase environment, configure both for
 server-only access, and deploy `cloudfunctions/walkStore` with its locked
 dependencies. `walkStore` uses `DYNAMIC_CURRENT_ENV`, requires no new
-environment variables, and uses document IDs rather than custom query indexes.
+environment variables. Its lifecycle operations use document IDs; the new History
+action additionally depends on the existing Issue #81 query indexes described above.
 
 The project also includes two health-check cloud functions:
 

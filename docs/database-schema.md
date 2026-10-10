@@ -222,13 +222,19 @@ original record without changing its time; a different terminal status is reject
 Database failures return normalized errors. Navigation and Track Cloud failures
 cannot reactivate any terminal walk.
 
-The five actions are startWalk, getActiveWalk, getWalk, completeWalk and
+The five lifecycle actions are startWalk, getActiveWalk, getWalk, completeWalk and
 updateTrajectoryMetadata. The last action is limited to opted-in completed /
 ended_early walks and can update only trajectoryPartial, trajectoryEndTimeMs and
 updatedAt; it cannot change lifecycle state or user-confirmed timing.
 All read/write operations are scoped to authenticated ownership. The response is
 { success: true, walk } (null only for no active walk), or
 { success: false, error: { code, message } }.
+
+Issue #87 Phase 1 adds a read-only `listHistory` action with a separate
+`{ success: true, items, nextCursor, totals }` response. It introduces no stored
+fields and reuses the existing Issue #81 query indexes. See the
+[History contract](walking-history.md) for pagination, lifetime counts, rating
+joins, validation and deployment limitations.
 
 ## Local recovery and trajectory boundary
 

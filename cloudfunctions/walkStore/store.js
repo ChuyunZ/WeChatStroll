@@ -1,3 +1,5 @@
+const { createHistoryStore } = require('./history-store');
+
 // Explicit transactions, including missing-document reads, fence concurrent starts.
 function isTransactionConflict(error) {
   if (!error) return false;
@@ -10,6 +12,7 @@ function isTransactionConflict(error) {
 
 function createStore(db) {
   return {
+    ...createHistoryStore(db),
     async transaction(work) {
       const transaction = await db.startTransaction();
       try {

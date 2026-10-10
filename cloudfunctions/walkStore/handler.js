@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { transact } = require('./store');
+const { historyRequest, validCursor } = require('./history-schema');
 
 const MIN_WALKING_DURATION_MINUTES = 15;
 const MAX_WALKING_DURATION_MINUTES = 120;
@@ -9,6 +10,7 @@ const messages = {
   UNAUTHENTICATED: 'Unable to identify the current user.',
   INVALID_ACTION: 'Unsupported walk operation.',
   INVALID_INPUT: 'Invalid walk metadata.',
+  INVALID_HISTORY_CURSOR: 'History cursor is no longer valid. Reload history.',
   WALK_NOT_FOUND: 'Walk not found.',
   WALK_STATE_CONFLICT: 'Walk is already finalized with another state.',
   TRAJECTORY_UPDATE_NOT_ALLOWED: 'Trajectory metadata can only update an opted-in finalized walk.',
@@ -73,6 +75,12 @@ function createWalkHandler({ store, getOpenId, now = Date.now, newId = () => cry
       const openid = getOpenId();
       if (typeof openid !== 'string' || !openid.trim()) fail('UNAUTHENTICATED');
       const ownerKey = crypto.createHash('sha256').update(openid).digest('hex');
+      if (event && event.action === 'listHistory') {
+        if (event.cursor != null && !validCursor(event.cursor)) fail('INVALID_HISTORY_CURSOR');
+        let input;
+        try { input = historyRequest(event); } catch (_) { fail('INVALID_INPUT'); }
+        return { success: true, ...await store.listHistory(ownerKey, input) };
+      }
       const lockPath = `active_walks/${ownerKey}`;
       if (!['startWalk', 'getActiveWalk', 'getWalk', 'completeWalk', 'updateTrajectoryMetadata'].includes(event.action)) fail('INVALID_ACTION');
       const owned = walk => {

@@ -1,5 +1,6 @@
 const { callCloudFunction } = require('./cloud-function-client');
 const { createCodedError } = require('../utils/errors');
+const { historyRequest, historyResponse } = require('../utils/history-schema');
 
 const MIN_WALKING_DURATION_MINUTES = 15;
 const MAX_WALKING_DURATION_MINUTES = 120;
@@ -61,6 +62,13 @@ async function request(action, fields = {}, nullable = false) {
   return walk;
 }
 module.exports = {
+  async listHistory(options) {
+    const input = historyRequest(options);
+    const result = await callCloudFunction('walkStore', { action: 'listHistory', ...input }, {
+      fallbackCode: 'WALK_STORE_FAILED', fallbackMessage: 'Unable to load walk history.'
+    });
+    return historyResponse(result, input);
+  },
   isValidPreferences,
   preferencesSnapshot,
   async startWalk({ routeId, preferences, trajectoryEnabled }) {

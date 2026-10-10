@@ -320,6 +320,15 @@ See [the implemented schema](database-schema.md#5-feedback-collection).
 
 ---
 
+# Walking History (Issue #87 Phase 1)
+
+Cloud Function `walkStore` accepts `{ action: 'listHistory', limit: 10, cursor: null }`.
+Success returns `{ success: true, items, nextCursor, totals }`. Limits are 1–20;
+subsequent pages pass the returned cursor and receive `totals: null`. See the
+[complete History contract](walking-history.md) for exact item/cursor fields,
+count semantics, errors, validation, privacy and concurrency limits. This action
+uses existing lifecycle metadata and does not implement Profile UI or GPS detail.
+
 # Walk (all fields are required)
 
 `endTime` is nullable while the walk is in progress.
