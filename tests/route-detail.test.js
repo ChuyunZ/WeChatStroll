@@ -1066,6 +1066,30 @@ test("old pending feedback cannot hijack Route Detail or erase completed history
   expect(walkRecords.completeWalk).not.toHaveBeenCalled();
 });
 
+test("optional pending feedback removal failure cannot break Route Detail", async () => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  wx.removeStorageSync.mockImplementationOnce(() => {
+    throw new Error("Local storage unavailable");
+  });
+
+  await expect(page.onShow()).resolves.toBeUndefined();
+  expect(page.data.route.routeId).toBe(mockRoutes[0].routeId);
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("pendingWalkResult").walkId).toBe("walk-feedback");
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("Could not clear pending feedback handoff"),
+    expect.any(Error)
+  );
+
+  // Storage availability recovers; a later route check can safely retry.
+  await expect(page.onShow()).resolves.toBeUndefined();
+  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+  expect(walkRecords.completeWalk).not.toHaveBeenCalled();
+});
+
 test("Route Detail waits for EventChannel route before reconciling cloud walk", async () => {
   const channel = createEventChannel();
   page = loadRouteDetailPage({ eventChannel: channel });
