@@ -435,13 +435,22 @@ test('refresh failure is non-fatal and logs only a fixed safe code', async () =>
   } finally { warn.mockRestore() }
 })
 
-test('replanning reuses one history snapshot and still updates failure context', async () => {
+test('replanning reuses one history snapshot when bounded corrections cannot validate', async () => {
   refreshProfile.mockResolvedValue(historicalProfile())
   sequencePlans([planSets(['A', 'B']), planSets(['A', 'C'])])
-  getWalkingSegment.mockImplementation(async (from, to) => ({
-    success: true, durationSeconds: from.nodeId === 'B' || to.nodeId === 'B' ? 100 : 1350,
-    distanceMeters: 200, polyline: [from, to]
-  }))
+  // [A,B] is too short. Extra waypoints containing B cannot become valid:
+  // the mock makes B<->(C,D,E) unwalkable, while A->C remains feasible.
+  getWalkingSegment.mockImplementation(async (from, to) => {
+    const other = ['C', 'D', 'E']
+    if ((from.nodeId === 'B' && other.includes(to.nodeId)) ||
+        (to.nodeId === 'B' && other.includes(from.nodeId))) {
+      return { success: false, error: 'ROUTE_NOT_FOUND' }
+    }
+    const slow = (from.nodeId === 'START' && to.nodeId !== 'B') ||
+      (from.nodeId === 'A' && to.nodeId !== 'B')
+    return { success: true, durationSeconds: slow ? 1350 : 100,
+      distanceMeters: 200, polyline: [from, to] }
+  })
   const result = await generateRoutes(preferences)
   expect(result.source).toBe('ai-replanned')
   expect(result.historicalPreferenceProfile).toBe(aiCalls()[0][1].historicalPreferenceProfile)
@@ -450,8 +459,14 @@ test('replanning reuses one history snapshot and still updates failure context',
   expect(aiCalls()[0][1].historicalPreferenceProfile).toEqual(compactHistory)
   expect(aiCalls()[1][1].historicalPreferenceProfile).toBe(aiCalls()[0][1].historicalPreferenceProfile)
   expect(aiCalls()[0][1]).not.toHaveProperty('replanningContext')
-  expect(aiCalls()[1][1].replanningContext).toMatchObject({ attempt: 2,
-    previousFailures: [{ attempt: 1, waypointIds: ['A', 'B'], failure: { type: 'DURATION_TOO_SHORT' } }] })
+  expect(aiCalls()[1][1].replanningContext.attempt).toBe(2)
+  expect(aiCalls()[1][1].replanningContext.previousFailures).toEqual(expect.arrayContaining([
+    expect.objectContaining({ attempt: 1, waypointIds: ['A', 'B'],
+      failure: expect.objectContaining({ type: 'DURATION_TOO_SHORT' }) })
+  ]))
+  // Correction failures are actionable, normalized feedback; no second history load.
+  expect(aiCalls()[1][1].replanningContext.previousFailures.some(item =>
+    item.waypointIds.length === 3)).toBe(true)
 })
 
 test.each(['empty', 'error'])('AI %s uses identical fallback selection and walking facts with or without history', async mode => {
@@ -550,7 +565,7 @@ test('first attempt succeeds with metadata and no retry context', async () => {
   expect(aiCalls()[0][1]).not.toHaveProperty('replanningContext')
 })
 
-test('all candidates are used before replanning, with shared directed cache and current alternatives', async () => {
+test('after a duration miss, correction avoids another AI call and reuses directed cache', async () => {
   sequencePlans([planSets(['A', 'B'], ['A', 'D']), planSets(['B', 'A'], ['A', 'C'], ['A', 'E'])])
   getWalkingSegment.mockImplementation(async (from, to) => ({
     success: true,
@@ -558,17 +573,18 @@ test('all candidates are used before replanning, with shared directed cache and 
     distanceMeters: 200, polyline: [from, to]
   }))
   const result = await generateRoutes(preferences)
-  expect(result.source).toBe('ai-replanned')
-  expect(result.planningMetadata).toEqual({ attemptCount: 2, replanned: true, fallbackUsed: false, failureTypes: ['DURATION_TOO_SHORT'] })
-  expect(aiCalls()).toHaveLength(2)
-  expect(aiCalls()[1][1].replanningContext).toEqual({ attempt: 2, previousFailures: [
-    { attempt: 1, waypointIds: ['A', 'B'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 1450, targetDurationSeconds: 2700 } },
-    { attempt: 1, waypointIds: ['A', 'D'], failure: { type: 'DURATION_TOO_SHORT', actualDurationSeconds: 1450, targetDurationSeconds: 2700 } }
-  ] })
-  expect(result.waypointCandidateCache.getAllCandidates().map(c => c.status)).toEqual(['failed', 'success', 'unused'])
-  expect(result.waypointCandidateCache.getUnusedCandidates()[0].waypointIds).toEqual(['A', 'E'])
-  expect(getWalkingSegment.mock.calls.filter(([from, to]) => from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
-  expect(getWalkingSegment).toHaveBeenCalledTimes(10)
+  expect(result.source).toBe('deterministic-correction')
+  expect(result.planningMetadata).toMatchObject({ attemptCount: 1, replanned: false, fallbackUsed: false })
+  expect(result.planningMetadata.failureTypes).toContain('DURATION_TOO_SHORT')
+  expect(aiCalls()).toHaveLength(1)
+  expect(result.waypointCandidateCache.getAllCandidates().map(c => c.status)).toEqual(['failed', 'failed'])
+  expect(result.routes).toHaveLength(1)
+  expect(result.routes[0].recommendedWaypointIds.length).toBeGreaterThan(2)
+  expect(result.routes[0].durationSeconds).toBeGreaterThanOrEqual(2025)
+  expect(result.routes[0].durationSeconds).toBeLessThanOrEqual(3375)
+  expect(getWalkingSegment.mock.calls.filter(([from, to]) =>
+    from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
+  expect(result.routePlanningSession.getPlanningDiagnostics().segmentCacheHits).toBeGreaterThan(0)
   expect(getCurrentLocation).toHaveBeenCalledTimes(1)
 })
 
@@ -583,17 +599,19 @@ test('repeated sets in another order stop at attempt two and fallback reuses res
   expect(getWalkingSegment.mock.calls.filter(([from, to]) => from.nodeId === 'START' && to.nodeId === 'A')).toHaveLength(1)
 })
 
-test('three distinct failed attempts exhaust the budget before deterministic fallback', async () => {
+test('too-long AI route is shortened to a valid singleton before another model call', async () => {
   sequencePlans([planSets(['A', 'B']), planSets(['A', 'C']), planSets(['A', 'D'])])
   getWalkingSegment.mockImplementation(async (from, to) => ({
     success: true, durationSeconds: 2700, distanceMeters: 200, polyline: [from, to]
   }))
   const result = await generateRoutes(preferences)
-  expect(aiCalls()).toHaveLength(3)
-  expect(result.source).toBe('fallback')
-  expect(result.planningMetadata).toEqual({ attemptCount: 3, replanned: true, fallbackUsed: true, failureTypes: ['DURATION_TOO_LONG'] })
-  expect(aiCalls()[2][1].replanningContext.previousFailures.map(o => o.failure.type))
-    .toEqual(['DURATION_TOO_LONG', 'DURATION_TOO_LONG'])
+  expect(aiCalls()).toHaveLength(1)
+  expect(result.source).toBe('deterministic-correction')
+  expect(result.routes).toHaveLength(1)
+  expect(result.routes[0].recommendedWaypointIds).toHaveLength(1)
+  expect(result.routes[0].durationSeconds).toBe(2700)
+  expect(result.planningMetadata).toEqual({ attemptCount: 1, replanned: false,
+    fallbackUsed: false, failureTypes: ['DURATION_TOO_LONG'] })
 })
 
 test('invalid model output can recover on the next planning call', async () => {
@@ -605,7 +623,7 @@ test('invalid model output can recover on the next planning call', async () => {
   ])
 })
 
-test('fallback logs the final route failure after an earlier invalid AI plan', async () => {
+test('a malformed AI plan does not prevent later bounded duration correction', async () => {
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
   try {
     sequencePlans([{ candidates: null }, planSets(['A', 'B']), planSets(['A', 'C'])])
@@ -613,12 +631,15 @@ test('fallback logs the final route failure after an earlier invalid AI plan', a
       success: true, durationSeconds: 2700, distanceMeters: 200, polyline: [from, to]
     }))
     const result = await generateRoutes(preferences)
-    expect(result.source).toBe('fallback')
-    expect(aiCalls()).toHaveLength(3)
-    expect(warn).toHaveBeenCalledWith('[Route Generation] Falling back:',
-      expect.objectContaining({ trigger: 'NO_VALID_AI_ROUTE' }))
-    expect(warn).not.toHaveBeenCalledWith('[Route Generation] Falling back:',
-      expect.objectContaining({ trigger: 'INVALID_AI_ROUTE_PLAN' }))
+    expect(result.source).toBe('deterministic-correction')
+    expect(aiCalls()).toHaveLength(2)
+    expect(result.planningMetadata).toEqual({ attemptCount: 2, replanned: true,
+      fallbackUsed: false, failureTypes: ['INVALID_AI_PLAN', 'DURATION_TOO_LONG'] })
+    expect(result.routes[0].recommendedWaypointIds).toHaveLength(1)
+    expect(aiCalls()[1][1].replanningContext.previousFailures).toEqual([
+      { attempt: 1, waypointIds: [], failure: { type: 'INVALID_AI_PLAN' } }
+    ])
+    expect(warn).not.toHaveBeenCalledWith('[Route Generation] Falling back:', expect.anything())
   } finally { warn.mockRestore() }
 })
 

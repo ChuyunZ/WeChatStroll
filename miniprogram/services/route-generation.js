@@ -7,6 +7,8 @@ const { validateProfile } = require('../utils/preference-profile-schema')
 const { copyEditableWaypoint, isValidEditableOrder } = require('./route-editing')
 const { waypointSetKey, normalizeExcludedWaypointSets, normalizePlanningFailure, isReplannableFailure, buildPlanningMetadata } = require('./agentic-route-planning')
 const { optimizeWaypointOrder } = require('./waypoint-order-optimizer')
+const { runBoundedRouteCorrections } = require('./route-correction')
+const { rankInitialCandidates } = require('./initial-candidate-quality')
 
 const {
   validateGeneratedWalkingRoute
@@ -34,7 +36,9 @@ const {
 
 const {
   MAX_FALLBACK_CANDIDATES,
-  MAX_AI_PLANNING_ATTEMPTS
+  MAX_AI_PLANNING_ATTEMPTS,
+  MAX_CORRECTION_CANDIDATES,
+  MAX_CORRECTION_NEW_SEGMENTS
 } = require('../config/route-planning')
 
 const {
@@ -685,6 +689,17 @@ async function generateWaypointPlan(
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
 
+  // Safe discovery diagnostics: categories/counts only, never coordinates,
+  // names, prompt text or detailed provider records.
+  console.log('[POI Discovery] Summary:', {
+    radiusMeters: radius,
+    categoryCounts: Object.fromEntries(
+      Object.entries(poisByCategory).map(([category, items]) =>
+        [category, Array.isArray(items) ? items.length : 0])
+    ),
+    verifiedPoiCount: nearbyPois.length
+  })
+
   if (nearbyPois.length === 0) {
     return {
       status: 'empty',
@@ -1230,10 +1245,32 @@ async function requestManualWaypointCandidates({
   return createWaypointCandidateCache(candidates)
 }
 
+// Shared initial/manual correction path. Uses the same existing optimizer,
+// RoutePlanningSession, candidate lifecycle, and final validator as AI plans.
+// The callback is deliberately the *real* route builder, not an alternative
+// map-routing or validation implementation.
+async function attemptRouteCorrections({
+  session, verifiedWaypointPool, observations, excludedWaypointSets,
+  requestedDurationMinutes, location, allowPairFallback = false,
+  maxCandidates = MAX_CORRECTION_CANDIDATES,
+  maxNewSegmentCalls = MAX_CORRECTION_NEW_SEGMENTS
+}) {
+  return runBoundedRouteCorrections({
+    session, verifiedWaypointPool, observations, excludedWaypointSets,
+    requestedDurationMinutes, allowPairFallback, maxCandidates, maxNewSegmentCalls,
+    buildCandidateRoute: ({ candidateCache, candidate, candidateIndex }) =>
+      buildOptimizedCandidateRoute({
+        session, candidateCache, candidate, candidateIndex, location,
+        requestedDurationMinutes
+      })
+  })
+}
+
 // AI waypoint candidates -> walking routes
 async function generateRoutes(
   preferences = {}
 ) {
+  const planningStartedAt = Date.now()
   const location =
     await locationService.getCurrentLocation()
 
@@ -1255,6 +1292,17 @@ async function generateRoutes(
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
 
+  // Safe discovery diagnostics: categories/counts only, never coordinates,
+  // names, prompt text or detailed provider records.
+  console.log('[POI Discovery] Summary:', {
+    radiusMeters: radius,
+    categoryCounts: Object.fromEntries(
+      Object.entries(poisByCategory).map(([category, items]) =>
+        [category, Array.isArray(items) ? items.length : 0])
+    ),
+    verifiedPoiCount: nearbyPois.length
+  })
+
   if (nearbyPois.length === 0) {
     return {
       status: 'empty',
@@ -1271,6 +1319,8 @@ async function generateRoutes(
   })
   const attemptedWaypointSets = new Set()
   const observations = []
+  let correctionRemainingSegments = MAX_CORRECTION_NEW_SEGMENTS
+  let correctionRemainingCandidates = MAX_CORRECTION_CANDIDATES
   let attemptCount = 0
   let trigger = 'NO_VALID_AI_ROUTE'
 
@@ -1301,7 +1351,36 @@ async function generateRoutes(
       canReplan = isReplannableFailure(failure)
     } else {
       trigger = 'NO_VALID_AI_ROUTE'
-      console.log('[Agent Planning] Plan received:', { attempt, candidateCount: plan.candidates.length })
+      console.log('[Agent Planning] Plan received:', {
+        attempt, candidateCount: plan.candidates.length,
+        emptyBatch: plan.candidates.length === 0
+      })
+      // Shadow-only initial quality experiment. Real WeChat DevTools E2E
+      // (Guangzhou, 30 min out_and_back) found that geometrically attractive
+      // pairs failed validation and delayed a valid 3rd AI singleton.
+      // Do not reorder/discard ANY of the five AI slots on uncertain estimates.
+      // Learn only anonymized proposal counts; correction still handles true
+      // failures after all available AI candidates have been attempted.
+      if (attempt === 1) {
+        try {
+          const shadow = rankInitialCandidates({
+            candidates: plan.candidates, verifiedWaypointPool: nearbyPois,
+            location, preferences
+          })
+          if (shadow.applied) {
+            console.log('[Initial Candidate Quality] Shadow summary:', {
+              inputCandidates: plan.candidates.length,
+              suggestedPairs: shadow.supplementalPairCount,
+              appliedPairs: 0,
+              preservesOriginalAiOrder: true,
+              geometryOnly: true
+            })
+          }
+        } catch (_) {
+          // Optional geometry estimator must never delay or break generation.
+          console.log('[Initial Candidate Quality] Shadow skipped: ESTIMATOR_UNAVAILABLE')
+        }
+      }
       const candidateCache = createWaypointCandidateCache(plan.candidates)
       // Settle repeated entries before execution, including alternatives after a success.
       const unseen = []
@@ -1332,6 +1411,10 @@ async function generateRoutes(
           const source = attempt === 1 ? 'ai' : 'ai-replanned'
           logCandidateSummary(candidateCache)
           console.log('[Agent Planning] Success:', { attempt, source })
+          console.log('[Agent Planning] First route diagnostics:', {
+            attempt, source, elapsedMs: Date.now() - planningStartedAt,
+            ...session.getPlanningDiagnostics()
+          })
           return {
             status: 'success', source, location,
             routes: rankRoutes([result.route], { preferences, historicalPreferenceProfile }),
@@ -1346,6 +1429,53 @@ async function generateRoutes(
         if (!isReplannableFailure(failure)) {
           canReplan = false
           break
+        }
+      }
+      // First try bounded deterministic correction with verified POIs and
+      // already-resolved walking edges. Never blindly consume another HY3
+      // round if one of these candidates can pass the existing validator.
+      if (canReplan && correctionRemainingCandidates > 0) {
+        const corrected = await attemptRouteCorrections({
+          session, verifiedWaypointPool: nearbyPois,
+          observations: [...observations, ...attemptObservations],
+          excludedWaypointSets: [...attemptedWaypointSets],
+          requestedDurationMinutes: preferences.durationMinutes,
+          location, allowPairFallback: false,
+          maxCandidates: correctionRemainingCandidates,
+          maxNewSegmentCalls: correctionRemainingSegments
+        })
+        correctionRemainingCandidates -= corrected.attemptedCandidates
+        correctionRemainingSegments = corrected.remainingSegmentBudget
+        corrected.attemptedWaypointSets.forEach(ids =>
+          attemptedWaypointSets.add(waypointSetKey(ids)))
+        corrected.failures.forEach(({ waypointIds, result }) =>
+          attemptObservations.push({ attempt, waypointIds,
+            failure: normalizePlanningFailure(result, waypointIds) }))
+        console.log('[Agent Planning] Correction summary:', {
+          attempt, attemptedCandidates: corrected.attemptedCandidates,
+          remainingSegmentBudget: correctionRemainingSegments,
+          failureTypes: [...new Set(corrected.failures.map(item =>
+            normalizePlanningFailure(item.result, item.waypointIds).type))]
+        })
+        if (corrected.providerError) {
+          throw createRouteGenerationError(corrected.providerError,
+            'Route service is temporarily unavailable.')
+        }
+        if (corrected.success) {
+          console.log('[Agent Planning] First route diagnostics:', {
+            attempt, source: 'deterministic-correction',
+            elapsedMs: Date.now() - planningStartedAt,
+            ...session.getPlanningDiagnostics()
+          })
+          return {
+            status: 'success', source: 'deterministic-correction', location,
+            routes: rankRoutes([corrected.route], { preferences, historicalPreferenceProfile }),
+            verifiedWaypointPool: nearbyPois.map(copyEditableWaypoint),
+            historicalPreferenceProfile,
+            routePlanningSession: session, waypointCandidateCache: candidateCache,
+            planningMetadata: buildPlanningMetadata(attemptCount, false,
+              [...observations, ...attemptObservations])
+          }
         }
       }
       logCandidateSummary(candidateCache)
@@ -1370,6 +1500,13 @@ async function generateRoutes(
   const result = await buildFallbackGenerationResult({
     location, poisByCategory, preferences, trigger, routePlanningSession: session
   })
+  if (result.status === 'success') {
+    console.log('[Agent Planning] First route diagnostics:', {
+      attempt: attemptCount, source: 'fallback',
+      elapsedMs: Date.now() - planningStartedAt,
+      ...session.getPlanningDiagnostics()
+    })
+  }
   return { ...result,
     ...(result.status === 'success' ? {
       routes: rankRoutes(result.routes, { preferences, historicalPreferenceProfile }),
@@ -1509,6 +1646,7 @@ function rebuildGeneratedRouteForOrder({ baseRoute, walkingRoute }) {
 }
 
 module.exports = {
+  attemptRouteCorrections,
   requestManualWaypointCandidates,
   rebuildGeneratedRouteForOrder,
   logCandidateSummary,

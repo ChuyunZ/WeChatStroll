@@ -521,7 +521,35 @@ describe('bounded manual alternatives', () => {
     expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(1);
   });
 
-  test('manual AI logs actual attempts, received batches, and exhaustion without POI payloads', async () => {
+  test('manual correction reuses rejected singleton sets before requesting AI', async () => {
+    setup(1, [['A'], ['B']]);
+    page._verifiedWaypointPool = ['A', 'B', 'C'].map(poiId => ({
+      poiId, name: poiId, latitude: 23.13, longitude: 113.26
+    }));
+    routeGenerationServiceMock.buildOptimizedCandidateRoute.mockImplementation(async ({ candidate, candidateCache }) => {
+      candidateCache.markBuilding(candidate.candidateId);
+      candidateCache.markFailed(candidate.candidateId);
+      return { success: false, error: 'ROUTE_VALIDATION_FAILED',
+        reason: 'ROUTE_DURATION_OUT_OF_RANGE', actualDurationSeconds: 900,
+        targetDurationSeconds: 1800, minDurationSeconds: 1350, maxDurationSeconds: 2250 };
+    });
+    const correctedRoute = route(['A','B']);
+    routeGenerationServiceMock.attemptRouteCorrections = jest.fn(async () => ({
+      success: true, route: correctedRoute, attemptedCandidates: 1,
+      attemptedWaypointSets: [['A','B']], failures: [], remainingSegmentBudget: 10
+    }));
+    routeGenerationServiceMock.requestManualWaypointCandidates = jest.fn();
+    await page.showOtherRoutes();
+    expect(routeGenerationServiceMock.attemptRouteCorrections).toHaveBeenCalledTimes(1);
+    expect(routeGenerationServiceMock.attemptRouteCorrections.mock.calls[0][0].observations
+      .map(item => item.failure.type)).toEqual(['DURATION_TOO_SHORT', 'DURATION_TOO_SHORT']);
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).not.toHaveBeenCalled();
+    expect(page._rawRoutes).toHaveLength(2);
+    expect(page._manualAlternativeActionCount).toBe(1);
+    expect(page._manualAttemptedKeys.has('["A","B"]')).toBe(true);
+  });
+
+  test('manual AI stops after two unchanged empty batches without POI payloads', async () => {
     setup(1, []);
     page._verifiedWaypointPool = [{ poiId: 'A', name: 'A', latitude: 23.13, longitude: 113.26 }];
     const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
@@ -533,14 +561,16 @@ describe('bounded manual alternatives', () => {
       page.updateManualAlternativeControls();
       await page.showOtherRoutes();
       expect(log.mock.calls.filter(([label]) => label === '[Manual AI Planning] Attempt start:')
-        .map(([, payload]) => payload.attempt)).toEqual([1, 2, 3]);
+        .map(([, payload]) => payload.attempt)).toEqual([1, 2]);
       expect(log.mock.calls.filter(([label]) => label === '[Manual AI Planning] Plan received:')
         .map(([, payload]) => payload)).toEqual([
-          { attempt: 1, candidateCount: 0 },
-          { attempt: 2, candidateCount: 0 },
-          { attempt: 3, candidateCount: 0 }
+          { attempt: 1, candidateCount: 0, novelCandidateCount: 0, emptyBatch: true },
+          { attempt: 2, candidateCount: 0, novelCandidateCount: 0, emptyBatch: true }
         ]);
-      expect(warn).toHaveBeenCalledWith('[Manual AI Planning] Exhausted:', { maxAttempts: 3 });
+      expect(warn).toHaveBeenCalledWith('[Manual AI Planning] Exhausted:', {
+        attemptedAiBatches: 2, maxAttempts: 3
+      });
+      expect(wx.showToast).toHaveBeenCalledWith({ title: '暂无更多可用路线', icon: 'none' });
       expect(log).not.toHaveBeenCalledWith('[Manual AI Planning] Route accepted:', expect.anything());
     } finally {
       log.mockRestore();
@@ -548,7 +578,7 @@ describe('bounded manual alternatives', () => {
     }
   });
 
-  test('three exhausted AI rounds keep original route and consume no successful action', async () => {
+  test('two exhausted empty AI rounds keep original route and consume no successful action', async () => {
     setup(1, []);
     page._verifiedWaypointPool = [{ poiId: 'A', name: 'A', latitude: 23.13, longitude: 113.26 }];
     const { createWaypointCandidateCache } = require('../miniprogram/services/waypoint-candidate-cache');
@@ -557,7 +587,7 @@ describe('bounded manual alternatives', () => {
     const original = page._rawRoutes;
     page.updateManualAlternativeControls();
     await page.showOtherRoutes();
-    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(3);
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(2);
     expect(page._rawRoutes).toBe(original);
     expect(page._manualAlternativeActionCount).toBe(0);
     expect(page._manualAlternativeExhausted).toBe(true);
@@ -612,7 +642,7 @@ describe('bounded manual alternatives', () => {
     expect(page._manualAlternativeActionCount).toBe(1);
   });
 
-  test('three duplicate AI batches never invoke the builder or consume successful budget', async () => {
+  test('two duplicate AI batches stop without invoking the builder or consuming budget', async () => {
     const cache = setup(3, [['A', 'B']]);
     cache.markSuccess('candidate-1', route(['A', 'B']));
     page._verifiedWaypointPool = [{ poiId: 'A' }, { poiId: 'B' }];
@@ -622,7 +652,7 @@ describe('bounded manual alternatives', () => {
     const original = page._rawRoutes;
     page.showOtherRoutes();
     await page.selectRouteToReplace(tap(original[1].routeId));
-    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(3);
+    expect(routeGenerationServiceMock.requestManualWaypointCandidates).toHaveBeenCalledTimes(2);
     expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).not.toHaveBeenCalled();
     expect(page._rawRoutes).toBe(original);
     expect(page._manualAlternativeActionCount).toBe(0);

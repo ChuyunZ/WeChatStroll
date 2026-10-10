@@ -114,6 +114,9 @@ function createRoutePlanningSession({
    * requests for the same directed edge share the same provider call.
    */
   const segmentCache = new Map()
+  // Request-local safe counters: no POI IDs, coordinates or provider payloads.
+  let segmentResolverCalls = 0
+  let segmentCacheHits = 0
   // Small settled-cost projection; Promise ownership and dedup stay above.
   const resolvedSegmentCosts = new Map()
 
@@ -131,16 +134,18 @@ function createRoutePlanningSession({
     )
 
     if (segmentCache.has(edgeKey)) {
+      segmentCacheHits++
       return segmentCache.get(edgeKey)
     }
 
     const segmentPromise = Promise.resolve()
-      .then(() =>
-        segmentResolver(
+      .then(() => {
+        segmentResolverCalls++
+        return segmentResolver(
           { ...fromNode },
           { ...toNode }
         )
-      )
+      })
       .then((result) => {
         if (!result || result.success !== true) {
           const failure = normalizeSegmentFailure(result)
@@ -453,6 +458,11 @@ function createRoutePlanningSession({
     evaluateRouteOrder,
     getWaypointSearchData,
     getCachedSegmentCosts,
+    getPlanningDiagnostics: () => ({
+      segmentResolverCalls,
+      segmentCacheHits,
+      settledSegmentCosts: resolvedSegmentCosts.size
+    }),
     buildRouteForOrder
   }
 }

@@ -58,14 +58,20 @@ function buildAllowedPoiIds(nearbyPois) {
 
 function normalizeCandidate(
   candidate,
-  allowedPoiIds
+  allowedPoiIds,
+  removedByReason
 ) {
+  // One primary reason per removed candidate: first failure in validation order.
+  const reject = reason => {
+    removedByReason[reason]++
+    return null
+  }
   if (
     !candidate ||
     typeof candidate !== "object" ||
     Array.isArray(candidate)
   ) {
-    return null
+    return reject('malformed_structure')
   }
 
   const candidateKeys =
@@ -76,7 +82,7 @@ function normalizeCandidate(
     candidateKeys[0] !== "waypoints" ||
     !Array.isArray(candidate.waypoints)
   ) {
-    return null
+    return reject('malformed_structure')
   }
 
   if (
@@ -85,7 +91,7 @@ function normalizeCandidate(
     candidate.waypoints.length >
       MAX_WAYPOINTS
   ) {
-    return null
+    return reject('waypoint_count')
   }
 
   const seenPoiIds = new Set()
@@ -100,7 +106,7 @@ function normalizeCandidate(
       typeof waypoint !== "object" ||
       Array.isArray(waypoint)
     ) {
-      return null
+      return reject('malformed_structure')
     }
 
     const waypointKeys =
@@ -112,18 +118,14 @@ function normalizeCandidate(
       typeof waypoint.poiId !== "string" ||
       waypoint.poiId.trim() === ""
     ) {
-      return null
+      return reject('malformed_structure')
     }
 
     const poiId =
       waypoint.poiId.trim()
 
-    if (
-      seenPoiIds.has(poiId) ||
-      !allowedPoiIds.has(poiId)
-    ) {
-      return null
-    }
+    if (seenPoiIds.has(poiId)) return reject('repeated_id')
+    if (!allowedPoiIds.has(poiId)) return reject('unverified_poi')
 
     seenPoiIds.add(poiId)
 
@@ -255,14 +257,21 @@ function selectLargestCompatibleCandidates(
 
 function validateRoutePlan(
   plan,
-  nearbyPois
+  nearbyPois,
+  diagnostics = createDiagnostics()
 ) {
+  const rawCandidates = plan && Array.isArray(plan.candidates) ? plan.candidates : null
+  diagnostics.rawCandidateCount = rawCandidates ? rawCandidates.length : null
+  const rejectPlan = reason => {
+    diagnostics.planRejectionReason = reason
+    return invalidRoutePlan()
+  }
   if (
     !plan ||
     typeof plan !== "object" ||
     Array.isArray(plan)
   ) {
-    return invalidRoutePlan()
+    return rejectPlan('malformed_plan')
   }
 
   const planKeys =
@@ -273,7 +282,7 @@ function validateRoutePlan(
     planKeys[0] !== "candidates" ||
     !Array.isArray(plan.candidates)
   ) {
-    return invalidRoutePlan()
+    return rejectPlan('malformed_plan')
   }
 
   if (
@@ -282,14 +291,14 @@ function validateRoutePlan(
     plan.candidates.length >
       MAX_ROUTE_CANDIDATES
   ) {
-    return invalidRoutePlan()
+    return rejectPlan('candidate_count')
   }
 
   const allowedPoiIds =
     buildAllowedPoiIds(nearbyPois)
 
   if (!allowedPoiIds) {
-    return invalidRoutePlan()
+    return rejectPlan('invalid_poi_pool')
   }
 
   if (plan.candidates.length === 0) {
@@ -305,7 +314,8 @@ function validateRoutePlan(
     const normalizedCandidate =
       normalizeCandidate(
         candidate,
-        allowedPoiIds
+        allowedPoiIds,
+        diagnostics.removedByReason
       )
 
     if (normalizedCandidate) {
@@ -315,8 +325,13 @@ function validateRoutePlan(
     }
   }
 
+  diagnostics.structurallyValidCount = validCandidates.length
+  diagnostics.structurallyValidMultiPoiCount =
+    validCandidates.filter(candidate => candidate.waypoints.length > 1).length
+  diagnostics.removedCandidateCount = plan.candidates.length - validCandidates.length
+
   if (validCandidates.length === 0) {
-    return invalidRoutePlan()
+    return rejectPlan('no_valid_candidates')
   }
 
   const selectedCandidates =
@@ -327,8 +342,23 @@ function validateRoutePlan(
   if (
     selectedCandidates.length === 0
   ) {
-    return invalidRoutePlan()
+    return rejectPlan('no_compatible_candidates')
   }
+
+  // Keep the original maximum-cardinality search and its input-order tie-break.
+  // Classify discarded valid sets against the RETAINED batch. Equality takes
+  // precedence; all other conflicts are strict subsets in either direction.
+  for (const candidate of validCandidates) {
+    if (selectedCandidates.includes(candidate)) continue
+    const duplicate = selectedCandidates.some(selected =>
+      selected.waypoints.length === candidate.waypoints.length &&
+      hasSubsetConflict(selected, candidate))
+    diagnostics.removedByReason[duplicate ? 'duplicate_set' : 'subset_conflict']++
+  }
+  diagnostics.retainedCandidateCount = selectedCandidates.length
+  diagnostics.retainedMultiPoiCount =
+    selectedCandidates.filter(candidate => candidate.waypoints.length > 1).length
+  diagnostics.removedCandidateCount = plan.candidates.length - selectedCandidates.length
 
   return {
     success: true,
@@ -347,13 +377,43 @@ function invalidRoutePlan() {
 }
 
 function parseAndValidateRoutePlan(rawText, nearbyPois) {
+  return parseAndValidateRoutePlanWithDiagnostics(rawText, nearbyPois).result
+}
+
+function createDiagnostics() {
+  return {
+    schemaVersion: 1,
+    rawCandidateCount: null,
+    structurallyValidCount: 0,
+    structurallyValidMultiPoiCount: 0,
+    retainedCandidateCount: 0,
+    retainedMultiPoiCount: 0,
+    removedCandidateCount: 0,
+    planRejectionReason: null,
+    removedByReason: {
+      malformed_structure: 0,
+      waypoint_count: 0,
+      unverified_poi: 0,
+      repeated_id: 0,
+      duplicate_set: 0,
+      subset_conflict: 0
+    }
+  }
+}
+
+// Aggregate counts/allowlisted codes only. Never include IDs, coordinates,
+// model text, names, indexes mapped to user data, or exception messages.
+function parseAndValidateRoutePlanWithDiagnostics(rawText, nearbyPois) {
+  const diagnostics = createDiagnostics()
   const parsedResult = parseRoutePlan(rawText)
 
   if (!parsedResult.success) {
-    return parsedResult
+    diagnostics.planRejectionReason = 'invalid_json'
+    return { result: parsedResult, diagnostics }
   }
 
-  return validateRoutePlan(parsedResult.data, nearbyPois)
+  const result = validateRoutePlan(parsedResult.data, nearbyPois, diagnostics)
+  return { result, diagnostics }
 }
 
 module.exports = {
@@ -363,5 +423,6 @@ module.exports = {
   MAX_ROUTE_CANDIDATES,
   parseRoutePlan,
   validateRoutePlan,
-  parseAndValidateRoutePlan
+  parseAndValidateRoutePlan,
+  parseAndValidateRoutePlanWithDiagnostics
 }

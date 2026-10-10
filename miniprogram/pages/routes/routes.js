@@ -6,6 +6,7 @@ const routeRankingService = require("../../services/route-ranking");
 const routeCopy = require("../../services/route-copy");
 const { waypointSetKey, normalizePlanningFailure } = require("../../services/agentic-route-planning");
 const { isProviderUnavailableCode } = require("../../utils/provider-errors");
+const { MAX_CORRECTION_CANDIDATES, MAX_CORRECTION_NEW_SEGMENTS } = require("../../config/route-planning");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 
@@ -744,6 +745,10 @@ Page({
         ...cachedBatches.flatMap(cache => cache.getAllCandidates().map(c => waypointSetKey(c.waypointIds)))
       ]);
       const observations = [];
+      let correctionRemainingCandidates = MAX_CORRECTION_CANDIDATES;
+      let correctionRemainingSegments = MAX_CORRECTION_NEW_SEGMENTS;
+      let consecutiveNoNovelBatches = 0;
+      let attemptedAiBatches = 0;
       for (let round = 0; round <= 3; round++) {
         if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
         let batch = unusedCandidates;
@@ -752,6 +757,7 @@ Page({
           console.log('[Manual AI Planning] Attempt start:', { attempt: round, maxAttempts: 3 });
           let batchCache;
           try {
+            attemptedAiBatches++;
             batchCache = await routeGenerationService.requestManualWaypointCandidates({
               location, preferences: this._routePreferences || {},
               nearbyPois: this._verifiedWaypointPool,
@@ -772,7 +778,12 @@ Page({
             continue;
           }
           if (!isCurrent()) return;
-          console.log('[Manual AI Planning] Plan received:', { attempt: round, candidateCount: batchCache.getAllCandidates().length });
+          console.log('[Manual AI Planning] Plan received:', {
+            attempt: round, candidateCount: batchCache.getAllCandidates().length,
+            novelCandidateCount: batchCache.getAllCandidates().filter(candidate =>
+              !previouslyAttempted.has(waypointSetKey(candidate.waypointIds))).length,
+            emptyBatch: batchCache.getAllCandidates().length === 0
+          });
           this._manualCandidateCache = batchCache;
           // Retain the entire requested batch, including candidates left unused
           // when the first success returns early.
@@ -780,6 +791,8 @@ Page({
             this._manualRequestedKeys.add(waypointSetKey(candidate.waypointIds)));
           batch = batchCache.getUnusedCandidates().map(candidate => ({ candidate, cache: batchCache }));
         }
+        const novelBatchCount = batch.filter(({ candidate }) =>
+          !previouslyAttempted.has(waypointSetKey(candidate.waypointIds))).length;
         for (const { candidate, cache: batchCache } of batch) {
         const candidateKey = waypointSetKey(candidate.waypointIds);
         if (round > 0 && previouslyAttempted.has(candidateKey)) {
@@ -838,12 +851,86 @@ Page({
         wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
         return;
         }
+        // Also cover the case where the original batch has no remaining
+        // candidates. Even without new failure observations, previously
+        // excluded singleton sets can be extended to novel verified POI pairs.
+        let correctedAttemptCount = 0;
+        if (isCurrent() && correctionRemainingCandidates > 0 &&
+            this._verifiedWaypointPool?.length &&
+            typeof routeGenerationService.attemptRouteCorrections === 'function') {
+          const excluded = new Set([
+            ...previouslyAttempted, ...this._manualAttemptedKeys,
+            ...this._manualRequestedKeys, ...this._seenWaypointSetKeys
+          ]);
+          const attemptedSingletons = [...excluded].filter(key => {
+            try { return JSON.parse(key).length === 1; } catch (_) { return false; }
+          }).length;
+          const corrected = await routeGenerationService.attemptRouteCorrections({
+            session, verifiedWaypointPool: this._verifiedWaypointPool,
+            observations, excludedWaypointSets: [...excluded],
+            requestedDurationMinutes: (this._routePreferences || {}).durationMinutes,
+            location, allowPairFallback: attemptedSingletons >= 2,
+            maxCandidates: correctionRemainingCandidates,
+            maxNewSegmentCalls: correctionRemainingSegments
+          });
+          if (!isCurrent() || (selectedRoute && !this._rawRoutes.includes(selectedRoute))) return;
+          correctedAttemptCount = corrected.attemptedCandidates;
+          correctionRemainingCandidates -= corrected.attemptedCandidates;
+          correctionRemainingSegments = corrected.remainingSegmentBudget;
+          corrected.attemptedWaypointSets.forEach(ids => {
+            const key = waypointSetKey(ids);
+            previouslyAttempted.add(key);
+            this._manualAttemptedKeys.add(key);
+          });
+          corrected.failures.forEach(({ waypointIds, result }) => observations.push({
+            attempt: round, waypointIds, failure: normalizePlanningFailure(result, waypointIds)
+          }));
+          console.log('[Manual AI Planning] Correction summary:', {
+            attempt: round, attemptedCandidates: corrected.attemptedCandidates,
+            remainingSegmentBudget: correctionRemainingSegments
+          });
+          if (corrected.providerError) {
+            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            return;
+          }
+          if (corrected.success) {
+            const resultRoute = corrected.route;
+            const completeSet = waypointSetKey(resultRoute.recommendedWaypointIds || []);
+            if (!this._seenWaypointSetKeys.has(completeSet)) {
+              const newRawRoutes = selectedRoute
+                ? this._rawRoutes.map(route => route === selectedRoute ? resultRoute : route)
+                : [...this._rawRoutes, resultRoute];
+              this._rawRoutes = this.rankCurrentRoutes(newRawRoutes);
+              this.rememberSurfacedRoute(resultRoute);
+              this._manualAlternativeActionCount++;
+              this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+              // Aggregate-only acceptance event; never expose route IDs or POI details.
+              console.log('[Manual AI Planning] Route accepted:', {
+                attempt: round,
+                action: selectedRoute ? 'replace' : 'add',
+                source: 'deterministic-correction'
+              });
+              wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
+              return;
+            }
+          }
+        }
+        // Two successive empty/repeated model batches without a novel
+        // candidate or a deterministic correction provide no new evidence.
+        // Allow one retry: an independent AI draw may still be different.
+        if (round > 0) {
+          consecutiveNoNovelBatches = (novelBatchCount + correctedAttemptCount) > 0
+            ? 0 : consecutiveNoNovelBatches + 1;
+          if (consecutiveNoNovelBatches >= 2) break;
+        }
       }
       if (isCurrent()) {
         this._manualAlternativeExhausted = true;
-        console.warn('[Manual AI Planning] Exhausted:', { maxAttempts: 3 });
+        console.warn('[Manual AI Planning] Exhausted:', {
+          attemptedAiBatches, maxAttempts: 3
+        });
         wx.showToast({ title: this._verifiedWaypointPool?.length
-          ? "三轮尝试后暂无更多路线" : "暂无更多路线", icon: "none" });
+          ? "暂无更多可用路线" : "暂无更多路线", icon: "none" });
       }
     } catch (error) {
       if (isCurrent()) wx.showToast({ title: "路线加载失败，请稍后再试", icon: "none" });

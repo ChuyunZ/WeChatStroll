@@ -238,3 +238,53 @@ test('later attempts keep the verified POI output contract', async () => {
   expect(client.request.mock.calls[0][0]).toContain('PREVIOUS FAILED ATTEMPTS')
   expect(result).toEqual({ success: false, error: 'INVALID_AI_ROUTE_PLAN' })
 })
+
+describe('sanitized contract diagnostics', () => {
+  let log, warn, error
+  beforeEach(() => {
+    log = jest.spyOn(console, 'log').mockImplementation(() => {})
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    error = jest.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => jest.restoreAllMocks())
+
+  test.each(['mixed', 'malformed-json', 'malformed-plan', 'all-invalid', 'empty'])
+  ('logs only aggregate counts and fixed codes for %s responses', async kind => {
+    const privateId = 'PRIVATE_POI_SENTINEL'
+    const event = { ...VALID_EVENT, nearbyPois: [
+      { ...VALID_EVENT.nearbyPois[0], poiId: privateId, name: 'PRIVATE_NAME_SENTINEL',
+        latitude: 23.123456789, longitude: 113.987654321 }
+    ] }
+    const valid = { waypoints: [{ poiId: privateId }] }
+    const invalid = { waypoints: [{ poiId: 'PRIVATE_UNKNOWN_SENTINEL' }] }
+    const texts = {
+      mixed: JSON.stringify({ candidates: [valid, valid, invalid,
+        { waypoints: [{ poiId: privateId, latitude: 23.123456789 }] }] }),
+      'malformed-json': 'PRIVATE_RAW_SENTINEL invalid JSON',
+      'malformed-plan': JSON.stringify({ candidates: [], text: 'PRIVATE_RAW_SENTINEL' }),
+      'all-invalid': JSON.stringify({ candidates: [invalid] }),
+      empty: '{"candidates":[]}'
+    }
+    const client = { request: jest.fn().mockResolvedValue({ success: true, data: { text: texts[kind] } }) }
+    const result = await generateWaypointPlan(event, client)
+    expect(client.request).toHaveBeenCalledTimes(1)
+    expect(log).toHaveBeenCalledTimes(1)
+    const [label, summary] = log.mock.calls[0]
+    expect(label).toBe('[AI Route Planner] Contract summary:')
+    expect(summary).toMatchObject({ schemaVersion: 1 })
+    expect(JSON.stringify([...log.mock.calls, ...warn.mock.calls, ...error.mock.calls]))
+      .not.toMatch(/PRIVATE_|23\.123456789|113\.987654321|waypointIds|"poiId"/)
+    if (kind === 'mixed') {
+      expect(result).toEqual({ success: true, plan: { candidates: [valid] } })
+      expect(summary).toMatchObject({ rawCandidateCount: 4, structurallyValidCount: 2,
+        retainedCandidateCount: 1, removedCandidateCount: 3,
+        removedByReason: { malformed_structure: 1, unverified_poi: 1, duplicate_set: 1 } })
+    } else if (kind === 'empty') {
+      expect(result).toEqual({ success: true, plan: { candidates: [] } })
+      expect(summary.planRejectionReason).toBeNull()
+    } else {
+      expect(result).toEqual({ success: false, error: 'INVALID_AI_ROUTE_PLAN' })
+      expect(summary.planRejectionReason).not.toBeNull()
+    }
+  })
+})

@@ -1,7 +1,7 @@
 const cloud = require("wx-server-sdk")
 const { createAiClient } = require("./aiClient")
 const { buildRoutePlanningPrompt } = require("./routePlanningPrompt")
-const { parseRoutePlan, parseAndValidateRoutePlan } = require("./routePlanContract")
+const { parseAndValidateRoutePlanWithDiagnostics } = require("./routePlanContract")
 cloud.init({
   env: cloud.DYNAMIC_CURRENT_ENV,
   timeout: 60000
@@ -70,75 +70,17 @@ async function generateWaypointPlan(
   if (!aiResult.success) {
     return aiResult
   }
-  const rawPlanResult =
-    parseRoutePlan(
-      aiResult.data.text
-    )
-
-  if (rawPlanResult.success) {
-    const rawCandidates =
-      rawPlanResult.data &&
-      Array.isArray(
-        rawPlanResult.data.candidates
-      )
-        ? rawPlanResult.data.candidates
-        : []
-
-    console.log(
-      "[AI Route Planner] Raw candidates:",
-      {
-        count:
-          rawCandidates.length,
-
-        waypointIds:
-          rawCandidates.map(
-            candidate =>
-              candidate &&
-              Array.isArray(candidate.waypoints)
-                ? candidate.waypoints.map(
-                    waypoint =>
-                      waypoint &&
-                      typeof waypoint.poiId === "string"
-                        ? waypoint.poiId
-                        : null
-                  )
-                : null
-          )
-      }
-    )
-  }
-  else {
-    console.warn(
-      "[AI Route Planner] Raw response is not valid JSON."
-    )
-  }
-
-  const planResult =
-    parseAndValidateRoutePlan(
+  const { result: planResult, diagnostics } =
+    parseAndValidateRoutePlanWithDiagnostics(
       aiResult.data.text,
       normalizedEvent.nearbyPois
     )
 
-  if (!planResult.success) {
-    console.warn('[AI Route Planner] Validation failed:', { code: planResult.error })
-    return planResult
-  }
-  console.log(
-    "[AI Route Planner] Validated candidates:",
-    {
-      count:
-        planResult.data.candidates.length,
+  // No raw model output, POI IDs, coordinates or user-specific values in logs.
+  // This describes cloud structural filtering, not real walking validation.
+  console.log('[AI Route Planner] Contract summary:', diagnostics)
 
-      waypointIds:
-        planResult.data.candidates.map(
-          candidate =>
-            candidate.waypoints.map(
-              waypoint =>
-                waypoint.poiId
-            )
-        )
-    }
-  )
+  if (!planResult.success) return planResult
 
   return {
     success: true,
