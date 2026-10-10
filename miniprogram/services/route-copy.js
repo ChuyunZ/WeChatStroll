@@ -135,12 +135,15 @@ function uniqueFallback(route, index, usedTitles) {
     const title = `途经${poi.name}的${typeLabel}`;
     if (Array.from(title).length <= 22) candidates.push(title);
   }
-  // Position is only a visual distinction, not an AI ranking or route fact.
-  candidates.push(`路线${index + 1} · ${typeLabel}`);
   for (const title of candidates) {
     if (!occupied(title)) return { ...base, title };
   }
-  return { ...base, title: `路线${index + 1} · ${typeLabel}` };
+  // Position is only a visual distinction, not an AI ranking or route fact.
+  // Try further serials when an unusual AI title already used this label.
+  for (let serial = index + 1; ; serial++) {
+    const title = `路线${serial} · ${typeLabel}`;
+    if (!occupied(title)) return { ...base, title };
+  }
 }
 
 function createSession({ scheduler = sharedScheduler, request = requestCopy,
