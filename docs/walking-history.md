@@ -69,7 +69,7 @@ All item fields are required, with these constraints:
 | requestedDurationMinutes | Integer 15–120, from the walk questionnaire |
 | trajectoryEnabled | Boolean consent captured at start; does not guarantee GPS availability |
 | trajectoryPartial | Boolean; must be false when trajectoryEnabled is false |
-| trajectoryEndTimeMs | Safe integer >= endTime, <= 253402300799999; query boundary metadata, not walking end or duration |
+| trajectoryEndTimeMs | Safe integer >= endTime, <= 253402300799999; cleanup metadata, not the historical GPS authorization boundary or walking duration |
 | rating | null when no matching feedback exists, otherwise integer 1–5 |
 
 Totals have exactly the two documented nonnegative safe integer fields. Response
@@ -175,3 +175,7 @@ Phase 3A now adds a local-only [walk-authorized trajectory API](history-trace.md
 and dedicated client Service. It does not change this list contract or fetch GPS
 on Profile load. History Detail, explicit trajectory loading and map UI remain
 Phase 3B. The new trajectory API has not been deployed or live-tested.
+The Phase 3A security follow-up bounds historical GPS by the fixed Walk endTime;
+later trajectoryEndTimeMs metadata cannot extend reads and conservatively marks
+the trace partial. Post-completion final samples may be omitted. See the trace
+contract for query-scoped summaries and remaining shared-Entity attribution limits.

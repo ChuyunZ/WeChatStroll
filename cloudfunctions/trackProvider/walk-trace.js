@@ -18,17 +18,19 @@ async function authorizeWalk(event, openid, store, nowMs, validateSearchRange) {
   if (walk.trajectoryEnabled !== true || typeof walk.trajectoryPartial !== 'boolean' ||
       !canonicalTime(walk.startTime) || !canonicalTime(walk.endTime)) throw traceError('INVALID_WALK_TRACE_METADATA');
   const startTimeMs = Date.parse(walk.startTime), completionMs = Date.parse(walk.endTime);
-  const endTimeMs = walk.trajectoryEndTimeMs;
-  if (!Number.isSafeInteger(endTimeMs) || !Number.isSafeInteger(nowMs) || startTimeMs > completionMs ||
-      endTimeMs < completionMs ||
-      endTimeMs > nowMs || endTimeMs > 253402300799999 || endTimeMs <= startTimeMs) {
+  const trajectoryEndTimeMs = walk.trajectoryEndTimeMs;
+  const endTimeMs = completionMs;
+  if (!Number.isSafeInteger(trajectoryEndTimeMs) || !Number.isSafeInteger(nowMs) ||
+      trajectoryEndTimeMs < completionMs || trajectoryEndTimeMs > nowMs ||
+      trajectoryEndTimeMs > 253402300799999 || endTimeMs <= startTimeMs) {
     throw traceError('INVALID_WALK_TRACE_METADATA');
   }
-  // Completion retries retain the original endTime; cleanup may finish much later.
-  // Validate the whole persisted interval, without inventing a separate tail limit.
+  // Cleanup metadata is mutable; only the immutable completion bounds historical reads.
+  // The 24-hour limit applies to the formal walk, not delayed cleanup.
   // Reject future persisted bounds above; never use the legacy validator's clamping as authorization.
   const range = validateSearchRange({ startTimeMs, endTimeMs }, nowMs);
-  return { ...range, startTimeMs, endTimeMs, partial: walk.trajectoryPartial };
+  return { ...range, startTimeMs, endTimeMs,
+    partial: walk.trajectoryPartial || trajectoryEndTimeMs > endTimeMs };
 }
 function normalizeWalkTrace(result, range, normalizePoint) {
   if (!result || !Array.isArray(result.points)) throw traceError('TRACK_INVALID_RESPONSE');

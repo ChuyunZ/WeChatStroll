@@ -50,15 +50,15 @@ test('database failures and untrusted error codes are redacted', async () => {
   const result = await f.handler(request); expect(result.error.code).toBe('TRACK_WALK_READ_FAILED'); noProvider(f);
   expect(JSON.stringify([result, f.log.mock.calls])).not.toMatch(/database secret|secret credentials|ownerKey/);
 });
-test.each(['completed', 'ended_early'])('authorizes %s before entity preparation, preserving cleanup boundary', async status => {
+test.each(['completed', 'ended_early'])('authorizes %s before entity preparation, excluding cleanup boundary', async status => {
   const f = fixture({ status, completionStatus: status, trajectoryEndTimeMs: END_MS + 5000, trajectoryPartial: true });
-  f.client.searchTrace.mockResolvedValue({ points: [rawPoint(END_MS + 3000)], mileageMeters: 100, durationSeconds: 12 });
+  f.client.searchTrace.mockResolvedValue({ points: [rawPoint(END_MS - 3000), rawPoint(END_MS + 3000)], mileageMeters: 100, durationSeconds: 12 });
   const result = await f.handler(request);
   expect(f.walkStore.getWalk).toHaveBeenCalledWith('walk-1');
   expect(f.walkStore.getWalk.mock.invocationCallOrder[0]).toBeLessThan(f.client.ensureEntity.mock.invocationCallOrder[0]);
-  expect(f.client.searchTrace).toHaveBeenCalledWith(expect.stringMatching(/^usr_[a-f0-9]{32}$/), START_MS / 1000, END_MS / 1000 + 5);
-  expect(result.trace).toMatchObject({ available: true, partial: true, retryable: false, mileageMeters: 100 });
-  expect(result.trace.points[0].timestampMs).toBe(END_MS + 3000); // Do not truncate at completion.
+  expect(f.client.searchTrace).toHaveBeenCalledWith(expect.stringMatching(/^usr_[a-f0-9]{32}$/), START_MS / 1000, END_MS / 1000);
+  expect(result.trace).toMatchObject({ available: true, partial: true, retryable: false, mileageMeters: null, durationSeconds: null });
+  expect(result.trace.points.map(point => point.timestampMs)).toEqual([END_MS - 3000]);
   expect(() => validateTraceResponse(result)).not.toThrow();
 });
 test.each([0, 1])('24-hour query limit boundary, extra millisecond=%i', async extra => {
@@ -68,16 +68,17 @@ test.each([0, 1])('24-hour query limit boundary, extra millisecond=%i', async ex
   if (extra) { expect(result.error.code).toBe('TRACK_RANGE_TOO_LARGE'); noProvider(f); }
   else expect(result.success).toBe(true);
 });
-test.each([60000, 60001, 300000])('persisted cleanup extension of %i milliseconds is not arbitrarily clipped', async extension => {
+test.each([60000, 60001, 300000])('cleanup extension of %i milliseconds cannot extend the query', async extension => {
   const f = fixture({ trajectoryEndTimeMs: END_MS + extension });
   const result = await f.handler(request);
   expect(result.success).toBe(true);
-  expect(f.client.searchTrace.mock.calls[0][2]).toBe(Math.floor((END_MS + extension) / 1000));
+  expect(f.client.searchTrace.mock.calls[0][2]).toBe(END_MS / 1000);
+  expect(result.trace.partial).toBe(true);
 });
-test('delayed cleanup still obeys the total 24-hour query limit', async () => {
+test('cleanup beyond 24 hours does not invalidate a safe formal interval', async () => {
   const f = fixture({ trajectoryEndTimeMs: START_MS + MAX_TRACE_QUERY_MS + 1 });
-  expect((await f.handler(request)).error.code).toBe('TRACK_RANGE_TOO_LARGE');
-  noProvider(f);
+  expect((await f.handler(request)).success).toBe(true);
+  expect(f.client.searchTrace.mock.calls[0].slice(1)).toEqual([START_MS / 1000, END_MS / 1000]);
 });
 test('a response-lost completion retry and delayed cleanup produce a readable persisted interval', async () => {
   const { createWalkHandler } = require('../walkStore/handler');
@@ -100,15 +101,17 @@ test('a response-lost completion retry and delayed cleanup produce a readable pe
     trajectoryEndTimeMs: now, trajectoryPartial: false })).success).toBe(true);
   // The transactional fake omits CloudBase's generated _id.
   const f = fixture({ ...store.documents.get('walks/walk-1'), _id: 'walk-1' });
-  f.client.searchTrace.mockResolvedValue({ points: [rawPoint(now - 1000)] });
+  f.client.searchTrace.mockResolvedValue({ points: [rawPoint(END_MS - 1000), rawPoint(now - 1000)] });
   const result = await f.handler(request);
   expect(result.success).toBe(true);
-  expect(result.trace.points.map(point => point.timestampMs)).toEqual([now - 1000]);
-  expect(f.client.searchTrace.mock.calls[0].slice(1)).toEqual([START_MS / 1000, now / 1000]);
+  expect(result.trace.points.map(point => point.timestampMs)).toEqual([END_MS - 1000]);
+  expect(result.trace.partial).toBe(true);
+  expect(f.client.searchTrace.mock.calls[0].slice(1)).toEqual([START_MS / 1000, END_MS / 1000]);
   expect(() => validateTraceResponse(result)).not.toThrow();
 });
 test('fractional boundary seconds never return samples potentially belonging to adjacent walks', async () => {
-  const f = fixture({ startTime: new Date(START_MS + 250).toISOString(), trajectoryEndTimeMs: END_MS + 5500 });
+  const f = fixture({ startTime: new Date(START_MS + 250).toISOString(),
+    endTime: new Date(END_MS + 5500).toISOString(), trajectoryEndTimeMs: END_MS + 9500 });
   f.client.searchTrace.mockResolvedValue({ points: [rawPoint(START_MS - 1000), rawPoint(START_MS), rawPoint(START_MS + 1000),
     rawPoint(END_MS + 4000), rawPoint(END_MS + 5000), rawPoint(END_MS + 6000)], mileageMeters: 123, durationSeconds: 1800 });
   const result = await f.handler(request);
@@ -124,6 +127,47 @@ test('two adjacent authorized ranges exclude their shared boundary bucket withou
   first.client.searchTrace.mockResolvedValue({ points: samples }); second.client.searchTrace.mockResolvedValue({ points: samples });
   expect((await first.handler(request)).trace.points.map(p => p.timestampMs)).toEqual([START_MS + 4000]);
   expect((await second.handler(request)).trace.points.map(p => p.timestampMs)).toEqual([START_MS + 6000]);
+});
+test('extending Walk A metadata cannot expose later Walk B points from the shared entity', async () => {
+  const at = time => Date.parse(`2026-10-06T${time}:00.000Z`);
+  const a = testWalk({ _id: 'walk-A', walkId: 'walk-A', startTime: new Date(at('10:00')).toISOString(),
+    endTime: new Date(at('10:30')).toISOString(), trajectoryEndTimeMs: at('11:30') });
+  const b = testWalk({ _id: 'walk-B', walkId: 'walk-B', startTime: new Date(at('11:00')).toISOString(),
+    endTime: new Date(at('11:20')).toISOString(), trajectoryEndTimeMs: at('11:20') });
+  const client = { ensureEntity: jest.fn(), searchTrace: jest.fn().mockResolvedValue({
+    points: ['10:05', '10:20', '11:05', '11:15'].map(time => rawPoint(at(time))), mileageMeters: 1000, durationSeconds: 3000 }) };
+  const handler = createTrackHandler({ config: { entitySecret: 'synthetic-secret' }, client,
+    getOpenId: () => 'openid-one', getNowMs: () => at('12:00'),
+    walkStore: { getWalk: async id => ({ 'walk-A': a, 'walk-B': b })[id] } });
+  const result = await handler({ action: 'searchWalkTrace', walkId: 'walk-A' });
+  expect(result.success).toBe(true);
+  expect(client.searchTrace.mock.calls[0].slice(1)).toEqual([at('10:00') / 1000, at('10:30') / 1000]);
+  expect(result.trace.points.map(point => point.timestampMs)).toEqual([at('10:05'), at('10:20')]);
+  expect(result.trace).toMatchObject({ partial: true, mileageMeters: null, durationSeconds: null });
+  const next = await handler({ action: 'searchWalkTrace', walkId: 'walk-B' });
+  expect(next.trace.points.map(point => point.timestampMs)).toEqual([at('11:05'), at('11:15')]);
+  expect(client.searchTrace.mock.calls[1][0]).toBe(client.searchTrace.mock.calls[0][0]);
+});
+test.each([0, 5000])('formal-interval summaries remain scoped to the query; cleanup extension=%i', async extension => {
+  const f = fixture({ trajectoryEndTimeMs: END_MS + extension });
+  f.client.searchTrace.mockResolvedValue({ points: [rawPoint()], mileageMeters: 10, durationSeconds: 2 });
+  const result = await f.handler(request);
+  expect(result.trace).toMatchObject({ available: true, partial: extension > 0, mileageMeters: 10, durationSeconds: 2 });
+  expect(f.client.searchTrace.mock.calls[0].slice(1)).toEqual([START_MS / 1000, END_MS / 1000]);
+});
+test('samples in the exact completion second and later are excluded', async () => {
+  const f = fixture();
+  f.client.searchTrace.mockResolvedValue({ points: [rawPoint(END_MS - 1000), rawPoint(END_MS), rawPoint(END_MS + 1000)] });
+  const result = await f.handler(request);
+  expect(result.trace.points.map(point => point.timestampMs)).toEqual([END_MS - 1000]);
+  expect(result.trace.partial).toBe(true);
+});
+test.each([[250, 750], [0, 999]])('same-second walk [%i, %i] returns empty without expanding a provider query', async (start, end) => {
+  const f = fixture({ startTime: new Date(START_MS + start).toISOString(),
+    endTime: new Date(START_MS + end).toISOString(), trajectoryEndTimeMs: START_MS + end });
+  expect(await f.handler(request)).toEqual({ success: true, trace: { points: [], mileageMeters: null,
+    durationSeconds: null, available: false, retryable: true, partial: true } });
+  noProvider(f);
 });
 test('sorts out-of-order provider points, deduplicates repeated samples and projects optional metadata', async () => {
   const f = fixture();

@@ -252,6 +252,10 @@ function createTrackHandler({
       if (action === 'searchTrace') throw traceError('TRACK_WALK_REQUIRED');
       if (action === 'searchWalkTrace') {
         const range = await authorizeWalk(event, openid, walkStore, getNowMs(), validateSearchRange);
+        // A same-second interval cannot form a positive provider query. Never extend it.
+        if (range.startTimeSeconds === range.endTimeSeconds) {
+          return { success: true, trace: normalizeWalkTrace({ points: [] }, { ...range, partial: true }, normalizeSearchPoint) };
+        }
         const entityId = await resolveEntity(openid);
         const result = await client.searchTrace(entityId, range.startTimeSeconds, range.endTimeSeconds);
         return { success: true, trace: normalizeWalkTrace(result, range, normalizeSearchPoint) };

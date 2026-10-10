@@ -335,7 +335,9 @@ preferences. History Detail and GPS display remain Phase 3B.
 
 `trackProvider` accepts only `{ action: 'searchWalkTrace', walkId }` as application
 fields, authorizes the persisted owner/terminal state/consent and derives the time
-range from startTime and trajectoryEndTimeMs. It returns `{ success: true, trace }`;
+range from startTime and the fixed completion endTime. Mutable trajectoryEndTimeMs
+cannot extend this range; later cleanup metadata makes the result partial and
+post-completion samples are omitted. It returns `{ success: true, trace }`;
 the dedicated `history-trace.searchWalkTrace({ walkId })` Service returns the
 validated trace with bounded empty-result retries. Generic public `searchTrace`
 range requests are retired. See the [complete trace contract](history-trace.md)

@@ -34,29 +34,23 @@ Before any Tencent entity preparation or trace search, require:
 - `trajectoryEnabled === true` and `trajectoryPartial` is a Boolean. A valid owned
   terminal walk with explicitly false consent returns `TRACK_NOT_ENABLED`.
 - Canonical positive UTC ISO start/completion timestamps, start <= completion,
-  safe integer trajectoryEndTimeMs >= completion, positive query span, query end
-  <= server now, and total span <= the existing 24-hour limit.
+  safe integer completion <= trajectoryEndTimeMs <= server now (and year 9999),
+  positive formal query span, and formal span <= the existing 24-hour limit.
 
-The interval is exclusively `[walk.startTime, walk.trajectoryEndTimeMs]`.
-`walk.endTime` validates completion but never replaces the extended query boundary.
-Future or excessive bounds are rejected, not clamped or replaced with client data.
+The historical interval is exclusively `[Date.parse(walk.startTime), Date.parse(walk.endTime)]`.
+Completion fixes `endTime`; later metadata updates cannot extend it. Mutable
+`trajectoryEndTimeMs` is still validated and stored by the unchanged lifecycle,
+but never expands the historical query or returned point range. Post-completion
+final samples are deliberately omitted to reduce cross-walk mixing.
 
-There is **no separate 60-second post-completion limit**. Lifecycle review found
-that `walking.js` retains the original completion request across failures and
-response-loss retries, and only finalizes tracking after completion succeeds.
-It then persists `max(savedBoundary, Date.now())`. The 5-second flush and 3-second
-stop budgets do not bound the preceding network delay or user retry delay.
-`walkStore.updateTrajectoryMetadata` accepts these later boundaries; its 60-second
-allowance is relative to server now, not to completion. The interrupted query-only
-tail fence therefore rejected legitimate existing records and has been removed.
-A regression uses the real lifecycle handler to complete, lose the response,
-retry five minutes later, update cleanup metadata, and query that saved interval.
-
-Delayed historical records remain readable when their persisted interval is valid,
-not future and at most 24 hours. Longer intervals fail explicitly rather than being
-silently truncated. A short tail limit would not prove same-user cross-walk
-separation either; the shared-Entity limitations below still apply. No Walk
-lifecycle writer is changed.
+There is no separate 60-second cleanup limit. Completion response-loss retries may
+retain the original confirmation while cleanup finishes minutes later. Such records
+remain readable over their formal interval; even cleanup metadata more than 24 hours
+after start does not invalidate an otherwise valid query. The 24-hour cap applies
+to startTime through endTime. Future or inconsistent metadata still fails validation.
+A lifecycle regression covers completion response loss, retry five minutes later,
+and cleanup metadata update: only pre-completion samples are returned. No lifecycle,
+final sampling, upload, recovery or metadata writer is changed by this fix.
 
 Only after authorization is the existing HMAC-derived per-user Tencent Entity
 ensured and searched through the existing signed client. The entity cache cannot
@@ -95,13 +89,17 @@ Unknown provider point fields are not returned. The client rejects unknown publi
 fields, invalid points, flag inconsistencies, duplicates and out-of-order points.
 
 - `available` is exactly `points.length > 0`; `retryable` is exactly its opposite.
-- `partial` includes persisted trajectoryPartial and detected point loss/filtering
-  or duplicate removal. It does not certify GPS accuracy or complete session coverage.
+- `partial` includes persisted trajectoryPartial, trajectoryEndTimeMs > endTime
+  (the cleanup interval is deliberately omitted), detected point loss/filtering,
+  duplicate removal and same-second queries omitted below. False does not certify
+  GPS authenticity, absence of sampling gaps or complete session coverage.
 - Summary metrics are nonnegative finite numbers or null. Missing provider metrics
   stay null. If any point is discarded/deduplicated, both summaries become null:
   the provider aggregate cannot be attributed to the retained point set. No path
   mileage or exercise duration is computed or fabricated. Even numeric metrics
-  are provider summaries, not verified walking exercise; walking elapsed time
+  describe only the queried formal interval, including when later cleanup was
+  deliberately omitted. They are not verified full-Walk totals or walking exercise;
+  walking elapsed time
   remains the Walk's `actualDurationSeconds`.
 
 The client retains the existing raw-query settings (`optimize: 0`, `get_fields: 1`),
@@ -116,12 +114,17 @@ An explicit empty `track: []` is a valid successful response.
 Existing uploads use `floor(timestampMs / 1000)`. The query uses the persisted
 start/end floored to seconds via the existing range validator; returned points
 are independently filtered. A point timestamp `t` is kept only if its entire
-possible millisecond bucket fits: `t >= startTimeMs && t + 999 <= trajectoryEndTimeMs`.
+possible millisecond bucket fits: `t >= startTimeMs && t + 999 <= Date.parse(walk.endTime)`.
 This conservatively excludes a shared second between adjacent non-overlapping
 walks, and rejects provider points outside the authorized time interval. It may
 discard legitimate first/final samples in those ambiguous seconds. Detected
-discarding sets partial; a cleanup sample after endTime is retained when its full
-bucket is inside the persisted extended boundary. No interpolation is performed.
+discarding sets partial. Cleanup samples after endTime are never returned, even
+when the provider returns them despite the bounded query. No interpolation is performed.
+Positive intervals whose start/end floor to the same second return an empty,
+partial, retryable trace with null metrics after authorization, without Entity or
+provider calls. No end-time extension is used to manufacture a positive provider
+query. The unchanged client may retry this empty result within its existing budget.
+Zero-duration intervals remain invalid.
 
 Points are sorted by timestamp, then latitude/longitude for deterministic same-second
 ordering. Identical timestamp/coordinate samples are deduplicated; optional metadata
@@ -134,8 +137,8 @@ retryable trace, not a provider failure.
 
 **The current per-user Entity and timestamps do not guarantee perfect per-walk
 point attribution.** Adjacent non-overlapping ranges are conservatively filtered,
-but truly overlapping persisted intervals (including one walk's cleanup extending
-into another's start), concurrent devices, incorrect device timestamps or historical
+but truly overlapping formal intervals, concurrent devices, inaccurate or forged
+device timestamps or historical
 uploads can still produce same-user cross-walk mixing *inside* the authorized
 interval. This implementation does not query neighboring walks or relabel such
 samples. Existing uploads are authenticated per Entity but are not bound to a
@@ -167,7 +170,7 @@ error bodies or `originalError`. Unknown codes become `TRACK_PROVIDER_FAILED`.
 | INVALID_WALK_TRACE_METADATA | Invalid identity/version/state/quality/time |
 | TRACK_WALK_READ_FAILED | Authorization document read failed |
 | TRACK_WALK_REQUIRED | Retired arbitrary-range query attempted |
-| TRACK_RANGE_TOO_LARGE | Persisted interval exceeds 24 hours |
+| TRACK_RANGE_TOO_LARGE | Formal startTime-to-endTime interval exceeds 24 hours |
 | TRACK_INVALID_RESPONSE | Malformed provider/public trace or no usable samples after invalid-data loss |
 | TRACK_SEARCH_TOO_LARGE | Page or point budget exceeded |
 | TRACK_SEARCH_PAGINATION_FAILED | Invalid/repeated pagination token |
