@@ -127,7 +127,8 @@ test.each(['completed', 'ended_early'])('cloud %s clears stale active session an
   await records.completeWalk({ walkId: walk.walkId, completionStatus, endTimeMs: Date.now(), trajectoryPartial: true });
   expect(await sessions.reconcileActiveWalk()).toBeNull();
   expect(storage.activeWalkSession).toBeUndefined();
-  expect(storage.pendingWalkResult).toMatchObject({ walkId: walk.walkId, completionStatus, route });
+  expect(storage.pendingWalkResult).toMatchObject({ walkId: walk.walkId, completionStatus });
+  expect(storage.pendingWalkResult).not.toHaveProperty('route');
   expect(tracker.stopTrackingForSession).toHaveBeenCalledWith(local);
 });
 test('cloud abandonment clears local tracking without creating a Feedback payload', async () => {
