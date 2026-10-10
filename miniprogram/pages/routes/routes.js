@@ -855,6 +855,12 @@ Page({
               this.rememberSurfacedRoute(resultRoute);
               this._manualAlternativeActionCount++;
               this.setData({ routes: this.prepareRoutes(this._rawRoutes) });
+              // Aggregate-only acceptance event; never expose route IDs or POI details.
+              console.log('[Manual AI Planning] Route accepted:', {
+                attempt: round,
+                action: selectedRoute ? 'replace' : 'add',
+                source: 'deterministic-correction'
+              });
               wx.showToast({ title: selectedRoute ? "已更换路线" : "已增加路线", icon: "none" });
               return;
             }
