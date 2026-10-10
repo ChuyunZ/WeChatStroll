@@ -1049,14 +1049,98 @@ test("late consent callbacks cannot create a walk after Route Detail unloads", (
   expect(wx.showModal).not.toHaveBeenCalled();
 });
 
-test("Route Detail recovers pending feedback using the durable walk identity", async () => {
-  wx.setStorageSync("pendingWalkResult", {
-    walkId: "walk-feedback", routeId: GENERATED_ROUTE.routeId, route: GENERATED_ROUTE,
-    startTime: "2026-10-07T01:00:00Z", endTime: "2026-10-07T01:05:00Z",
-    actualDurationSeconds: 300, completionStatus: "completed"
+const pendingFeedback = (overrides = {}) => ({
+  walkId: "walk-feedback", routeId: GENERATED_ROUTE.routeId, route: GENERATED_ROUTE,
+  startTime: "2026-10-07T01:00:00Z", endTime: "2026-10-07T01:05:00Z",
+  actualDurationSeconds: 300, completionStatus: "completed", ...overrides
+});
+
+test("old pending feedback cannot hijack Route Detail or erase completed history", async () => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  await page.onShow();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+  expect(walkRecords.getActiveWalk).toHaveBeenCalledTimes(1);
+  expect(walkRecords.completeWalk).not.toHaveBeenCalled();
+});
+
+test("Route Detail waits for EventChannel route before reconciling cloud walk", async () => {
+  const channel = createEventChannel();
+  page = loadRouteDetailPage({ eventChannel: channel });
+  page.onLoad({ id: GENERATED_ROUTE.routeId, from: "routes" });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  await page.onShow();
+  expect(walkRecords.getActiveWalk).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  channel.handlers.selectedRoute(GENERATED_ROUTE);
+  await flushCloud();
+  expect(page.data.route.routeId).toBe(GENERATED_ROUTE.routeId);
+  expect(walkRecords.getActiveWalk).toHaveBeenCalledTimes(1);
+  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+});
+
+test("a genuine active walk still resumes before any old feedback cleanup", async () => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  wx.setStorageSync("activeWalkSession", {
+    version: 2, walkId: "walk-test", status: "active",
+    routeId: GENERATED_ROUTE.routeId, route: GENERATED_ROUTE,
+    preferences: { durationMinutes: 30, routeType: "loop",
+      crowdPreference: "medium", environmentPreferences: [] },
+    startTimeMs: Date.now(), trackingEnabled: false
   });
   await page.onShow();
-  expect(wx.reLaunch).toHaveBeenCalledWith(expect.objectContaining({
-    url: "/pages/feedback/feedback?walkId=walk-feedback"
+  expect(wx.navigateTo).toHaveBeenCalledWith(expect.objectContaining({
+    url: `/pages/walking/walking?routeId=${encodeURIComponent(GENERATED_ROUTE.routeId)}`
   }));
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("activeWalkSession").walkId).toBe("walk-test");
+  expect(wx.getStorageSync("pendingWalkResult").walkId).toBe("walk-feedback");
+});
+
+test.each(["hide", "unload"])("late cloud reconciliation after %s cannot redirect or clean pending", async mode => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  let finish;
+  walkRecords.getActiveWalk.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const checking = page.onShow();
+  if (mode === "hide") page.onHide();
+  else page.onUnload();
+  finish(null);
+  await checking;
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("pendingWalkResult")).toBeTruthy();
+});
+
+test("repeated onShow checks ignore older out-of-order responses", async () => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  let finishFirst;
+  walkRecords.getActiveWalk
+    .mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }))
+    .mockResolvedValueOnce(null);
+  const first = page.onShow();
+  const second = page.onShow();
+  await second;
+  finishFirst(null);
+  await first;
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("pendingWalkResult")).toBeUndefined();
+  expect(wx.removeStorageSync.mock.calls.filter(([key]) => key === "pendingWalkResult")).toHaveLength(1);
+});
+
+test("failed CloudBase reconciliation preserves pending and does not hijack navigation", async () => {
+  page.onLoad({ id: mockRoutes[0].routeId });
+  wx.setStorageSync("pendingWalkResult", pendingFeedback());
+  walkRecords.getActiveWalk.mockRejectedValueOnce(new Error("offline"));
+  await page.onShow();
+  expect(wx.reLaunch).not.toHaveBeenCalled();
+  expect(wx.getStorageSync("pendingWalkResult")).toBeTruthy();
+  expect(wx.showToast).toHaveBeenCalledWith({
+    title: "暂时无法恢复散步状态，请重试", icon: "none"
+  });
 });
