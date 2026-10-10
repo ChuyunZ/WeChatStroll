@@ -54,6 +54,9 @@ Page({
     this._startingWalk = false;
     this._activeWalkRedirecting = false;
     this._activeWalkRedirectStartedAtMs = 0;
+    this._routeDetailVisible = false;
+    this._walkReconcileEpoch = 0;
+    this._awaitingSelectedRoute = options.from === "routes";
 
     const routeId = options.id;
     this._routePreferences =
@@ -100,7 +103,11 @@ Page({
             return;
           }
 
+          this._awaitingSelectedRoute = false;
           this.loadRoute(route);
+          // onShow can run before the opener delivers the selected route.
+          // Reconcile only once a usable route snapshot is available.
+          if (this._routeDetailVisible && this._confirmedRoute) void this.onShow();
         };
         eventChannel.on("selectedRoute", this._selectedRouteHandler);
 
@@ -118,9 +125,12 @@ Page({
   },
 
   async onShow() {
-    if (this._unloaded || this._startingWalk) {
-      return;
-    }
+    if (this._unloaded) return;
+    this._routeDetailVisible = true;
+    const checkEpoch = (this._walkReconcileEpoch || 0) + 1;
+    this._walkReconcileEpoch = checkEpoch;
+    if (this._startingWalk ||
+        (this._awaitingSelectedRoute && !this._confirmedRoute)) return;
 
     if (this._activeWalkRedirecting) {
       const redirectAgeMs =
@@ -143,6 +153,8 @@ Page({
     try {
       activeSession = await activeWalkSessionService.reconcileActiveWalk(this._confirmedRoute);
     } catch (error) {
+      if (this._unloaded || !this._routeDetailVisible ||
+          checkEpoch !== this._walkReconcileEpoch) return;
       wx.showToast({
         title:
           error.code === "WALK_ROUTE_UNAVAILABLE" || error.code === "WALK_ABANDONED"
@@ -153,18 +165,29 @@ Page({
       return;
     }
 
-    if (this._unloaded) return;
+    if (this._unloaded || !this._routeDetailVisible ||
+        checkEpoch !== this._walkReconcileEpoch || this._startingWalk) return;
     if (activeSession) {
       this.resumeActiveWalk(activeSession);
     } else {
-      const pending = activeWalkSessionService.getPendingWalkResult();
-      if (pending && pending.walkId) {
-        wx.reLaunch({
-          url: `/pages/feedback/feedback?walkId=${encodeURIComponent(pending.walkId)}`,
-          fail: () => wx.showToast({ title: "散步已保存，暂时无法打开评价页面", icon: "none" })
-        });
+      // Feedback is optional. Once the user chooses to view another route,
+      // discard only the previous local feedback handoff, never the walk record.
+      try {
+        const pending = activeWalkSessionService.getPendingWalkResult();
+        if (pending && pending.walkId) {
+          activeWalkSessionService.clearPendingWalkResult(pending.walkId);
+        }
+      } catch (error) {
+        // An optional local handoff must not break viewing the selected route.
+        // Keep the durable walk record untouched; cleanup can be retried later.
+        console.warn("[Route Detail] Could not clear pending feedback handoff.", error);
       }
     }
+  },
+
+  onHide() {
+    this._routeDetailVisible = false;
+    this._walkReconcileEpoch = (this._walkReconcileEpoch || 0) + 1;
   },
 
   resumeActiveWalk(activeSession) {
@@ -498,6 +521,8 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    this._routeDetailVisible = false;
+    this._walkReconcileEpoch = (this._walkReconcileEpoch || 0) + 1;
     if (this._copyUnsubscribe) this._copyUnsubscribe();
     this._copyUnsubscribe = this._copySession = null;
     this._startPromptOpen = false;
