@@ -1,10 +1,13 @@
 # Walking History Detail — Issue #87 Phase 3B
 
-Native Mini Program implementation. The P1 handoff reports initial native E2E for
-navigation, metadata/read-only feedback, single marker, empty GPS, expanded history
-and scroll restoration, plus Phase 3A CloudBase/Tencent validation. New P1 rate limits
-remain local and require the [quota collection and rollout](history-trace.md).
-Remaining native/device acceptance is separate from Jest evidence.
+Native Mini Program implementation. Development WeChat Developer Tools E2E
+has verified navigation, real Walk/read-only feedback, real one-point and
+empty GPS views, Profile expansion/scroll restoration, 60-second cooldown
+and safe error UI. The revised quota-limited `trackProvider` and ADMINONLY
+collection were deployed and tested **in development**. Other environments
+still require [their own collection rollout](history-trace.md). Physical-
+device continuous multi-point traces and selected live cloud race/failure
+scenarios remain pending.
 
 ## Entry and data
 
@@ -114,27 +117,39 @@ overlapping formal intervals, multiple devices and inaccurate/forged timestamps
 still prevent definitive per-Walk point attribution. Display segmentation is not
 an authorization mechanism and cannot reconstruct missing historical evidence.
 
-## Manual acceptance after review
+## Development E2E completed (2026-10-10)
 
-1. Home → 我的散步 → history row: verify date/time, status and planned/elapsed duration.
-2. Verify existing feedback, all labels, long comments and empty feedback; no edit action.
-3. Inspect network: entry and feedback loading must not call trackProvider.
-4. Click 查看实际轨迹 on the handoff's approximately 12-minute Walk: one returned
-   sample must show exactly one marker and no line. On the approximately 22-second
-   Walk, zero samples plus partial must show the truthful empty/neutral wording.
-5. GPS-disabled walks show no query button or provider request. Test independent
-   feedback/GPS failures, retry, offline behavior and loading double taps.
-6. Expand/paginate Profile, scroll, open detail and return: retain list/cursor/scroll.
-   Normal Home re-entry must refresh. Test rapid back/forward and hide/unload races.
-7. Use synthetic multi-point responses to inspect gaps, same-second groups, jumps,
-   bounds and large-trace truncation on the actual native map.
-8. Check small screens, long text, safe areas, marker assets and map gesture behavior.
-9. After the dedicated development quota collection and revised function are ready,
-   test old/recent empty queries, 60-second cooldown, two manual retries across
-   errors/empty states, hide/show budget preservation and server rate-limit messaging.
-   Confirm no automatic page-entry queries or upload/finalization regression.
+- Home → Profile → History Detail rendered real persisted metadata and read-only
+  feedback or the honest absent-feedback state.
+- One actual Track Cloud point rendered a marker without a line; a separate
+  actual empty trace rendered no invented map or path.
+- Profile expansion and scroll position survived Detail return.
+- Two synthetic disconnected polylines and an independent marker displayed
+  correctly in native `<map>`; this does **not** certify live multi-point GPS.
+- The development ADMINONLY quota collection and revised `trackProvider`
+  were deployed. Four authorized historical searches produced four bounded
+  timestamps. Missing/opted-out Walks returned `WALK_NOT_FOUND` /
+  `TRACK_NOT_ENABLED` without quota increments.
+- Temporary saturation with 20 valid request timestamps caused
+  `TRACK_SEARCH_RATE_LIMITED` on the next authorized request, without
+  recording a 21st entry. The original four timestamps were restored.
+- Native manual cooldown re-enabled after 60 seconds and remained disabled
+  after the initial attempt plus two manual retries. Mocked quota and network
+  errors displayed separate safe Chinese messages, without affecting metadata
+  or feedback.
 
-The handoff reports seven real historical Walks, two with GPS, plus existing
-feedback. Initial native acceptance is reported in the P1 handoff; this local
-limiter revision still needs its own E2E. Continuous trajectory rendering still
-needs a separate real-device walk.
+## Remaining acceptance and rollout
+
+1. A real continuous **multi-point GPS walk on a physical device**; verify
+   segmentation, time/distance/speed gaps, same-second points, long-trace
+   truncation and native map behavior from actual samples.
+2. Physical-device small-screen, long-comment, map gesture and background/
+   resume checks, plus rapid navigation/in-flight request/lifecycle races.
+3. Confirm entry makes no implicit GPS request, opted-out sessions cannot
+   query, ordinary Home re-entry refreshes, and Profile return retains state.
+4. Post-deployment upload/final-flush regression. Live last-slot multi-instance
+   contention, CloudBase storage outage and clock-edge scenarios are covered
+   by deterministic tests only, not by actual cloud fault injection.
+5. Other environments (including production) require the ADMINONLY quota
+   collection and dedicated rollout validation **before** function deployment.
+   Production deployment is not claimed here.

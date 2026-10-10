@@ -22,17 +22,18 @@ from `getWXContext().OPENID`.
 
 Live multi-user isolation and forced transaction-conflict scenarios were not
 manually induced; deterministic automated tests cover those cases. Feedback saving
-remains independent and no automatic refresh hook or Profile UI is added. See
+remains independent; Issue #81 added no automatic refresh hook, while Issue #87 adds the separate Profile UI. See
 [algorithm, schema and concurrency](preference-profile.md).
 
 ## 1. CloudBase Environment
 
-Issue #87 Phase 1 adds local `walkStore.listHistory` support. It reuses the
-Issue #81 walk/feedback indexes above, including their ordered range-query use;
-no new index, permission, environment variable or collection is introduced.
-History queries and lifetime counts require those indexes in the target environment.
-The cursor anchor uses `_id` equality with an owner filter. This phase is not
-deployed or live-validated; see [the History contract and bounds](walking-history.md).
+Issue #87 Phase 1 introduced `walkStore.listHistory`, which has been exercised
+in development CloudBase with owner-scoped pagination, lifetime counts and
+feedback ratings. The native Profile now consumes this endpoint. The action
+reuses Issue #81 walk/feedback indexes (including ordered range queries);
+no new collection, index or environment variable was required for Phase 1.
+Other environments must independently verify existing indexes and permissions.
+See [the History contract](walking-history.md).
 
 The project uses the following CloudBase development environment:
 
@@ -82,22 +83,27 @@ Current planned-route cloud architecture:
 - `getNearbyPois` and `getWalkingRoute`: legacy wrappers forwarding to `mapProvider`.
 - `aiRoutePlanner`: verified POI selection; real route facts come from the map provider and Route Engine.
 - `amapProvider`: historical/rollback implementation, not the current planned-route provider.
-- `trackProvider`: separate actual GPS trajectory flow through Track Cloud.
-  Phase 3A locally adds an authorized `searchWalkTrace` action and retires generic
-  range reads. P1 adds atomic per-user quota reservations in the dedicated
-  `history_trace_rate_limits` collection, alongside reads of existing `walks`.
-  This new collection must be manually created before deployment; no new compound
-  index or environment variable is needed. See [trace review and rollout](history-trace.md)
-  for caller migration, read-access requirements and pending development E2E.
-  Configure `history_trace_rate_limits` as ADMINONLY/server-only. Document IDs are
-  SHA-256 hashes of authenticated OpenIDs; records contain only requestTimesMs
-  (at most 20 server timestamps) and updatedAtMs. The function needs transaction
-  read/write access. No GPS, walk IDs, plaintext OpenIDs or provider payloads belong
-  here. Missing collection/storage failure denies historical queries; no bypass or
-  runtime collection creation exists. After review and user-approved Git workflow,
-  create/verify the development collection, then deploy revised trackProvider,
-  compile the Mini Program and run controlled quota/cooldown plus upload/finalization
-  E2E. This task performs no remote creation, permissions change or deployment.
+- `trackProvider`: separate Tencent Track Cloud GPS flow. Phase 3A implements
+  Walk-authorized `searchWalkTrace({walkId})` and retires public arbitrary-range
+  queries. Phase 3B P1 adds a transactional 20-requests-per-rolling-hour limit
+  in the dedicated `history_trace_rate_limits` collection.
+  **Development status (2026-10-10):** the ADMINONLY/server-only collection was
+  manually created in `cloud1-d0g0q6wm2e49d23d0`, the revised
+  `trackProvider` deployed, and real CloudBase quota creation/increments,
+  authorized GPS retrieval, unauthorized/opted-out denials, controlled 20-slot
+  rejection and native 60-second cooldown were verified. The 20-slot test
+  record was restored to its original values after testing.
+  The collection stores only SHA-256(authenticated OpenID) document IDs,
+  `requestTimesMs` (at most 20 server timestamps) and `updatedAtMs`;
+  never GPS, Walk IDs, raw OpenIDs, routes or provider payloads.
+  Missing/unavailable collection or transaction failures deny historical
+  queries; there is no fail-open path or runtime collection creation.
+  **Other environments, including production:** manually create the collection
+  as ADMINONLY and verify server-side transaction permissions *before* deploying
+  this function. Repeat environment-specific authorized queries and quota
+  tests. Production deployment, live multi-instance race and live storage-outage
+  validation remain unverified. See [history trace rollout](history-trace.md).
+
 - `walkStore`: durable walk lifecycle persistence for Issue #79. It owns the
   `walks` and `active_walks` collections, derives ownership from
   `cloud.getWXContext().OPENID`, and stores only allowlisted lifecycle/questionnaire

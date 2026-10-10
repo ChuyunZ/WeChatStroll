@@ -1,10 +1,13 @@
 # Historical trajectory API — Issue #87 Phase 3A
 
-The Phase 3B handoff reports Phase 3A development CloudBase/Tencent E2E success.
-[History Detail](history-detail.md), explicit “查看实际轨迹” and native map presentation
-are now implemented locally; native UI acceptance is still pending. Profile
-loading does not fetch GPS. Historical feedback remains read-only through
-the unchanged `feedbackStore.getFeedback(walkId)` API.
+Phase 3A authorized historical Tencent queries, Phase 3B native Detail and
+Phase 3B P1 transactional query limits have been exercised **in development**.
+The revised `trackProvider` and ADMINONLY quota collection are deployed there;
+real one-point and empty traces, quota creation/rejection and native
+cooldown/error UI were verified. Continuous real multi-point device GPS
+and live multi-instance/fault-injected CloudBase behavior remain unverified.
+Profile loading does not fetch GPS. Historical feedback is read-only through
+the existing `feedbackStore.getFeedback(walkId)` API.
 
 ## Request, authorization and storage
 
@@ -177,11 +180,11 @@ does not provide an exact server retry time; UI uses neutral fixed Chinese messa
 The Service neither starts tracking nor uploads, changes active sessions, queries
 on Profile load, or writes local/CloudBase GPS data.
 
-## Rolling server quota (Phase 3B P1, local only)
+## Rolling server quota (Phase 3B P1; deployed in development)
 
 `history_trace_rate_limits` is a dedicated **ADMINONLY/server-only** collection,
-not accessible to Mini Program clients. It must be created manually before this
-version is deployed. The implementation never creates a collection at runtime.
+not accessible to Mini Program clients. It was created manually in development
+before deployment; every additional environment must do the same. The implementation never creates a collection at runtime.
 Each `_id` is `sha256(authenticated OpenID)` in hex, consistent with Walk ownership.
 Only two application fields are written:
 
@@ -274,32 +277,48 @@ migrate; no safe automatic mapping from arbitrary client times is available.
 The active upload/finalization API is unchanged. The handoff reports development
 deployment/E2E of Phase 3A; other environments must independently verify their version.
 
-## Review and future development rollout
+## Development rollout completed; other environments remain pending
 
-P1 adds the collection dependency above. No new environment variable, provider
-credential or compound index is required. `trackProvider` retains server reads of
-existing ADMINONLY walks and needs transaction read/write access to the new quota
-collection. The revised limiter has not been deployed or live-tested in this task.
+P1 adds no provider credential, environment variable or compound index.
+The revised `trackProvider` requires owner-scoped `walks` reads and
+transactional read/write permission for `history_trace_rate_limits`.
 
-Rollout: Code Review/full Jest → user-approved Git workflow → manually create
-`history_trace_rate_limits` in development with ADMINONLY access → verify collection
-and transaction support → deploy revised development trackProvider → compile the
-Mini Program → controlled quota/cooldown E2E → upload/final-flush regression →
-remaining native acceptance → separate production rollout review. Never deploy this
-version while the collection is missing. No remote creation or deployment is done here.
+### Completed in development (2026-10-10)
 
-Controlled development E2E should verify 20 reservations followed by rejection,
-two instances competing for the last slot, expiration at the rolling-hour boundary,
-no quota writes on invalid requests or uploads, and no Tencent calls on quota/storage
-failure. Verify old empty Walks use one call; recent ones use at most three; local
-60-second cooldown and two manual retries survive hide/show. Inspect quota fields
-for timestamp-only data. Use development test identities and account for provider
-capacity consumed during validation; do not alter production quota documents.
+1. Created the quota collection as ADMINONLY in
+   `cloud1-d0g0q6wm2e49d23d0`, then deployed the revised
+   `trackProvider`.
+2. Exercised real authorized GPS queries, including one true marker and a
+   separate zero-point trace. A real initial transaction created the
+   hashed quota record; four searches produced four request timestamps.
+3. Verified missing Walk → `WALK_NOT_FOUND` and disabled consent →
+   `TRACK_NOT_ENABLED`, with no quota consumption.
+4. Controlled database saturation with 20 recent timestamps caused the
+   next authorized call to return `TRACK_SEARCH_RATE_LIMITED`; the count
+   stayed at 20. Original quota entries were restored afterward.
+5. Native UI verified 60-second cooldown and two manual retries after the
+   initial request. Local error injection verified safe distinct Chinese
+   quota/network messages and was restored after testing.
 
-Development E2E must verify CloudBase event metadata, document projection, owner/
-consent rejection without provider requests, real Tencent empty-body shape,
-pagination/tokens, seconds/boundary inclusivity and final cleanup latency. Test
-closely adjacent sessions, delayed retries, shared-Entity overlap and large traces
-before defining Phase 3B display promises. Confirm the old arbitrary-range action
-is rejected in the deployed environment. No live validation is claimed by Jest.
-See the Phase 3B detail checklist for the pending native UI/device acceptance.
+These observations do **not** establish live multi-instance last-slot
+contention, CloudBase transaction outage behavior, physical-device
+multi-point trajectory quality or production deployment. Concurrency and
+infrastructure failures have deterministic Jest coverage only.
+
+### Required for other environments and remaining E2E
+
+1. **Before** deploying this function in any other environment, create
+   `history_trace_rate_limits` as ADMINONLY/server-only and verify
+   transactional access. Missing storage intentionally fails closed.
+2. Deploy the compatible `trackProvider` and client, verify authorized
+   0/1/N GPS, immutable start/end boundaries, consent denial, quota and
+   retired public arbitrary-range action.
+3. Run a real upload/final-flush regression; history quota must never
+   obstruct active GPS upload or Entity initialization.
+4. Test continuous multi-point GPS on a physical device, long traces,
+   boundary seconds, pagination, shared-Entity overlap and map segmentation.
+5. Where safe, separately test real CloudBase last-slot concurrency,
+   database outage handling and rolling-window expiry. Jest transaction
+   simulations cannot prove live cross-instance behavior.
+6. Production rollout, provider permissions and usage/privacy constraints
+   require their own release review.
