@@ -21,8 +21,8 @@ the existing green palette, rpx spacing and safe-area bottom padding.
   Chinese route/status labels, requested minutes, exact actual elapsed seconds
   formatted as hours/minutes/seconds, and rating or “尚未评价”. Planned and actual
   durations are separate. No fabricated route names, locations or distances appear.
-- History rows have no detail navigation. GPS/Track Cloud, complete feedback
-  detail and the independent History Detail page remain **Phase 3**.
+- History rows now open the [Phase 3B History Detail page](history-detail.md) with
+  only a validated walkId. GPS loads only after an explicit click inside detail.
 - AI content uses the validated refresh result, transformed by the pure
   `profile-insights.js` module. No `aiRoutePlanner`, new model inference,
   third-party API, cloud function or database change is involved.
@@ -70,7 +70,10 @@ reloads page one. Pagination neither recomputes totals nor refreshes AI.
 `onLoad` initializes instance fields; `onShow` runs one refresh per visible session.
 Repeated `onShow` while already active does not duplicate requests. `onHide` and
 `onUnload` invalidate both independent request versions. Re-entry starts a fresh
-first page and preference refresh. Old successes, errors and finally handlers
+first page and preference refresh, except a matching normal return from the
+read-only History Detail page: retain loaded rows/expansion/cursor and settled AI,
+restore scroll where supported, and resume only interrupted non-GPS loads.
+Old successes, errors and finally handlers
 cannot mutate a newer generation or reset its busy flags. Unloaded pages never
 receive later `setData` calls. No cancellation API is assumed: network work already
 sent can finish, but its stale results are discarded.

@@ -2,7 +2,8 @@
 
 This phase adds a read-only `walkStore.listHistory` action and the Mini Program
 `services/walk-records.listHistory` service. Phase 2 now consumes this API in the
-[native Profile UI](profile-ui.md); History Detail and GPS maps remain Phase 3.
+[native Profile UI](profile-ui.md); [History Detail](history-detail.md) is now
+implemented locally in Phase 3B, with read-only feedback and explicit GPS loading.
 No persistence schema changes are needed.
 
 ## Request and response
@@ -171,10 +172,11 @@ environment variables or CloudBase configuration and deploys no function.
 The Phase 2 handoff reports successful Phase 1 development CloudBase E2E for
 counts, pagination, ratings and invalid cursors. Phase 2 consumes this unchanged
 contract in the [Profile UI](profile-ui.md); its native UI acceptance is separate.
-Phase 3A now adds a local-only [walk-authorized trajectory API](history-trace.md)
+Phase 3A adds a [walk-authorized trajectory API](history-trace.md)
 and dedicated client Service. It does not change this list contract or fetch GPS
-on Profile load. History Detail, explicit trajectory loading and map UI remain
-Phase 3B. The new trajectory API has not been deployed or live-tested.
+on Profile load. The Phase 3B handoff reports development CloudBase E2E success
+for Phase 3A. History Detail and map UI are now implemented locally; native UI
+acceptance remains pending, as described in the [detail checklist](history-detail.md).
 The Phase 3A security follow-up bounds historical GPS by the fixed Walk endTime;
 later trajectoryEndTimeMs metadata cannot extend reads and conservatively marks
 the trace partial. Post-completion final samples may be omitted. See the trace

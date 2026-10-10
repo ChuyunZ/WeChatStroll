@@ -38,6 +38,8 @@ button.small-button { margin: 24rpx 0 0; padding: 0 30rpx; display: inline-block
 button.load-more { margin: 20rpx 0 0; }
 button.load-more[disabled] { color: #6b8d74; background: #f0f5f1; }
 .walk-row { padding: 28rpx 0; border-bottom: 1rpx solid #edf0ed; }
+.walk-row-hover { background: #f2faf4; }
+.detail-link { display: block; color: #188343; font-size: 24rpx; margin-top: 14rpx; }
 .walk-date { display: block; color: #768379; font-size: 23rpx; }
 .walk-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 14rpx 0; }
 .walk-title { font-size: 30rpx; font-weight: 500; }

@@ -189,3 +189,46 @@ test('replayed pagination data is rejected without duplicate appends', async () 
   await page.loadMore(); expect(page.data.moreState).toBe('error'); expect(page.data.visibleHistory).toHaveLength(10);
   await page.loadMore(); expect(new Set(page.data.visibleHistory.map(w => w.walkId)).size).toBe(12);
 });
+
+const tapHistory = walkId => page.openHistory({ currentTarget: { dataset: { walkId } } });
+test('history navigation validates and encodes only the ID, with duplicate taps guarded', async () => {
+  walks = [historyItem(0, { walkId: 'walk:001' })]; await enter(); wx.navigateTo = jest.fn();
+  for (const id of [null, '../walk', 'unknown', 'walk?owner=x']) tapHistory(id);
+  expect(wx.navigateTo).not.toHaveBeenCalled();
+  tapHistory('walk:001'); tapHistory('walk:001'); expect(wx.navigateTo).toHaveBeenCalledTimes(1);
+  expect(wx.navigateTo.mock.calls[0][0].url).toBe('/pages/history-detail/history-detail?walkId=walk%3A001');
+  wx.navigateTo.mock.calls[0][0].fail(); tapHistory('walk:001'); expect(wx.navigateTo).toHaveBeenCalledTimes(2);
+});
+test('normal detail return preserves expanded pagination, AI and scroll; unrelated hide refreshes', async () => {
+  walks = Array.from({ length: 23 }, (_, i) => historyItem(i)); await enter(); page.toggleHistory(); await page.loadMore();
+  page.onPageScroll({ scrollTop: 1234 }); wx.navigateTo = jest.fn(); wx.pageScrollTo = jest.fn();
+  const before = JSON.parse(JSON.stringify(page.data)); tapHistory(walks[0].walkId); page.onHide();
+  wx.navigateTo.mock.calls[0][0].events.historyDetailClosed(); await page.onShow();
+  expect(page.data).toEqual(before); expect(historyCalls()).toHaveLength(2); expect(profileCalls()).toHaveLength(1);
+  expect(wx.pageScrollTo).toHaveBeenCalledWith({ scrollTop: 1234, duration: 0 });
+  await page.loadMore(); expect(page.data.visibleHistory).toHaveLength(23);
+  page.onHide(); await page.onShow(); expect(page.data.expanded).toBe(false); expect(profileCalls()).toHaveLength(2);
+});
+test('return from detail invalidates old pagination without losing the retained cursor', async () => {
+  walks = Array.from({ length: 12 }, (_, i) => historyItem(i)); await enter(); page.toggleHistory(); wx.navigateTo = jest.fn();
+  const pending = deferred(); wx.cloud.callFunction.mockImplementationOnce(() => pending.promise); const old = page.loadMore();
+  tapHistory(walks[0].walkId); page.onHide(); wx.navigateTo.mock.calls[0][0].events.historyDetailClosed(); await page.onShow();
+  expect(page.data.moreState).toBe('idle'); expect(page.data.visibleHistory).toHaveLength(10);
+  page.setData.mockClear(); pending.resolve(historyResult([historyItem(10)], null, null)); await old;
+  expect(page.setData).not.toHaveBeenCalled(); await page.loadMore(); expect(page.data.visibleHistory).toHaveLength(12);
+});
+test('navigation without a detail-close event retains normal refresh behavior', async () => {
+  walks = [historyItem(0)]; await enter(); wx.navigateTo = jest.fn(); tapHistory(walks[0].walkId);
+  page.onHide(); await page.onShow(); expect(historyCalls()).toHaveLength(2); expect(profileCalls()).toHaveLength(2);
+  wx.navigateTo.mock.calls[0][0].events.historyDetailClosed(); page.onHide(); await page.onShow(); expect(historyCalls()).toHaveLength(3);
+});
+test('detail return resumes interrupted AI without resetting expanded history', async () => {
+  walks = Array.from({ length: 7 }, (_, i) => historyItem(i)); const oldAi = deferred();
+  wx.cloud.callFunction.mockImplementation(args => args.name === 'preferenceProfileStore' ? oldAi.promise : Promise.resolve(respond(args)));
+  const old = enter(); await new Promise(setImmediate); page.toggleHistory(); wx.navigateTo = jest.fn();
+  tapHistory(walks[0].walkId); page.onHide(); wx.navigateTo.mock.calls[0][0].events.historyDetailClosed();
+  wx.cloud.callFunction.mockImplementation(async args => respond(args)); profile = preferenceProfile(5); await page.onShow();
+  expect(page.data.expanded).toBe(true); expect(page.data.visibleHistory).toHaveLength(7); expect(historyCalls()).toHaveLength(1);
+  const current = page.data.insights; oldAi.resolve({ result: { success: true, profile: null } }); await old;
+  expect(page.data.insights).toBe(current); expect(profileCalls()).toHaveLength(2);
+});

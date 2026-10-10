@@ -52,11 +52,12 @@
       <text>散步记录暂时无法加载。</text><button class="small-button" bindtap="retryHistory">重试</button>
     </view>
     <view wx:else>
-      <view wx:for="{{visibleHistory}}" wx:key="walkId" class="walk-row">
+      <view wx:for="{{visibleHistory}}" wx:key="walkId" class="walk-row" hover-class="walk-row-hover" bindtap="openHistory" data-walk-id="{{item.walkId}}" role="button" aria-label="{{item.dateText}} {{item.routeText}}，查看散步详情">
         <text class="walk-date">{{item.dateText}}</text>
         <view class="walk-heading"><text class="walk-title">{{item.routeText}}</text><text class="status {{item.statusClass}}">{{item.statusText}}</text></view>
         <view class="walk-durations"><text>{{item.plannedText}}</text><text class="actual-duration">{{item.actualText}}</text></view>
         <text class="rating {{item.hasRating ? 'rated' : ''}}">{{item.ratingText}}</text>
+        <text class="detail-link">查看详情 ›</text>
       </view>
       <view wx:if="{{expanded}}" class="pagination">
         <text wx:if="{{moreError}}" class="pagination-error">{{moreError}}</text>

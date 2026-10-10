@@ -2,6 +2,7 @@ const walkRecords = require('../../services/walk-records');
 const preferenceRecords = require('../../services/preference-profile-records');
 const { profileInsights } = require('../../utils/profile-insights');
 const { historyCard } = require('../../utils/profile-history');
+const { validId } = require('../../utils/feedback-validation');
 
 Page({
   data: {
@@ -19,7 +20,35 @@ Page({
   onShow() {
     if (this._disposed || this._active) return;
     this._active = true;
+    const returned = this._detailReturned;
+    this._detailReturned = false; this._navigating = false; this._navigationToken = null;
+    if (returned) {
+      if (this.data.moreState === 'loading') this.setData({ moreState: 'idle' });
+      if (typeof wx.pageScrollTo === 'function') wx.pageScrollTo({ scrollTop: this._scrollTop || 0, duration: 0 });
+      return Promise.all([
+        this.data.historyState === 'loading' ? this.loadHistory() : null,
+        this.data.profileState === 'loading' ? this.loadProfile() : null
+      ]);
+    }
     return Promise.all([this.loadHistory(), this.loadProfile()]);
+  },
+  onPageScroll(event) { if (Number.isFinite(event.scrollTop)) this._scrollTop = event.scrollTop; },
+  openHistory(event) {
+    const walkId = event && event.currentTarget && event.currentTarget.dataset.walkId;
+    if (!this._active || this._disposed || this._navigating || !validId(walkId) ||
+        !this._history.some(item => item.walkId === walkId)) return;
+    this._navigating = true;
+    const token = {}; this._navigationToken = token;
+    const fail = () => {
+      if (this._navigationToken !== token || this._disposed) return;
+      this._navigating = false; this._navigationToken = null; this._detailReturned = false;
+    };
+    try {
+      wx.navigateTo({ url: `/pages/history-detail/history-detail?walkId=${encodeURIComponent(walkId)}`,
+        events: { historyDetailClosed: () => {
+          if (!this._disposed && this._navigationToken === token) this._detailReturned = true;
+        } }, fail });
+    } catch (_) { fail(); }
   },
   onHide() { this.invalidateRequests(); },
   onUnload() {

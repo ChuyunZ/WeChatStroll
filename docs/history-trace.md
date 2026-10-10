@@ -1,8 +1,9 @@
 # Historical trajectory API — Issue #87 Phase 3A
 
-Local implementation only: not deployed or live-tested. Phase 3B's History Detail,
-explicit “查看实际轨迹” button and map rendering are not implemented here. Profile
-loading does not fetch GPS. Historical feedback will remain read-only through
+The Phase 3B handoff reports Phase 3A development CloudBase/Tencent E2E success.
+[History Detail](history-detail.md), explicit “查看实际轨迹” and native map presentation
+are now implemented locally; native UI acceptance is still pending. Profile
+loading does not fetch GPS. Historical feedback remains read-only through
 the unchanged `feedbackStore.getFeedback(walkId)` API.
 
 ## Request, authorization and storage
@@ -16,7 +17,7 @@ Cloud Function `trackProvider` accepts:
 Only those two application fields are accepted. The ID must match
 `^[a-zA-Z0-9_.:-]{1,200}$`. Unexpected fields (including ownerKey, OpenID, entityId,
 startTimeMs, endTimeMs, trajectoryPartial and consent flags) are rejected.
-The deployed entry adapter discards only CloudBase's `userInfo` transport field;
+The entry adapter discards CloudBase's `userInfo` and `tcbContext` transport fields;
 it is never an identity source, even when forged. The action handler itself keeps
 an exact application-field allowlist. The client Service accepts only `{ walkId }`.
 
@@ -205,8 +206,8 @@ bounded-retry coverage; explicit retirement tests cover the rejected old inputs.
 This is an intentional compatibility break for external/manual callers and any
 unseen old client using ranges. Such callers must obtain a durable walkId and
 migrate; no safe automatic mapping from arbitrary client times is available.
-The active upload/finalization API is unchanged. The previously deployed server
-still has the old behavior until a separately authorized deployment happens.
+The active upload/finalization API is unchanged. The handoff reports development
+deployment/E2E of Phase 3A; other environments must independently verify their version.
 
 ## Review and future development rollout
 
@@ -222,3 +223,4 @@ pagination/tokens, seconds/boundary inclusivity and final cleanup latency. Test
 closely adjacent sessions, delayed retries, shared-Entity overlap and large traces
 before defining Phase 3B display promises. Confirm the old arbitrary-range action
 is rejected in the deployed environment. No live validation is claimed by Jest.
+See the Phase 3B detail checklist for the pending native UI/device acceptance.
