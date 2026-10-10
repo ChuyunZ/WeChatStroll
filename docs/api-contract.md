@@ -326,8 +326,10 @@ Cloud Function `walkStore` accepts `{ action: 'listHistory', limit: 10, cursor: 
 Success returns `{ success: true, items, nextCursor, totals }`. Limits are 1–20;
 subsequent pages pass the returned cursor and receive `totals: null`. See the
 [complete History contract](walking-history.md) for exact item/cursor fields,
-count semantics, errors, validation, privacy and concurrency limits. This action
-uses existing lifecycle metadata and does not implement Profile UI or GPS detail.
+count semantics, errors, validation, privacy and concurrency limits. Phase 2's
+[Profile UI](profile-ui.md) consumes this unchanged action for lifetime statistics
+and paginated history, and independently calls `refreshProfile()` for explainable
+preferences. GPS and History Detail remain Phase 3.
 
 # Walk (all fields are required)
 

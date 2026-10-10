@@ -1,8 +1,9 @@
 # Walking History backend — Issue #87, Phase 1
 
 This phase adds a read-only `walkStore.listHistory` action and the Mini Program
-`services/walk-records.listHistory` service. Profile UI, History Detail, GPS maps
-and AI profile UI remain future phases. No persistence schema changes are needed.
+`services/walk-records.listHistory` service. Phase 2 now consumes this API in the
+[native Profile UI](profile-ui.md); History Detail and GPS maps remain Phase 3.
+No persistence schema changes are needed.
 
 ## Request and response
 
@@ -167,5 +168,7 @@ for query/count semantics. Target-environment index availability and query plans
 still need a live smoke test after review; this work changes no indexes, permissions,
 environment variables or CloudBase configuration and deploys no function.
 
-Phase 2 can consume this contract after code review and development deployment
-validation. This change does not implement or begin Phase 2/3.
+The Phase 2 handoff reports successful Phase 1 development CloudBase E2E for
+counts, pagination, ratings and invalid cursors. Phase 2 consumes this unchanged
+contract in the [Profile UI](profile-ui.md); its native UI acceptance is separate.
+Phase 3 remains unimplemented.

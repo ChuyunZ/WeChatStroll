@@ -1,4 +1,70 @@
-<view class="container">
-  <text class="title">Profile</text>
-  <text class="subtitle">User profile will go here.</text>
+<view class="profile-page">
+  <view class="page-heading">
+    <text class="eyebrow">留一点时间，给自己</text>
+    <text class="page-title">我的散步</text>
+    <text class="page-subtitle">每一次散步，都让我们更了解你。</text>
+  </view>
+  <view class="statistics">
+    <view class="stat-card">
+      <text class="stat-label">已完成散步</text>
+      <view wx:if="{{totals !== null}}" class="stat-value"><text class="stat-number">{{totals.completedWalkCount}}</text><text class="stat-unit">次</text></view>
+      <text wx:else class="stat-pending">{{historyState === 'error' ? '暂未加载' : '加载中…'}}</text>
+      <text class="stat-caption">每一步都算数</text>
+    </view>
+    <view class="stat-card">
+      <text class="stat-label">提前结束</text>
+      <view wx:if="{{totals !== null}}" class="stat-value"><text class="stat-number secondary">{{totals.endedEarlyWalkCount}}</text><text class="stat-unit">次</text></view>
+      <text wx:else class="stat-pending">{{historyState === 'error' ? '暂未加载' : '加载中…'}}</text>
+      <text class="stat-caption">按自己的节奏来</text>
+    </view>
+  </view>
+  <view class="card ai-card">
+    <view class="section-heading"><text class="section-title">AI 了解的我</text><text class="section-badge">慢慢了解</text></view>
+    <text class="section-description">根据你的散步选择和反馈整理，会随着散步逐渐更新。</text>
+    <view wx:if="{{profileState === 'loading'}}" class="state-panel"><text>正在整理你的散步偏好…</text></view>
+    <view wx:elif="{{profileState === 'empty'}}" class="state-panel"><text>AI 正在慢慢了解你。完成散步并留下反馈后，这里会逐渐丰富。</text></view>
+    <view wx:elif="{{profileState === 'error'}}" class="state-panel">
+      <text>偏好暂时无法加载。</text><button class="small-button" bindtap="retryProfile">重试</button>
+    </view>
+    <view wx:else>
+      <view class="insight"><text class="insight-label">环境选择</text><text class="insight-text">{{insights.environment}}</text><text class="evidence">{{insights.environmentEvidence}}</text></view>
+      <view class="insight"><text class="insight-label">时长倾向</text><text class="insight-text">{{insights.duration}}</text><text class="evidence">{{insights.durationEvidence}}</text></view>
+      <view class="insight"><text class="insight-label">人流倾向</text><text class="insight-text">{{insights.crowd}}</text><text class="evidence">{{insights.crowdEvidence}}</text></view>
+      <view class="insight">
+        <text class="insight-label">评价里的体验</text><text class="evidence">{{insights.feedbackHint}}</text>
+        <text wx:if="{{insights.positiveTags.length}}" class="tag-heading">觉得不错的</text>
+        <view class="tags"><text wx:for="{{insights.positiveTags}}" wx:key="key" class="tag positive">{{item.text}}</text></view>
+        <text wx:if="{{insights.negativeTags.length}}" class="tag-heading">希望改进的</text>
+        <view class="tags"><text wx:for="{{insights.negativeTags}}" wx:key="key" class="tag negative">{{item.text}}</text></view>
+        <text wx:if="{{!insights.positiveTags.length && !insights.negativeTags.length}}" class="evidence">还没有具体的体验标签。</text>
+      </view>
+      <view class="evidence-footer"><text class="evidence-count">{{insights.evidenceText}}</text><text class="evidence">{{insights.scopeText}}</text></view>
+    </view>
+  </view>
+  <view class="card">
+    <view class="section-heading">
+      <text class="section-title">{{expanded ? '全部散步' : '最近散步'}}</text>
+      <button wx:if="{{historyState === 'ready' && canExpand}}" class="text-button" bindtap="toggleHistory">{{expanded ? '收起' : '查看全部'}}</button>
+    </view>
+    <view wx:if="{{historyState === 'loading'}}" class="state-panel"><text>正在加载散步记录…</text></view>
+    <view wx:elif="{{historyState === 'empty'}}" class="state-panel"><text>还没有散步记录，开始你的第一次散步吧。</text></view>
+    <view wx:elif="{{historyState === 'error'}}" class="state-panel">
+      <text>散步记录暂时无法加载。</text><button class="small-button" bindtap="retryHistory">重试</button>
+    </view>
+    <view wx:else>
+      <view wx:for="{{visibleHistory}}" wx:key="walkId" class="walk-row">
+        <text class="walk-date">{{item.dateText}}</text>
+        <view class="walk-heading"><text class="walk-title">{{item.routeText}}</text><text class="status {{item.statusClass}}">{{item.statusText}}</text></view>
+        <view class="walk-durations"><text>{{item.plannedText}}</text><text class="actual-duration">{{item.actualText}}</text></view>
+        <text class="rating {{item.hasRating ? 'rated' : ''}}">{{item.ratingText}}</text>
+      </view>
+      <view wx:if="{{expanded}}" class="pagination">
+        <text wx:if="{{moreError}}" class="pagination-error">{{moreError}}</text>
+        <button wx:if="{{moreState === 'invalid'}}" class="small-button" bindtap="reloadHistory">重新加载历史</button>
+        <button wx:elif="{{hasMore}}" class="load-more" bindtap="loadMore" loading="{{moreState === 'loading'}}" disabled="{{moreState === 'loading'}}">{{moreState === 'loading' ? '正在加载' : moreState === 'error' ? '重试加载更多' : '加载更多'}}</button>
+        <text wx:else class="end-note">已经到底了</text>
+      </view>
+    </view>
+  </view>
+  <text class="page-footer">走过的日常，也值得被记住。</text>
 </view>
