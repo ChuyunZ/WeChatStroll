@@ -317,7 +317,7 @@ submission per durable walk, even when the same route is walked repeatedly.
 | wouldRecommend | Boolean, including explicit false |
 | positiveTags | Array from the positive allowlist below; empty allowed |
 | negativeTags | Array from the negative allowlist below; empty allowed |
-| comment | Optional input, at most 500 characters; trimmed, empty/omitted stored as null |
+| comment | Optional personal walk journal (existing API field); at most 500 UTF-16 code units; trimmed, empty/omitted stored as null |
 | schemaVersion | Integer 1 |
 | createdAt | Server-generated ISO timestamp |
 
@@ -345,6 +345,15 @@ recovery of existing server feedback) or explicit Skip confirmation. Cleanup
 requires the same walkId, protecting a newer pending walk. Failed saves keep
 form input and pending results. Skip creates no feedback document and does not
 change the terminal walk. Feedback navigation uses walkId, never routeId.
+
+**Personal walk journal UI (PR #112):** The optional `comment` is now labeled
+`散步日志` and displayed in a separate read-only History Detail card when
+nonempty. It is not used for AI recommendations: the preference profile reads
+only allowlisted structured feedback fields and excludes `comment`. No new
+collection, field, endpoint or migration was introduced. Saving the journal
+still requires a completed structured evaluation; Skip discards any unsaved
+journal text, and existing saved notes cannot be edited. Independent journals
+would require a separate persistence/lifecycle feature.
 
 ---
 
