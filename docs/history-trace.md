@@ -299,6 +299,15 @@ transactional read/write permission for `history_trace_rate_limits`.
 5. Native UI verified 60-second cooldown and two manual retries after the
    initial request. Local error injection verified safe distinct Chinese
    quota/network messages and was restored after testing.
+6. An opted-in development Walk finalized successfully as `ended_early`
+   after 135 seconds and opened Feedback. CloudBase recorded
+   `trajectoryPartial: false` with 3672ms of post-end cleanup; an authorized
+   Track Cloud history search returned one point (`available: true`,
+   `partial: true`) while the simulated device location was stationary.
+   One client `TRACK_OPERATION_TIMEOUT` warning occurred during upload
+   (3-second deadline). This proves at least one sample was persisted and
+   terminal Walk flow was unaffected by history quota; it **does not prove**
+   every intermediate or final sample was acknowledged.
 
 These observations do **not** establish live multi-instance last-slot
 contention, CloudBase transaction outage behavior, physical-device
@@ -313,8 +322,11 @@ infrastructure failures have deterministic Jest coverage only.
 2. Deploy the compatible `trackProvider` and client, verify authorized
    0/1/N GPS, immutable start/end boundaries, consent denial, quota and
    retired public arbitrary-range action.
-3. Run a real upload/final-flush regression; history quota must never
-   obstruct active GPS upload or Entity initialization.
+3. Repeat upload/final-flush regression in each additional environment.
+   Development confirmed terminal Walk and at least one stored sample; monitor
+   the observed 3-second `TRACK_OPERATION_TIMEOUT` and verify intermediate
+   and final sample acknowledgements on a moving physical device. The history
+   quota must not obstruct active upload or Entity initialization.
 4. Test continuous multi-point GPS on a physical device, long traces,
    boundary seconds, pagination, shared-Entity overlap and map segmentation.
 5. Where safe, separately test real CloudBase last-slot concurrency,

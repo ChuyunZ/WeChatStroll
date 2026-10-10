@@ -276,7 +276,11 @@ flow. Questionnaire data is user input. The existing complete route snapshot sta
 local for map rendering, subject to the existing data-policy checkpoint. Actual GPS
 geometry remains exclusively in Tencent Track Cloud; no segment cache is introduced.
 
-## Manual rollout later (not performed by this change)
+## Rollout requirements for other environments (development already deployed)
+
+In development, `walkStore` and the associated Walk lifecycle were deployed
+and tested, including authenticated History reads for Issue #87. For every
+additional deployment environment, apply and verify the following:
 
 1. Create walks and active_walks in the intended CloudBase environment.
 2. Configure these collections for server-only access (deny direct Mini Program reads
@@ -290,9 +294,10 @@ geometry remains exclusively in Tencent Track Cloud; no segment cache is introdu
    Early, 12-hour abandonment/replacement, offline retry, missing local route and
    Feedback navigation failure.
 
-These are future operator steps only. This implementation does not deploy functions,
-change console permissions/environment variables or mutate live documents. It does
-not establish Tencent planned-route persistence approval.
+These remain per-environment operator requirements, not tasks completed in
+production by this PR. Development acceptance does not establish that other
+environment permissions/indexes are ready. No planned-route Tencent
+persistence approval is implied.
 
 ---
 

@@ -137,6 +137,17 @@ an authorization mechanism and cannot reconstruct missing historical evidence.
   after the initial attempt plus two manual retries. Mocked quota and network
   errors displayed separate safe Chinese messages, without affecting metadata
   or feedback.
+- **Post-deployment active-tracking regression (2026-10-10):** an opted-in
+  development Walk ran about 135 seconds, successfully finalized as
+  `ended_early` and navigated to Feedback. Stored
+  `trajectoryEnabled: true`, `trajectoryPartial: false`, and
+  `trajectoryEndTimeMs - endTime ≈ 3.7s`. A subsequent authorized Tencent
+  historical search returned one point (`available: true`, `partial: true`);
+  the developer-tools location was stationary. The tracker logged one
+  `TRACK_OPERATION_TIMEOUT` (3-second upload acknowledgement deadline).
+  Thus **at least one point was stored**, but complete delivery/final-sample
+  acknowledgement was not proven. The server history quota does not affect
+  `uploadTrace`, but occasional upload timeout warrants follow-up.
 
 ## Remaining acceptance and rollout
 
@@ -147,9 +158,12 @@ an authorization mechanism and cannot reconstruct missing historical evidence.
    resume checks, plus rapid navigation/in-flight request/lifecycle races.
 3. Confirm entry makes no implicit GPS request, opted-out sessions cannot
    query, ordinary Home re-entry refreshes, and Profile return retains state.
-4. Post-deployment upload/final-flush regression. Live last-slot multi-instance
-   contention, CloudBase storage outage and clock-edge scenarios are covered
-   by deterministic tests only, not by actual cloud fault injection.
+4. Follow up the observed client `TRACK_OPERATION_TIMEOUT` on an actual device
+   and inspect upload/final-flush reliability with changing locations; the
+   development stationary-device regression verified completion and a recorded
+   point, **not** full sample delivery. Live last-slot multi-instance
+   contention, CloudBase storage outage and clock-edge cases have
+   deterministic coverage only, not cloud fault-injection evidence.
 5. Other environments (including production) require the ADMINONLY quota
    collection and dedicated rollout validation **before** function deployment.
    Production deployment is not claimed here.

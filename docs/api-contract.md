@@ -355,8 +355,14 @@ before Entity/search. Same-second/no-provider results use no quota; failures aft
 reservation still count. One logical search slot may involve multiple HTTP pages.
 New safe errors: `TRACK_SEARCH_RATE_LIMITED` (quota full) and
 `TRACK_RATE_LIMIT_STORE_FAILED` (infrastructure/state failure). Neither auto-retries.
-See the trace contract for schema, conflict retries and mandatory development
-collection creation before deploying P1. No remote change is performed by this work.
+See the trace contract for schema and conflict retries. In development, the
+ADMINONLY quota collection and revised `trackProvider` have been deployed and
+the 20-slot refusal verified; **all other environments** must create/verify
+the collection before deploying this function. No production deployment is
+claimed. A post-deploy stationary-location Walk finalized correctly and a
+subsequent history search returned one point, but one 3-second client GPS
+upload timeout was logged; not all uploads/final-flush acknowledgements
+were independently verified.
 
 # Walk (all fields are required)
 

@@ -165,18 +165,20 @@ Reuse the Issue #81 indexes documented as present in development:
 Counts use the walk index's equality prefix. Equality/range queries and ordered
 reads use the same compound index; no new custom index is designed for this phase.
 See the [CloudBase Node SDK database reference](https://github.com/TencentCloudBase/node-sdk/blob/master/docs/database/database.md)
-for query/count semantics. Target-environment index availability and query plans
-still need a live smoke test after review; this work changes no indexes, permissions,
-environment variables or CloudBase configuration and deploys no function.
+for query/count semantics. Index availability and query plans in **other environments** still require a
+live smoke test. Phase 1 required no extra indexes or environment variables;
+the development `walkStore.listHistory` deployment and its owner-scoped history
+queries were verified in CloudBase.
 
-The Phase 2 handoff reports successful Phase 1 development CloudBase E2E for
-counts, pagination, ratings and invalid cursors. Phase 2 consumes this unchanged
-contract in the [Profile UI](profile-ui.md); its native UI acceptance is separate.
-Phase 3A adds a [walk-authorized trajectory API](history-trace.md)
-and dedicated client Service. It does not change this list contract or fetch GPS
-on Profile load. The Phase 3B handoff reports development CloudBase E2E success
-for Phase 3A. History Detail and map UI are now implemented locally; native UI
-acceptance remains pending, as described in the [detail checklist](history-detail.md).
+Phase 1 development CloudBase E2E verified owner-scoped counts, pagination,
+ratings and invalid cursors. Phase 2 consumes this unchanged contract in
+the native [Profile UI](profile-ui.md). Phase 3A adds a
+[walk-authorized trajectory API](history-trace.md) without fetching GPS on
+Profile load. Phase 3B History Detail was exercised in WeChat Developer Tools:
+real Walk/feedback, one-point and empty GPS views, and Profile history/scroll
+preservation. Multi-segment rendering used synthetic points; real
+**continuous multi-point physical-device** validation remains outstanding.
+See the [Detail E2E record](history-detail.md) for exact scope and limits.
 The Phase 3A security follow-up bounds historical GPS by the fixed Walk endTime;
 later trajectoryEndTimeMs metadata cannot extend reads and conservatively marks
 the trace partial. Post-completion final samples may be omitted. See the trace
