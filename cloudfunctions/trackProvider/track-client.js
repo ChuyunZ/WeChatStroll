@@ -2,6 +2,7 @@ const {
   buildSignedGetUrl,
   buildSignedPostUrl
 } = require("./signing");
+const { MAX_TRACE_POINTS } = require('./trace-schema');
 
 const PATHS = {
   entityCreate: "/tracks/entity/create",
@@ -34,9 +35,10 @@ class TrackProviderError extends Error {
 }
 
 function providerStatus(data) {
-  if (!data || data.status === null || data.status === undefined || data.status === "") return null;
+  if (!data || !['number', 'string'].includes(typeof data.status) ||
+      (typeof data.status === 'string' && !data.status.trim())) return null;
   const value = Number(data.status);
-  return Number.isFinite(value) ? value : null;
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function isProviderSuccess(data) {
@@ -237,8 +239,8 @@ function createTrackClient({
     endTimeSeconds
   ) {
     const points = [];
-    let mileageMeters = 0;
-    let durationSeconds = 0;
+    let mileageMeters = null;
+    let durationSeconds = null;
     let pageNext = null;
     let pageCount = 0;
     const seenPageTokens = new Set();
@@ -274,27 +276,31 @@ function createTrackClient({
         throw providerFailure(data, "TRACK_SEARCH_FAILED");
       }
 
-      const result =
-        data && data.result && typeof data.result === "object"
-          ? data.result
-          : {};
-
-      if (Array.isArray(result.track)) {
-        points.push(...result.track);
+      const result = data && data.result;
+      if (!result || typeof result !== 'object' || Array.isArray(result) || !Array.isArray(result.track)) {
+        throw new TrackProviderError('TRACK_INVALID_RESPONSE', 'Invalid trajectory search response.');
       }
-
-      const distance = Number(result.distance);
-      const duration = Number(result.duration);
-
-      if (Number.isFinite(distance) && distance >= 0) {
-        mileageMeters = Math.max(mileageMeters, distance);
+      if (points.length + result.track.length > MAX_TRACE_POINTS) {
+        throw new TrackProviderError('TRACK_SEARCH_TOO_LARGE', 'Trajectory point limit exceeded.');
       }
-
-      if (Number.isFinite(duration) && duration >= 0) {
-        durationSeconds = Math.max(durationSeconds, duration);
-      }
+      points.push(...result.track);
+      const metric = value => {
+        if (value === undefined || value === null) return null;
+        if (!['number', 'string'].includes(typeof value) || (typeof value === 'string' && !value.trim()) ||
+            !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > Number.MAX_SAFE_INTEGER) {
+          throw new TrackProviderError('TRACK_INVALID_RESPONSE', 'Invalid trajectory summary.');
+        }
+        return Number(value);
+      };
+      const distance = metric(result.distance), duration = metric(result.duration);
+      if (distance !== null) mileageMeters = Math.max(mileageMeters || 0, distance);
+      if (duration !== null) durationSeconds = Math.max(durationSeconds || 0, duration);
 
       pageNext = result.page_next;
+      if (pageNext !== undefined && pageNext !== null &&
+          !((typeof pageNext === 'string' && pageNext.length <= 2048) || (Number.isSafeInteger(pageNext) && pageNext >= 0))) {
+        throw new TrackProviderError('TRACK_SEARCH_PAGINATION_FAILED', 'Invalid pagination token.');
+      }
       pageCount += 1;
 
       if (

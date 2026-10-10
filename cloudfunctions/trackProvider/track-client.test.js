@@ -1,7 +1,8 @@
 const {
   createTrackClient,
-  PATHS
+  PATHS, MAX_SEARCH_PAGES
 } = require("./track-client");
+const { MAX_TRACE_POINTS } = require('./trace-schema');
 
 const config = {
   apiKey: "test-key",
@@ -245,11 +246,48 @@ describe("Tencent Track Cloud client", () => {
   });
 });
 
-test.each([null, {}, { status: null }, { status: "" }])("malformed provider response %j is never successful", async data => {
+test.each([null, {}, { status: null }, { status: "" }, { status: false }, { status: [] }])("malformed provider response %j is never successful", async data => {
   const http = createHttp();
   http.post.mockResolvedValue({ data });
   http.get.mockResolvedValue({ data });
   const client = createTrackClient({ config, http });
   await expect(client.ensureEntity("usr_abc")).rejects.toMatchObject({ code: "TRACK_ENTITY_FAILED" });
   await expect(client.searchTrace("usr_abc", 100, 200)).rejects.toMatchObject({ code: "TRACK_SEARCH_FAILED" });
+});
+
+test.each([undefined, null, {}, { track: null }, { track: 'bad' }, { track: [], distance: '' },
+  { track: [], duration: -1 }, { track: [], distance: true }])('successful status with malformed trace body %j is not an empty success', async result => {
+  const http = createHttp(); http.get.mockResolvedValue({ data: { status: 0, result } });
+  await expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_INVALID_RESPONSE' });
+});
+test('an explicit empty track is retryable at the handler layer, with absent metrics left unknown', async () => {
+  const http = createHttp(); http.get.mockResolvedValue({ data: { status: 0, result: { track: [], page_next: '' } } });
+  expect(await createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).toEqual({ points: [], mileageMeters: null, durationSeconds: null });
+});
+test('later pagination failure never returns the first page as success', async () => {
+  const http = createHttp(); http.get.mockResolvedValueOnce({ data: { status: 0, result: { track: [{}], page_next: 'next' } } })
+    .mockRejectedValueOnce(new Error('signed url secret'));
+  await expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_PROVIDER_UNAVAILABLE' });
+  expect(http.get).toHaveBeenCalledTimes(2);
+});
+test('repeated pagination token is rejected, including string/number aliases', async () => {
+  const http = createHttp(); http.get.mockResolvedValueOnce({ data: { status: 0, result: { track: [], page_next: 1 } } })
+    .mockResolvedValueOnce({ data: { status: 0, result: { track: [], page_next: '1' } } });
+  await expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_SEARCH_PAGINATION_FAILED' });
+  expect(http.get).toHaveBeenCalledTimes(2);
+});
+test.each([{}, [], true, 'x'.repeat(2049)])('invalid pagination token fails closed: %j', page_next => {
+  const http = createHttp(); http.get.mockResolvedValue({ data: { status: 0, result: { track: [], page_next } } });
+  return expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_SEARCH_PAGINATION_FAILED' });
+});
+test('page budget is bounded and never returns truncated success', async () => {
+  const http = createHttp(); let count = 0;
+  http.get.mockImplementation(async () => ({ data: { status: 0, result: { track: [], page_next: `next-${count++}` } } }));
+  await expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_SEARCH_TOO_LARGE' });
+  expect(http.get).toHaveBeenCalledTimes(MAX_SEARCH_PAGES);
+});
+test('point budget is enforced across pages before normalization', async () => {
+  const http = createHttp(); http.get.mockResolvedValueOnce({ data: { status: 0, result: { track: Array(MAX_TRACE_POINTS).fill({}), page_next: 'next' } } })
+    .mockResolvedValueOnce({ data: { status: 0, result: { track: [{}] } } });
+  await expect(createTrackClient({ config, http }).searchTrace('usr_test', 100, 200)).rejects.toMatchObject({ code: 'TRACK_SEARCH_TOO_LARGE' });
 });

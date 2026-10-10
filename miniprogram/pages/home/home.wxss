@@ -146,3 +146,11 @@
   font-weight: 600;
   color: #222222;
 }
+
+button.profile-entry { display: flex; align-items: center; justify-content: space-between; width: 100%; box-sizing: border-box; margin: 60rpx 0 0; padding: 28rpx; background: #fff; border-radius: 24rpx; text-align: left; line-height: 1.6; }
+button.profile-entry::after { border: none; }
+.profile-entry-copy { min-width: 0; }
+.profile-entry-title { display: block; font-size: 30rpx; font-weight: 600; color: #285638; }
+.profile-entry-subtitle { display: block; margin-top: 8rpx; font-size: 24rpx; color: #718078; }
+.profile-entry-arrow { flex-shrink: 0; margin-left: 20rpx; font-size: 42rpx; color: #2fc766; }
+.profile-entry-active { opacity: 0.75; }

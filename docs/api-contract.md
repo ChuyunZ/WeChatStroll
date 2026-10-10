@@ -320,6 +320,50 @@ See [the implemented schema](database-schema.md#5-feedback-collection).
 
 ---
 
+# Walking History (Issue #87 Phase 1)
+
+Cloud Function `walkStore` accepts `{ action: 'listHistory', limit: 10, cursor: null }`.
+Success returns `{ success: true, items, nextCursor, totals }`. Limits are 1–20;
+subsequent pages pass the returned cursor and receive `totals: null`. See the
+[complete History contract](walking-history.md) for exact item/cursor fields,
+count semantics, errors, validation, privacy and concurrency limits. Phase 2's
+[Profile UI](profile-ui.md) consumes this unchanged action for lifetime statistics
+and paginated history, and independently calls `refreshProfile()` for explainable
+preferences. History Detail and GPS display remain Phase 3B.
+
+## Historical GPS query (Issue #87 Phase 3A, local implementation)
+
+`trackProvider` accepts only `{ action: 'searchWalkTrace', walkId }` as application
+fields, authorizes the persisted owner/terminal state/consent and derives the time
+range from startTime and the fixed completion endTime. Mutable trajectoryEndTimeMs
+cannot extend this range; later cleanup metadata makes the result partial and
+post-completion samples are omitted. It returns `{ success: true, trace }`;
+the dedicated `history-trace.searchWalkTrace({ walkId })` Service returns the
+validated trace with bounded empty-result retries. Generic public `searchTrace`
+range requests are retired. See the [complete trace contract](history-trace.md)
+for exact point/metric fields, errors, boundary filtering, shared-Entity isolation
+limitations and legacy migration. UI and rollout requirements are described below.
+
+Phase 3B now provides the [native detail UI](history-detail.md). P1 keeps the exact
+Cloud Function request unchanged and adds a local second Service argument
+`{retryEmpty: boolean}` (default true for compatibility). Detail enables empty
+500/1000ms retries only for validated completion age 0–5 minutes; older walks use
+one call. Each detail visit permits an initial click plus two manual retries with
+60 seconds between accepted clicks. Server authorization precedes an atomic
+20-per-user rolling-hour reservation in ADMINONLY `history_trace_rate_limits`,
+before Entity/search. Same-second/no-provider results use no quota; failures after
+reservation still count. One logical search slot may involve multiple HTTP pages.
+New safe errors: `TRACK_SEARCH_RATE_LIMITED` (quota full) and
+`TRACK_RATE_LIMIT_STORE_FAILED` (infrastructure/state failure). Neither auto-retries.
+See the trace contract for schema and conflict retries. In development, the
+ADMINONLY quota collection and revised `trackProvider` have been deployed and
+the 20-slot refusal verified; **all other environments** must create/verify
+the collection before deploying this function. No production deployment is
+claimed. A post-deploy stationary-location Walk finalized correctly and a
+subsequent history search returned one point, but one 3-second client GPS
+upload timeout was logged; not all uploads/final-flush acknowledgements
+were independently verified.
+
 # Walk (all fields are required)
 
 `endTime` is nullable while the walk is in progress.
@@ -512,9 +556,14 @@ Authorization: Bearer <OAuth Token>
 
 ---
 
-## GET /user/walk-history
+## GET /user/walk-history (historical proposal — not implemented)
 
-Returns the walking history of the current user.
+The HTTP endpoint and example fields below are an old proposal, **not** the current
+Mini Program history API. Use `walkStore.listHistory` as documented in
+[Walking History](walking-history.md). In particular, the current API does not
+persist or return planned-route distances or user IDs.
+
+The original proposal described returning the walking history of the current user.
 
 ### URL Params
 

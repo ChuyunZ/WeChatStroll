@@ -878,7 +878,7 @@ describe("walking-tracker", () => {
     ).not.toHaveBeenCalled();
   });
 
-  test("searchTrace calls the track provider with a valid time range", async () => {
+  test("deprecated searchTrace wrapper uses an authorized walk ID and preserves its envelope", async () => {
     const startTimeMs =
       TEST_START_TIME_MS;
 
@@ -888,15 +888,14 @@ describe("walking-tracker", () => {
     callCloudFunction.mockResolvedValueOnce({
       success: true,
       trace: {
-        points: [],
-        mileageMeters: 0
+        points: [{ latitude: 31, longitude: 121, timestampMs: TEST_START_TIME_MS }],
+        mileageMeters: 0, durationSeconds: 1, available: true, retryable: false, partial: false
       }
     });
 
     const result =
       await walkingTracker.searchTrace({
-        startTimeMs,
-        endTimeMs
+        walkId: 'walk-1'
       });
 
     expect(
@@ -904,9 +903,8 @@ describe("walking-tracker", () => {
     ).toHaveBeenCalledWith(
       "trackProvider",
       {
-        action: "searchTrace",
-        startTimeMs,
-        endTimeMs
+        action: "searchWalkTrace",
+        walkId: 'walk-1'
       },
       {
         fallbackCode: "TRACK_SEARCH_FAILED",
@@ -918,8 +916,8 @@ describe("walking-tracker", () => {
     expect(result).toEqual({
       success: true,
       trace: {
-        points: [],
-        mileageMeters: 0
+        points: [{ latitude: 31, longitude: 121, timestampMs: TEST_START_TIME_MS }],
+        mileageMeters: 0, durationSeconds: 1, available: true, retryable: false, partial: false
       }
     });
   });
@@ -968,8 +966,7 @@ describe("walking-tracker", () => {
 
     const resultPromise =
       walkingTracker.searchTrace({
-        startTimeMs,
-        endTimeMs
+        walkId: 'walk-1'
       });
 
     await Promise.resolve();
@@ -1020,8 +1017,7 @@ describe("walking-tracker", () => {
 
     const resultPromise =
       walkingTracker.searchTrace({
-        startTimeMs,
-        endTimeMs
+        walkId: 'walk-1'
       });
 
     await Promise.resolve();
@@ -1037,14 +1033,14 @@ describe("walking-tracker", () => {
     ).toHaveBeenCalledTimes(3);
   });
 
-  test("searchTrace rejects an invalid time range", async () => {
+  test("searchTrace rejects retired time-range input without a network call", async () => {
     await expect(
       walkingTracker.searchTrace({
         startTimeMs: TEST_START_TIME_MS,
         endTimeMs: TEST_START_TIME_MS
       })
     ).rejects.toMatchObject({
-      code: "INVALID_TRACKING_SESSION"
+      code: "TRACK_WALK_REQUIRED"
     });
 
     expect(
@@ -1265,9 +1261,9 @@ describe("tracking lifecycle regressions", () => {
     expect(JSON.stringify(storage.activeWalkTracking)).not.toMatch(/latitude|longitude/);
   });
 
-  test("search sends completed-walk quality independently of query retryability", async () => {
-    await walkingTracker.searchTrace({ startTimeMs: TEST_START_TIME_MS, endTimeMs: Date.now(), trajectoryPartial: true });
-    expect(callCloudFunction.mock.calls[0][1].trajectoryPartial).toBe(true);
+  test("search cannot override completed-walk quality from the client", async () => {
+    await expect(walkingTracker.searchTrace({ walkId: 'walk-1', trajectoryPartial: true })).rejects.toMatchObject({ code: 'INVALID_WALK_TRACE_REQUEST' });
+    expect(callCloudFunction).not.toHaveBeenCalled();
   });
 });
 

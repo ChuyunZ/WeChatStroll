@@ -1,0 +1,23 @@
+page { background: #f7f7f7; color: #25382c; }
+.detail-page { padding: 32rpx 28rpx; padding-bottom: calc(48rpx + env(safe-area-inset-bottom)); }
+.card { background: #fff; border-radius: 28rpx; padding: 30rpx 28rpx; margin-bottom: 28rpx; }
+.heading { border-top: 6rpx solid #2fc766; }
+.eyebrow { display: block; color: #62846c; font-size: 23rpx; letter-spacing: 3rpx; }
+.title { display: block; font-size: 48rpx; font-weight: 600; margin: 14rpx 0 24rpx; }
+.date { display: block; font-size: 25rpx; color: #748078; margin-bottom: 20rpx; }
+.row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12rpx; }
+.section-title { font-size: 32rpx; font-weight: 600; }
+.badge { background: #e9f8ee; color: #267d45; padding: 6rpx 14rpx; font-size: 22rpx; border-radius: 12rpx; }
+.value, .label { display: block; margin-top: 24rpx; font-size: 26rpx; color: #526859; }
+.elapsed { display: block; font-size: 40rpx; color: #16743b; margin-top: 10rpx; }
+.note { display: block; font-size: 25rpx; color: #748078; line-height: 1.8; margin-top: 18rpx; }
+.field { font-size: 28rpx; padding-top: 26rpx; }
+.score { color: #16743b; font-weight: 600; }
+.tags { display: flex; flex-wrap: wrap; }
+.tag { font-size: 24rpx; background: #eef8f1; color: #237745; padding: 10rpx 16rpx; border-radius: 12rpx; margin: 12rpx 12rpx 0 0; }
+.negative { color: #806642; background: #f8f4ec; }
+.comment { display: block; white-space: pre-wrap; word-break: break-all; line-height: 1.8; font-size: 28rpx; margin-top: 26rpx; }
+button { margin-top: 24rpx; background: #edf8f0; color: #16743b; font-size: 27rpx; border-radius: 36rpx; }
+button.primary { background: #2fc766; color: #fff; }
+button::after { border: none; }
+.trace-map { width: 100%; height: 520rpx; margin-top: 20rpx; border-radius: 18rpx; }

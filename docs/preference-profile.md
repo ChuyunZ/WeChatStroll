@@ -7,6 +7,16 @@ never changed and takes precedence in AI waypoint planning (Issue #82). Profile
 computation remains deterministic; route ranking (#83) and Profile UI (#87) remain
 separate.
 
+Issue #87 Phase 2 now calls `refreshProfile()` from the [native Profile page](profile-ui.md)
+on entry/re-entry. Independent region states and conservative deterministic wording
+explain questionnaire intent and explicit feedback without new AI inference.
+The UI rule thresholds, limited-evidence wording and lifecycle are documented there.
+
+Issue #87 Phase 1 [Walking History](walking-history.md) supplies independent
+lifetime completed/ended-early counts through owner-scoped CloudBase count queries.
+The profile's completedWalkCount and endedEarlyWalkCount describe only its recent
+20-walk evidence window and must not be used as lifetime Profile UI statistics.
+
 ## AI waypoint planning integration (Issue #82)
 
 `route-generation.generateRoutes()` obtains and validates the current location,

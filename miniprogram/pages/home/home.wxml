@@ -25,6 +25,11 @@
 </view>
 
 
+<button class="profile-entry" bindtap="goProfile" hover-class="profile-entry-active">
+  <view class="profile-entry-copy"><text class="profile-entry-title">我的散步</text><text class="profile-entry-subtitle">回看散步记录，看看我们了解的你</text></view>
+  <text class="profile-entry-arrow">›</text>
+</button>
+
 <!-- Primary CTA -->
 <view
   class="bottom-action"

@@ -1,9 +1,14 @@
 const {
   MAX_TRACE_QUERY_MS,
   normalizeUploadPoint,
-  createTrackHandler
+  createTrackHandler: makeTrackHandler
 } = require("./handler");
 const { createEntityId } = require("./entity-id");
+const { testWalk } = require('./test-walk');
+const createTrackHandler = options => makeTrackHandler({
+  historyLimiter: { reserve: jest.fn().mockResolvedValue() },
+  walkStore: { getWalk: jest.fn().mockResolvedValue(testWalk({}, options.getOpenId())) }, ...options
+});
 
 const config = {
   entitySecret: "test-entity-secret"
@@ -171,10 +176,8 @@ describe("trackProvider handler", () => {
     });
 
     const result = await handler({
-      action: "searchTrace",
-      startTimeMs: 1760000000000,
-      endTimeMs: 1760001800000,
-      entityId: "attacker-controlled-id"
+      action: "searchWalkTrace",
+      walkId: 'walk-1'
     });
 
     expect(result).toEqual({
@@ -208,7 +211,7 @@ describe("trackProvider handler", () => {
     );
   });
 
-  test("clamps a future search end time to the current time", async () => {
+  test("rejects a future persisted search end instead of clamping authorization", async () => {
     const client = createClient();
     const nowMs = 1760001200000;
 
@@ -219,17 +222,10 @@ describe("trackProvider handler", () => {
       getNowMs: () => nowMs
     });
 
-    await handler({
-      action: "searchTrace",
-      startTimeMs: 1760000000000,
-      endTimeMs: nowMs + 5 * 60 * 1000
-    });
-
-    expect(client.searchTrace).toHaveBeenCalledWith(
-      expect.stringMatching(/^usr_[a-f0-9]{32}$/),
-      1760000000,
-      1760001200
-    );
+    const result = await handler({ action: 'searchWalkTrace', walkId: 'walk-1' });
+    expect(result.error.code).toBe('INVALID_WALK_TRACE_METADATA');
+    expect(client.searchTrace).not.toHaveBeenCalled();
+    expect(client.ensureEntity).not.toHaveBeenCalled();
   });
 
   test("marks an empty successful search as retryable", async () => {
@@ -241,9 +237,8 @@ describe("trackProvider handler", () => {
     });
 
     const result = await handler({
-      action: "searchTrace",
-      startTimeMs: 1760000000000,
-      endTimeMs: 1760001800000
+      action: "searchWalkTrace",
+      walkId: 'walk-1'
     });
 
     expect(result).toEqual({
@@ -264,14 +259,15 @@ describe("trackProvider handler", () => {
     const handler = createTrackHandler({
       config,
       client,
-      getOpenId: () => "openid-one"
+      getOpenId: () => "openid-one",
+      walkStore: { getWalk: jest.fn().mockResolvedValue(testWalk({
+        endTime: new Date(1760000000000 + MAX_TRACE_QUERY_MS + 1).toISOString(),
+        trajectoryEndTimeMs: 1760000000000 + MAX_TRACE_QUERY_MS + 1 })) }
     });
 
     const result = await handler({
-      action: "searchTrace",
-      startTimeMs: 1760000000000,
-      endTimeMs:
-        1760000000000 + MAX_TRACE_QUERY_MS + 1
+      action: "searchWalkTrace",
+      walkId: 'walk-1'
     });
 
     expect(result).toEqual({
@@ -337,16 +333,20 @@ describe("trackProvider handler", () => {
 test.each([false, true])("search preserves known partial=%s independently of availability", async partial => {
   const client = createClient();
   client.searchTrace.mockResolvedValue({ points: [{ lat: 31, lng: 121, loctime: 100 }] });
-  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000 });
-  const result = await handler({ action: "searchTrace", startTimeMs: 90000, endTimeMs: 110000, trajectoryPartial: partial });
+  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000,
+    walkStore: { getWalk: jest.fn().mockResolvedValue(testWalk({ startTime: new Date(90000).toISOString(),
+      endTime: new Date(110000).toISOString(), trajectoryEndTimeMs: 110000, trajectoryPartial: partial }, 'user')) } });
+  const result = await handler({ action: "searchWalkTrace", walkId: 'walk-1' });
   expect(result.trace).toMatchObject({ available: true, retryable: false, partial });
 });
 
 test("discarded invalid provider points mark a trajectory partial", async () => {
   const client = createClient();
   client.searchTrace.mockResolvedValue({ points: [{ lat: 31, lng: 121, loctime: 100 }, { lat: 999, lng: 121, loctime: 101 }] });
-  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000 });
-  const result = await handler({ action: "searchTrace", startTimeMs: 90000, endTimeMs: 110000 });
+  const handler = createTrackHandler({ config, client, getOpenId: () => "user", getNowMs: () => 200000,
+    walkStore: { getWalk: jest.fn().mockResolvedValue(testWalk({ startTime: new Date(90000).toISOString(),
+      endTime: new Date(110000).toISOString(), trajectoryEndTimeMs: 110000 }, 'user')) } });
+  const result = await handler({ action: "searchWalkTrace", walkId: 'walk-1' });
   expect(result.trace).toMatchObject({ available: true, retryable: false, partial: true });
   expect(result.trace.points).toHaveLength(1);
 });

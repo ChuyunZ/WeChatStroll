@@ -222,13 +222,19 @@ original record without changing its time; a different terminal status is reject
 Database failures return normalized errors. Navigation and Track Cloud failures
 cannot reactivate any terminal walk.
 
-The five actions are startWalk, getActiveWalk, getWalk, completeWalk and
+The five lifecycle actions are startWalk, getActiveWalk, getWalk, completeWalk and
 updateTrajectoryMetadata. The last action is limited to opted-in completed /
 ended_early walks and can update only trajectoryPartial, trajectoryEndTimeMs and
 updatedAt; it cannot change lifecycle state or user-confirmed timing.
 All read/write operations are scoped to authenticated ownership. The response is
 { success: true, walk } (null only for no active walk), or
 { success: false, error: { code, message } }.
+
+Issue #87 Phase 1 adds a read-only `listHistory` action with a separate
+`{ success: true, items, nextCursor, totals }` response. It introduces no stored
+fields and reuses the existing Issue #81 query indexes. See the
+[History contract](walking-history.md) for pagination, lifetime counts, rating
+joins, validation and deployment limitations.
 
 ## Local recovery and trajectory boundary
 
@@ -270,21 +276,28 @@ flow. Questionnaire data is user input. The existing complete route snapshot sta
 local for map rendering, subject to the existing data-policy checkpoint. Actual GPS
 geometry remains exclusively in Tencent Track Cloud; no segment cache is introduced.
 
-## Manual rollout later (not performed by this change)
+## Rollout requirements for other environments (development already deployed)
+
+In development, `walkStore` and the associated Walk lifecycle were deployed
+and tested, including authenticated History reads for Issue #87. For every
+additional deployment environment, apply and verify the following:
 
 1. Create walks and active_walks in the intended CloudBase environment.
 2. Configure these collections for server-only access (deny direct Mini Program reads
-   and writes); ownership enforcement is in walkStore. No custom query index is
-   required: operations use document IDs.
+   and writes); ownership enforcement is in walkStore. Lifecycle operations use
+   document IDs and do not require custom query indexes. Issue #87 History queries
+   and counts additionally depend on the existing Issue #81 compound walk/feedback
+   indexes (see [Walking History](walking-history.md)).
 3. Deploy cloudfunctions/walkStore with its locked dependencies, then release the
    client changes together. It uses DYNAMIC_CURRENT_ENV and needs no new variables.
 4. On a test account, verify Start/retry, concurrent Start, app recreation, Finish/End
    Early, 12-hour abandonment/replacement, offline retry, missing local route and
    Feedback navigation failure.
 
-These are future operator steps only. This implementation does not deploy functions,
-change console permissions/environment variables or mutate live documents. It does
-not establish Tencent planned-route persistence approval.
+These remain per-environment operator requirements, not tasks completed in
+production by this PR. Development acceptance does not establish that other
+environment permissions/indexes are ready. No planned-route Tencent
+persistence approval is implied.
 
 ---
 
