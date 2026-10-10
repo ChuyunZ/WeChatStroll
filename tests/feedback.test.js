@@ -65,6 +65,7 @@ test('old flow never clears newer pending even if it changes while saving', asyn
 test.each([false, true])('skip confirm=%s never writes feedback', async confirm => {
   await load(); fill(); page.skipFeedback();
   const modal = wx.showModal.mock.calls[0][0];
+  expect(modal.content).toContain('未保存的散步日志');
   await page.submitFeedback(); expect(records.submitFeedback).not.toHaveBeenCalled();
   modal.success({ confirm }); modal.complete();
   expect(records.submitFeedback).not.toHaveBeenCalled();
@@ -152,4 +153,10 @@ test('late feedback lookup cannot show form after unload', async () => {
   await loading;
   expect(page.data.state).toBe('loading');
   expect(storage.pendingWalkResult).toBeUndefined();
+});
+
+test('skipping without journal warns only about the evaluation', async () => {
+  await load();
+  page.skipFeedback();
+  expect(wx.showModal.mock.calls[0][0].content).toBe('本次散步记录仍会保留，但这次评价不会保存。');
 });
