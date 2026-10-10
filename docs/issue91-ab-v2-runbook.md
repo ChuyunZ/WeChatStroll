@@ -5,8 +5,8 @@ the existing shared `aiRoutePlanner`, or touch the tracked original cloud functi
 
 ## Input versions
 
-- Baseline prompt: original `0944584` (`cloudfunctions/aiRoutePlanner/routePlanningPrompt.js`).
-- Treatment prompt: PR #108 commit `3f0134a`, including whole-batch self-check.
+- Baseline prompt: **previous experimental treatment `72f8155`** (`cloudfunctions/aiRoutePlanner/routePlanningPrompt.js`); this is the version that returned 5 raw candidates but retained only 3 in the prior live experiment.
+- Treatment prompt: PR #108 commit `3f0134a`, adding the whole-batch self-check. This isolates the incremental self-check change; the original `develop` prompt `0944584` is an earlier reference, **not** this run's baseline.
 - Both variants use the **same treatment-revision validator**, API client, SDK,
   model, output schema, POI pool and preferences. The test wrapper changes only
   prompt selection, health-check and reporting.

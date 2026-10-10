@@ -7,7 +7,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 
-const BASELINE = '094458407f0538123fd2ab60ea7db3f7a5234fee'
+const BASELINE = '72f8155087b86e95ddeff5795cf85a2a9b14f2c4'
 const TREATMENT = '3f0134a67cdfd9df7b01f6a28c215f72724c600b'
 const SOURCE_DIR = 'cloudfunctions/aiRoutePlanner/'
 const DEST_DIR = 'cloudfunctions/aiRoutePlannerIssue91AB'
