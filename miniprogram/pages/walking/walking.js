@@ -724,7 +724,7 @@ Page({
     const walkResult = {
       walkId: this._walkId,
       routeId: this._route.routeId,
-      route: this._route,
+      // Terminal feedback recovery needs metadata, never the planned Route.
       startTime: new Date(this._startTimeMs).toISOString(),
       endTime: new Date(endTimeMs).toISOString(),
       actualDurationSeconds,
