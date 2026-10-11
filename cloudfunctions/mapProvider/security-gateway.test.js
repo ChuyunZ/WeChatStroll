@@ -53,6 +53,42 @@ test('actual gateway authorizes discovery then Walking; duplicates cannot obtain
   expect(await call({ action: 'closePlanning', planningToken: found.planningToken })).toEqual({ success: true })
   expect(await call({ ...event, requestId: 'request_walking_2' })).toMatchObject({ error: { code: 'MAP_SESSION_EXPIRED' } })
 })
+test.each([
+  ['TENCENT_MAPS_API_KEY', undefined],
+  ['TENCENT_MAPS_SECRET_KEY', undefined],
+  ['TENCENT_MAPS_WALKING_MAX_ATTEMPTS', '0'],
+  ['TENCENT_MAPS_POI_MIN_INTERVAL_MS', 'invalid']
+])('authenticated closePlanning releases holds despite invalid Tencent setting %s', async (name, value) => {
+  const found = await call({ action: 'nearbyPois', ...start, requestId: 'request_before_config_failure' })
+  expect(found.success).toBe(true)
+  expect(quotaStore.documents.get('day_1').sessions).not.toEqual({})
+  if (value === undefined) delete process.env[name]
+  else process.env[name] = value
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken })).toEqual({ success: true })
+  expect(quotaStore.documents.get('day_1').sessions).toEqual({})
+  expect(quotaStore.documents.get('day_1').used).toEqual({ explore: 3, walking: 0 })
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken })).toEqual({ success: true })
+  expect(axios.get).toHaveBeenCalledTimes(3) // No Tencent calls on close.
+  const subsequent = await call({ action: 'nearbyPois', ...start, requestId: 'request_after_config_failure' })
+  expect(subsequent.success).toBe(false) // Discovery still requires valid Tencent configuration.
+  expect(axios.get).toHaveBeenCalledTimes(3)
+})
+
+test('closePlanning still requires the authenticated owner when Tencent credentials are absent', async () => {
+  const found = await call({ action: 'nearbyPois', ...start, requestId: 'request_authenticated_close' })
+  expect(found.success).toBe(true)
+  delete process.env.TENCENT_MAPS_API_KEY
+  cloud.getWXContext.mockReturnValue({ OPENID: 'other-user', APPID: 'app' })
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }))
+    .toMatchObject({ error: { code: 'MAP_SESSION_INVALID' } })
+  expect(quotaStore.documents.get('day_1').sessions).not.toEqual({})
+  cloud.getWXContext.mockReturnValue({})
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }))
+    .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
+  expect(quotaStore.documents.get('day_1').sessions).not.toEqual({})
+  expect(axios.get).toHaveBeenCalledTimes(3)
+})
+
 test.each(['ready_rejected', 'ready_committed_ack_lost'])(
   'discovery %s cleans undelivered physical and creation holds without refunding Explore sends',
   async mode => {
