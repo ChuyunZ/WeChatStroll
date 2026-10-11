@@ -36,7 +36,11 @@ or recovery snapshots. Existing authorized active-Walk device recovery is unchan
 
 Use a separate high-entropy `MAP_PLANNING_SECRET` (at least 32 bytes), configured
 only on the gateway and both wrappers through operator-managed secrets. Never
-reuse the Tencent secret. Rotation invalidates active planning credentials;
+reuse the Tencent secret. The required `MAP_QUOTA_OFFSET_MINUTES` and
+`MAP_QUOTA_ACTIVE_FROM_MS` values must be nonempty, canonical base-10 integer
+strings (no whitespace, exponent, hex or plus prefix), within the enforced
+numeric ranges. Invalid or missing values fail closed instead of silently
+selecting UTC/epoch zero. Rotation invalidates active planning credentials;
 displayed routes and active Walks remain usable. Do not log invocation payloads,
 tokens, secret material or provider URLs, including platform debug/event logging.
 
@@ -150,6 +154,12 @@ request/attempt documents participate in the same CloudBase transactions.
 The ledger serializes contention at this small configured daily scale. Only
 explicit transaction conflicts retry, with bounded jitter. Database failures
 and uncertain commit acknowledgements fail closed.
+
+Authenticated `closePlanning` is independent of Tencent API credentials and
+the provider/QPS `loadLimits()` configuration. Missing Tencent keys or invalid
+provider pacing settings therefore cannot trap unused reservations; owner,
+signed token, planning configuration and quota-store checks are still required.
+Discoveries and Walking continue to reject invalid Tencent configuration.
 
 The transaction compares the validated resulting ledger with its original JSON
 snapshot and writes only on an actual change or first initialization. It still
