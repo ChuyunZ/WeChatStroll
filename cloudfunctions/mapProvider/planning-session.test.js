@@ -1,5 +1,5 @@
 const { createPlanningSecurity } = require('./planning-session')
-const { createQuota, DAY } = require('./quota')
+const { createQuota, DAY, emptyCreations } = require('./quota')
 const { createTokens, ownerOf, hash } = require('./planning-token')
 const { createTestStore } = require('./test-store')
 const env = { MAP_PLANNING_SECRET: 'synthetic-secret-with-at-least-32-bytes',
@@ -60,7 +60,7 @@ test('lost discovery/walking responses and parameter replay never reexecute, inc
   await expect(other.walking({ ...walking(response), start: poi, destination: origin }, context)).rejects.toMatchObject({ code: 'MAP_EXECUTION_UNKNOWN' })
 })
 test('coupled reservation rejects Explore before use if Walking capacity is unavailable', async () => {
-  store.documents.set('day_1', { used: { explore: 0, walking: 5311 }, users: {}, sessions: {} })
+  store.documents.set('day_1', { used: { explore: 0, walking: 5311 }, users: {}, sessions: {}, creations: emptyCreations() })
   await expect(security.open({ ...origin, requestId: rid(1) }, context)).rejects.toMatchObject({ code: 'MAP_GLOBAL_QUOTA_EXHAUSTED' })
   expect(store.documents.get('day_1').used.explore).toBe(0)
 })
@@ -73,7 +73,7 @@ test('90 is a base hold, 94 and 188 physical attempts are supported; user hard l
   await expect(security.open({ ...origin, requestId: rid(2) }, context)).rejects.toMatchObject({ code: 'MAP_USER_QUOTA_EXHAUSTED' })
 })
 test('reservations protect active users; competing users cannot seize the final base hold', async () => {
-  store.documents.set('day_1', { used: { explore: 0, walking: 5310 }, users: {}, sessions: {} })
+  store.documents.set('day_1', { used: { explore: 0, walking: 5310 }, users: {}, sessions: {}, creations: emptyCreations() })
   const results = await Promise.allSettled([1, 2, 3].map(n => security.open({ ...origin, requestId: rid(n) }, { ...context, OPENID: `user-${n}` })))
   expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1)
   expect(results.filter(r => r.status === 'rejected').every(r => r.reason.code === 'MAP_GLOBAL_QUOTA_EXHAUSTED')).toBe(true)

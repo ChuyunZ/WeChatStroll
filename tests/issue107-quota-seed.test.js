@@ -5,7 +5,8 @@ test('offline seed identifies provider-local day and retains reconciled user/glo
   const result = buildSeed(input)
   expect(new Date(result.activeFromMs).toISOString()).toBe('2026-10-10T16:00:00.000Z')
   expect(result.documentId).toBe('day_20737')
-  expect(result.data).toEqual({ used: input.used, users: input.users, sessions: {} })
+  expect(result.data).toEqual({ used: input.used, users: input.users, sessions: {},
+    creations: { requests: { explore: 0, walking: 0 }, attempts: { explore: 0, walking: 0 }, users: {} } })
 })
 test.each([{ userUsageComplete: false }, { offsetMinutes: undefined }, { date: '2026-02-30' },
   { users: { OPENID: { explore: 1, walking: 1 } } }, { used: { explore: 0, walking: 0 } }])(

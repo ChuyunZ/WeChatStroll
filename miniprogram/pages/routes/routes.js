@@ -9,7 +9,7 @@ const { isProviderUnavailableCode, mapErrorMessage } = require("../../utils/prov
 const { MAX_CORRECTION_CANDIDATES, MAX_CORRECTION_NEW_SEGMENTS } = require("../../config/route-planning");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
-const { releaseSession } = require("../../services/map-planning-authorization");
+const { releaseSession, createPlanningRun } = require("../../services/map-planning-authorization");
 
 const {
   ROUTE_TYPES
@@ -129,6 +129,9 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    if (this._planningRun) this._planningRun.cancel();
+    releaseSession(this._retainedPlanningState && this._retainedPlanningState._routePlanningSession);
+    this._retainedPlanningState = null;
     releaseSession(this._routePlanningSession);
     if (this._copyUnsubscribe) this._copyUnsubscribe();
     if (this._copySession) this._copySession.dispose();
@@ -153,7 +156,10 @@ Page({
   },
 
   async loadRoutes() {
-    const previous = {
+    if (this._planningRun) this._planningRun.cancel();
+    const run = createPlanningRun();
+    this._planningRun = run;
+    const previous = this._retainedPlanningState || {
       _rawRoutes: this._rawRoutes,
       _routePlanningSession: this._routePlanningSession,
       _waypointCandidateCache: this._waypointCandidateCache,
@@ -161,6 +167,7 @@ Page({
       _historicalPreferenceProfile: this._historicalPreferenceProfile,
       _verifiedWaypointPool: this._verifiedWaypointPool
     };
+    this._retainedPlanningState = previous;
     // Retry is a new generation, but not a new questionnaire/copy budget.
     if (this._copySession) this._copySession.beginGeneration();
     this.resetManualAlternatives();
@@ -191,9 +198,10 @@ Page({
       routeState: "loading"
     });
 
+    let routeLoadResult;
+    let adopted = false;
     try {
-      const routeLoadResult =
-        await this.getRoutes();
+      routeLoadResult = await this.getRoutes(run);
 
       // 新请求已经开始，
       // 当前结果已经过期。
@@ -219,6 +227,7 @@ Page({
         routeLoadResult.routes;
 
       if (routes.length === 0) {
+        this._retainedPlanningState = null;
         releaseSession(previous._routePlanningSession);
         releaseSession(routeLoadResult.routePlanningSession);
         this._rawRoutes = [];
@@ -271,9 +280,11 @@ Page({
         routeLoadResult.waypointCandidateCache;
 
       this._routeLocation = routeLoadResult.location;
-      releaseSession(previous._routePlanningSession);
-
       this.renderRoutes({ routeState: "success" });
+      run.detach(this._routePlanningSession);
+      adopted = true;
+      this._retainedPlanningState = null;
+      releaseSession(previous._routePlanningSession);
       // Do not await the remainder before making the first route usable.
       this._initialFillPromise = this.fillInitialRoutes(requestId);
     } catch (error) {
@@ -285,6 +296,7 @@ Page({
       }
 
       if (mapErrorMessage(error) && previous._rawRoutes && previous._rawRoutes.length) {
+        this._retainedPlanningState = null;
         Object.assign(this, previous);
         this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
         this.renderRoutes({ routeState: "success" });
@@ -292,6 +304,7 @@ Page({
         return;
       }
       releaseSession(previous._routePlanningSession);
+      this._retainedPlanningState = null;
 
       this._rawRoutes = [];
       this._routePlanningSession = null;
@@ -309,14 +322,21 @@ Page({
         routeErrorMessage: mapErrorMessage(error) || "请稍后再试",
         routeState: "error"
       });
+    } finally {
+      if (!adopted) {
+        run.cancel();
+        releaseSession(routeLoadResult && routeLoadResult.routePlanningSession);
+      }
+      if (this._planningRun === run) this._planningRun = null;
     }
   },
 
-  async getRoutes() {
+  async getRoutes(run) {
     const result =
       await routeGenerationService
         .generateRoutes(
-          this._routePreferences || {}
+          this._routePreferences || {},
+          ...(run ? [run] : [])
         );
 
     if (
@@ -329,6 +349,7 @@ Page({
     }
 
     if (result.status === "empty") {
+      releaseSession(result.routePlanningSession);
       return {
         routes: [],
         routePlanningSession: null,
@@ -346,6 +367,7 @@ Page({
         result.waypointCandidateCache
       )
     ) {
+      releaseSession(result.routePlanningSession);
       throw new Error(
         "Invalid route generation result"
       );

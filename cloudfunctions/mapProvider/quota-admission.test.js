@@ -32,6 +32,7 @@ test.each([[120, 2, 'PROVIDER_RATE_LIMITED'], [121, 1, 'PROVIDER_QUOTA_EXHAUSTED
     expect(await outcome).toMatchObject({ code })
     expect(request).toHaveBeenCalledTimes(count)
     expect(qstore.documents.get('day_1').used.walking).toBe(count)
+    expect(qstore.documents.get('day_1').creations.attempts.walking).toBe(count)
   })
 test('QPS deadline before acquisition never charges daily quota', async () => {
   await limiter.cooldown('tencent:key', 20000, 'walkingRoute')
@@ -55,6 +56,7 @@ test('slow confirmed debit outliving queue refunds once without sending', async 
   expect(request).not.toHaveBeenCalled()
   expect(qstore.documents.get('day_1').used.walking).toBe(0)
   expect(admission.cancel).toHaveBeenCalledTimes(1)
+  expect(qstore.documents.get('day_1').creations.attempts.walking).toBe(1)
 })
 test('ambiguous debit acknowledgement retains charge and sends no HTTP', async () => {
   qstore.afterCommit = () => { throw new Error('ack lost') }
@@ -65,6 +67,7 @@ test('ambiguous debit acknowledgement retains charge and sends no HTTP', async (
   expect(request).not.toHaveBeenCalled()
   expect(admission.cancel).not.toHaveBeenCalled()
   expect(qstore.documents.get('day_1').used.walking).toBe(1)
+  expect(qstore.documents.get('day_1').creations.attempts.walking).toBe(1)
 })
 test('quota expiration between debit and send never reaches HTTP', async () => {
   admission.prepare.mockImplementation(async () => {
@@ -87,3 +90,23 @@ test('network failure cannot safely refund an invoked HTTP request', async () =>
   expect(admission.cancel).not.toHaveBeenCalled()
   expect(qstore.documents.get('day_1').used.walking).toBe(1)
 })
+
+
+test('close while HTTP is in flight keeps its charge; next send is refused', async () => {
+  let complete;
+  const pending = new Promise(resolve => { complete = resolve });
+  const request = jest.fn(() => pending);
+  const invoke = createProvider({ limiter, limits, request, admission })('walkingRoute');
+  const outcome = invoke('mock', {});
+  await jest.advanceTimersByTimeAsync(100);
+  expect(request).toHaveBeenCalledTimes(1);
+  await quota.close(auth);
+  complete({ data: { status: 0 } });
+  await outcome;
+  expect(admission.cancel).not.toHaveBeenCalled();
+  expect(qstore.documents.get('day_1').used.walking).toBe(1);
+  const rejected = invoke('mock', {}).catch(e => e);
+  await jest.runAllTimersAsync();
+  expect(await rejected).toMatchObject({ code: 'MAP_SESSION_EXPIRED' });
+  expect(request).toHaveBeenCalledTimes(1);
+});

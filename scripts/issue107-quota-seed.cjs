@@ -1,6 +1,6 @@
 // Offline only. Emits a reviewable seed, never connects to CloudBase.
 const fs = require('node:fs')
-const { LIMITS, DAY } = require('../cloudfunctions/mapProvider/quota')
+const { LIMITS, DAY, emptyCreations } = require('../cloudfunctions/mapProvider/quota')
 function buildSeed({ date, offsetMinutes, used, users = {}, userUsageComplete = false }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '') || !Number.isInteger(offsetMinutes) || Math.abs(offsetMinutes) > 840) throw new Error('Explicit date and confirmed reset offset required')
   const midnight = Date.parse(date + 'T00:00:00.000Z')
@@ -18,7 +18,8 @@ function buildSeed({ date, offsetMinutes, used, users = {}, userUsageComplete = 
     activeFromMs: midnight - offsetMinutes * 60000,
     calendar: { activeFromMs: midnight - offsetMinutes * 60000, offsetMinutes, latestDay: midnight / DAY },
     data: { used: clamp(used, LIMITS.global),
-      users: Object.fromEntries(Object.entries(users).map(([owner, value]) => [owner, clamp(value, LIMITS.user)])), sessions: {} } }
+      users: Object.fromEntries(Object.entries(users).map(([owner, value]) => [owner, clamp(value, LIMITS.user)])),
+      sessions: {}, creations: emptyCreations() } }
 }
 if (require.main === module) {
   try {

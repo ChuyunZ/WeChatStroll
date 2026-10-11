@@ -82,6 +82,55 @@ real, privacy-safe aggregate usage evidence; no such policy is claimed here.
 Existing route quality, directed-edge Promise cache, ordering, scoring and
 deterministic correction budgets are unchanged.
 
+### Nonrefundable record creation budgets (P0-2)
+
+The daily ledger also contains `creations`: global and per-owner `requests` and
+`attempts` counters, each split into Explore and Walking. A new record and its
+counter increment commit in the **same transaction**. The limits apply separately
+to each of those two record types:
+
+| Record creations, per type | User/day | Global/day |
+| --- | ---: | ---: |
+| Explore | 18 | 360 |
+| Walking | 540 | 10,800 |
+
+These are twice the corresponding physical HTTP ceilings: one complete day's
+normal traffic plus equal headroom for queue failures/confirmed unsent refunds.
+A successful logical request needs at most one request record; a physical
+attempt needs one receipt. Internal 120 retries create receipts, not new logical
+claims. Thus normal requests that fit the 270/5400 HTTP limits also fit these
+creation limits, including the 94/188 capacity fixtures, edits and candidates.
+Pathological repeated queue failures eventually stop; unlimited free retries
+would defeat the bound. This is a bounded failure allowance, not a guarantee of
+successful completion or a measured optimal traffic policy.
+
+`claim()` checks the live signed session, existing request identity, remaining
+hold or extensible physical capacity, receipt headroom and request headroom
+**before** writing. Existing claims remain `MAP_EXECUTION_UNKNOWN`, never replay
+HTTP. `begin()` also checks both APIs' receipt headroom and Walking claim
+headroom, then counts discovery creation; unused close/reopen loops cannot
+reset it. `debit()` counts receipts before granting HTTP permission. Close,
+expiry and refund never decrement creation counters. Every owner shares them
+across all sessions and instances; random IDs do not increase the budget.
+
+Rejected quota/creation/replay transactions commit no writes. Concurrent accepted
+claims can still compete for the last physical attempt; final debit enforces the
+HTTP ceiling and a losing claim stays conservatively consumed. Unknown commit
+acknowledgements likewise never reset counts or authorize unconfirmed HTTP.
+
+Per day, at most **22,320 new request/attempt documents globally**:
+`2 * (360 + 10,800)`; at most **1,116 per owner**. Add one daily ledger and the
+singleton calendar. Pruning, failed close and repeated refund can update existing
+records but cannot enlarge this creation bound. Denied requests still cost
+function invocations, reads and transaction work: **this does not eliminate DoS**.
+The existing limiter protects Tencent sends and is downstream of claim; it is
+not an ingress limiter. Before release, assess a platform-enforced authenticated
+invocation rate/concurrency limit (including wrappers), validate normal parallel
+segment bursts and queue latency, and alarm on rejection/transaction volume.
+Do not trust a client-provided owner/IP or add per-random-ID throttle documents.
+In-process throttling alone cannot enforce multi-instance limits. No unverified
+platform setting or new online ingress policy was applied in this local repair.
+
 ## Transactions, QPS, expiry and unknown outcomes
 
 `map_planning_quotas` is separate from `provider_rate_limits`. A single daily
@@ -112,9 +161,24 @@ hours. This covers the minutes-scale generation and an editing interval without
 equating a 120-minute Walk with a 120-minute planning operation. There is no
 automatic renewal or replay-based extension. At expiry, new HTTP is denied;
 existing routes/cache hits/active Walk/Feedback/History/recovery remain usable.
-On page disposal or replacement of a completed planning session the client
-releases unused holds; failed/missing close calls fall back to server expiry.
-Abandoned generation can retain its hold until expiry.
+Each generation owns a `createPlanningRun()` until a successful route is adopted.
+Discovery credentials are captured before response validation. Empty POIs,
+AI+fallback failure, exceptions and cancellation release them even when no
+`routePlanningSession` is returned. Page unload/replacement cancels pending work;
+late discovery captures immediately close their token and cannot restart work.
+Only an adopted successful session is detached from the run and retained for
+candidate filling, additions, replacements and editing. Standalone generation
+callers own and must release a returned successful session.
+
+During reload, the previous displayed session is retained privately until the
+replacement succeeds or definitively fails. A quota/request-budget refusal
+restores it; overlapping reloads share that retained state. A stale result cannot
+take ownership. Unload closes both retained and pending credentials. Duplicate
+closes share one promise; failed close has one bounded retry, including a lost
+acknowledgement. Failures cannot mask the generation result. New resolver calls
+stop on cancellation; already invoked HTTP may settle and remains charged.
+No raw route/credential persistence is added. Offline/crashed clients, a lost
+discovery response with no token, or two failed closes still rely on expiry.
 
 Every successful ledger transaction prunes expired holds **before admission**;
 capacity recovery does not depend on a cron job or physical document deletion.
@@ -131,7 +195,8 @@ when a remote server receives a packet.
 Client messages distinguish `MAP_UNAUTHORIZED`, `MAP_SESSION_INVALID`,
 `MAP_SESSION_EXPIRED`, `MAP_REQUEST_INVALID`, `MAP_EXECUTION_UNKNOWN`,
 `MAP_USER_QUOTA_EXHAUSTED`, `MAP_GLOBAL_QUOTA_EXHAUSTED`,
-`MAP_QUOTA_UNAVAILABLE` and `MAP_QUOTA_NOT_READY`.
+`MAP_QUOTA_UNAVAILABLE`, `MAP_QUOTA_NOT_READY` and `MAP_REQUEST_LIMITED` (daily
+record-creation protection, distinct from physical quota exhaustion).
 Existing Tencent `PROVIDER_RATE_LIMITED` (120), `PROVIDER_QUOTA_EXHAUSTED` (121),
 busy/network/configuration failures remain separate codes. Quota/session failures
 are service failures, never unreachable-edge facts. Manual add/replace/edit
@@ -230,6 +295,19 @@ sums exceeding global totals; already-exceeded ceilings are saturated closed.
 Never overwrite a live ledger with this seed. Missing activation-day state is
 `MAP_QUOTA_NOT_READY`; only later days initialize automatically.
 
+The seed now includes empty `creations` counters and is only for initial
+activation with **no existing quota request/attempt records for that day**.
+An existing ledger without the new counters fails closed; it is never interpreted
+as zero. For upgrading an already active old gateway, stop new planning, drain
+in-flight functions, and prefer the next confirmed quota day, after old sessions
+expire. Preserve the calendar and old ledgers; the first new-day transaction
+creates the new shape automatically. If that day's old ledger already exists,
+do not overwrite it or advance the calendar artificially. Wait another fresh
+day or obtain a complete, independently reviewed reconciliation of all creation
+counts, including refunds/unknown outcomes. Old request docs do not contain an
+owner field, so per-owner reconciliation may be impossible; zero is not a safe
+substitute. No online migration was performed here.
+
 All request and attempt records have numeric `expires` at the end of the next
 quota day. Configure a trusted administrative cleanup job to delete expired
 receipt/request records and day ledgers older than three complete quota days.
@@ -238,6 +316,26 @@ dedup records; deletion is not a mechanism to release capacity. Physical cleanup
 is an operator task and was not installed here. With no cleanup, metadata grows
 but expired reservations still stop occupying capacity. Keep the same-Key gateway
 closed if its ledger is lost; restore/reconcile rather than treating loss as zero.
+
+`scripts/issue107-quota-retention.cjs` supplies a tested **pure eligibility
+predicate**, not an installed worker. It uses the configured quota offset, not
+machine-local/UTC midnight; requires full next-day receipt grace; rejects
+malformed/early expiry; preserves today's and three previous complete days'
+ledgers, the calendar and its latest initialized day even after a long idle
+period. Missing calendar or a backwards clock fails closed.
+
+For the later administrative worker: deny Mini Program invocation and client DB
+access; use a dedicated scheduled service identity with only this collection's
+required read/delete permissions. Paginate bounded batches, re-read calendar and
+candidate inside a transaction immediately before delete, apply the predicate,
+and never alter usage/creation counters, activation epoch or high-water mark.
+Use an `expires` index for receipt candidates and an explicit old-day ID range
+for ledgers; do not enable collection-wide TTL (it would lack these safeguards).
+Run a dry-run inventory first; record aggregate deleted/failed counts without
+tokens/provider data. Retry cleanup failures later: they retain metadata but
+cannot reset quota. Full next-day grace exceeds the bounded function execution
+window; verify that window before enabling the worker. If cleanup is delayed
+indefinitely, total historical storage still grows by up to the daily bound.
 
 ## Validation and remaining release checks
 
@@ -260,11 +358,67 @@ published-client compatibility nor real CloudBase transaction/identity behavior
 nor Tencent availability. Complete the controlled device/deployment checks above
 before claiming production readiness.
 
-Local verification on 2026-10-11: **110 suites / 2519 tests passed**. Both #91
+P0 repair verification on 2026-10-11: **112 suites / 2551 tests passed** (previous
+baseline: 110 / 2519). Both #91
 offline benchmarks completed; success counts, logical request counts and cache
 metrics matched the pre-change baseline (CPU timings vary). `git diff --check`
 passed. On this Windows host `npm.cmd` was used because PowerShell blocks the
 `npm.ps1` shim; Jest assertions and requirements were not reduced. The locked
-wrapper dependency update reported six npm audit findings (one moderate, five
-high); no unrelated dependency upgrade or automatic audit fix was performed.
-These findings require dependency review before a production security sign-off.
+wrapper dependency audit still reports six affected packages (one moderate, five
+high). See [the exact package/advisory inventory and runtime analysis](issue107-dependency-audit.md).
+No dependency upgrade or automatic fix was performed. SDK dependency security
+sign-off, verified ingress protections, cleanup installation and controlled
+CloudBase/device checks remain release work, not completed deployment claims.
+
+### P0 local review inventory and benchmark comparison
+
+All 32 added test cases and the original tests pass. The original two #91 A/B
+assertions remain enabled; this repair makes no A/B preparation or AI changes.
+Lifecycle tests cover empty POIs, all-route failure, malformed discovery,
+exceptions/close failure, repeated close, unload while discovery is pending,
+late/superseded results, quota-denied reload preserving old ownership and
+concurrent Walking cancellation. Server tests cover 10/100/1000 unique and
+repeated rejections, shared-session budgets, last-slot races across instances,
+global limits, close/refund loops, ambiguous commits and sent-HTTP close races.
+Existing edit/add/replace/cache, credential isolation, Walk/History/recovery,
+120/121 and QPS tests remain green.
+
+Each correction scenario has 250 synthetic fixtures. Baseline and repaired
+values match exactly (CPU timings are not compared):
+
+| Correction scenario | Success | Mean new segments | Mean cache hits |
+| --- | ---: | ---: | ---: |
+| balanced | 247 | 3.66 | 7.31 |
+| needle-in-haystack | 73 | 10.52 | 21.04 |
+| directional | 206 | 6.67 | 13.34 |
+| impossible | 0 | 12 | 24 |
+| partly-cached | 248 | 1.88 | 7.84 |
+
+Initial-candidate benchmark also matches baseline, 250 fixtures per scenario:
+
+| Scenario | Hybrid successes | Mean new segments | Mean attempted candidates |
+| --- | ---: | ---: | ---: |
+| short-singletons | 244 | 6.93 | 1.28 |
+| mixed | 219 | 6.35 | 2.54 |
+| long-singletons | 250 | 2.12 | 1.06 |
+
+Changed local files (13 modified, 4 new; none staged):
+
+- Client: `miniprogram/pages/routes/routes.js`,
+  `miniprogram/services/map-planning-authorization.js`,
+  `miniprogram/services/route-generation.js`,
+  `miniprogram/utils/provider-errors.js`.
+- Server: `cloudfunctions/mapProvider/quota.js`, `errors.js`,
+  `planning-session.test.js`, `quota-admission.test.js`, new `request-budget.test.js`
+  (all under that function directory).
+- Client/operator tests: `tests/routes.test.js`,
+  `tests/map-planning-authorization.test.js`, `tests/issue107-quota-seed.test.js`,
+  new `tests/issue107-quota-retention.test.js`.
+- Operator scripts: `scripts/issue107-quota-seed.cjs`,
+  new `scripts/issue107-quota-retention.cjs`.
+- Documentation: this file and new `docs/issue107-dependency-audit.md`.
+
+Reviewed tracked diffs and the four new files; `git diff --check` passes. The
+original three unfinished client modifications were retained and completed.
+No add/commit/push/PR/merge, dependency upgrade, real Tencent stress call or online
+CloudBase/configuration/deployment operation was performed.

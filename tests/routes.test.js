@@ -2281,3 +2281,96 @@ describe(
 
   }
 );
+
+
+describe('planning authorization ownership on the Routes page', () => {
+  let authorization, cloud;
+  beforeEach(() => {
+    authorization = require('../miniprogram/services/map-planning-authorization');
+    cloud = jest.spyOn(require('../miniprogram/services/cloud-function-client'), 'callCloudFunction').mockResolvedValue({ success: true });
+    page.fillInitialRoutes = jest.fn();
+  });
+  const closedTokens = () => cloud.mock.calls.filter(([, e]) => e.action === 'closePlanning').map(([, e]) => e.planningToken);
+  function result(token, run) {
+    const grouped = {};
+    if (run) run.capture(grouped, { planningToken: token });
+    else authorization.rememberDiscovery(grouped, { planningToken: token });
+    const loaded = createSuccessfulRouteLoadResult();
+    authorization.bindSession(loaded.routePlanningSession, grouped);
+    return { status: 'success', ...loaded };
+  }
+  async function showOld() {
+    const old = result('old');
+    routeGenerationServiceMock.generateRoutes.mockResolvedValueOnce(old);
+    await page.loadRoutes();
+    expect(closedTokens()).toEqual([]);
+    return old;
+  }
+  test('successful replacement closes old ownership; unload and duplicate unload close new once', async () => {
+    await showOld();
+    routeGenerationServiceMock.generateRoutes.mockImplementationOnce(async (_, run) => result('new', run));
+    await page.loadRoutes();
+    expect(closedTokens()).toEqual(['old']);
+    page.onUnload(); page.onUnload();
+    expect(closedTokens()).toEqual(['old', 'new']);
+  });
+  test.each(['empty', 'exception'])('replacement %s releases both captured generation and obsolete old session', async mode => {
+    await showOld();
+    routeGenerationServiceMock.generateRoutes.mockImplementationOnce((_, run) => run.execute(async () => {
+      const loaded = result('failed', run);
+      if (mode === 'exception') throw new Error('generation error');
+      return { status: 'empty', routePlanningSession: loaded.routePlanningSession };
+    }));
+    await page.loadRoutes();
+    expect(new Set(closedTokens())).toEqual(new Set(['failed', 'old']));
+    expect(closedTokens()).toHaveLength(2);
+    expect(page._routePlanningSession).toBeNull();
+  });
+  test('unload during discovery releases old and the later arriving new authorization without rendering', async () => {
+    await showOld();
+    const pending = createDeferred();
+    routeGenerationServiceMock.generateRoutes.mockImplementationOnce((_, run) => run.execute(async () => {
+      await pending.promise;
+      return result('late', run);
+    }));
+    const loading = page.loadRoutes();
+    page.onUnload();
+    const count = page.setData.mock.calls.length;
+    pending.resolve(); await loading;
+    expect(closedTokens()).toEqual(['old', 'late']);
+    expect(page.setData).toHaveBeenCalledTimes(count);
+    expect(page._routePlanningSession).toBeNull();
+  });
+  test('superseded generation closes promptly; quota refusal restores the original live session', async () => {
+    const old = await showOld();
+    const pending = createDeferred();
+    routeGenerationServiceMock.generateRoutes.mockImplementationOnce((_, run) => run.execute(async () => {
+      const loaded = result('superseded', run);
+      await pending.promise;
+      return loaded;
+    }));
+    const first = page.loadRoutes();
+    routeGenerationServiceMock.generateRoutes.mockRejectedValueOnce(Object.assign(new Error('quota'), { code: 'MAP_REQUEST_LIMITED' }));
+    await page.loadRoutes();
+    expect(page._routePlanningSession).toBe(old.routePlanningSession);
+    expect(closedTokens()).toEqual(['superseded']);
+    pending.resolve(); await first;
+    expect(page._routePlanningSession).toBe(old.routePlanningSession);
+    expect(closedTokens()).toEqual(['superseded']);
+    page.onUnload();
+    expect(closedTokens()).toEqual(['superseded', 'old']);
+  });
+  test('late success from a service that ignores cancellation cannot replace the adopted result', async () => {
+    await showOld();
+    const pending = createDeferred();
+    const late = result('late');
+    routeGenerationServiceMock.generateRoutes.mockReturnValueOnce(pending.promise);
+    const first = page.loadRoutes();
+    const current = result('current');
+    routeGenerationServiceMock.generateRoutes.mockResolvedValueOnce(current);
+    await page.loadRoutes();
+    pending.resolve(late); await first;
+    expect(page._routePlanningSession).toBe(current.routePlanningSession);
+    expect(closedTokens()).toEqual(['old', 'late']);
+  });
+});
