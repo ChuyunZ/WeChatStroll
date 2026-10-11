@@ -51,6 +51,20 @@ function isValidActiveWalkSession(session) {
   );
 }
 
+// A matching local terminal handoff can request a server check, but can
+// never authorize deleting the active lock by itself.
+function hasMatchingTerminalHandoff(session) {
+  try {
+    const pending = getPendingWalkResult();
+    return Boolean(pending &&
+      pending.walkId === session.walkId &&
+      pending.routeId === session.routeId &&
+      Date.parse(pending.startTime) === session.startTimeMs);
+  } catch (_) {
+    return false;
+  }
+}
+
 function getActiveWalkSession() {
   const session = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
@@ -272,7 +286,11 @@ async function reconcileActiveWalkImpl(route = null) {
 // actual abandonment: never delete a still-active or unverified Walk by clock.
 async function cleanupStaleActiveWalk() {
   const local = getActiveWalkSession();
-  if (!local || Date.now() - local.startTimeMs < MAX_ACTIVE_WALK_AGE_MS) return false;
+  if (!local) return false;
+  // A matching terminal handoff can mean route deletion failed during an
+  // earlier completion. Verify such locks promptly, even if younger than 12h.
+  if (Date.now() - local.startTimeMs < MAX_ACTIVE_WALK_AGE_MS &&
+      !hasMatchingTerminalHandoff(local)) return false;
   const check = reconcileActiveWalkImpl();
   startupStaleCheck = check;
   try {

@@ -116,10 +116,10 @@ test('terminal cloud status removes full route but recovers optional Feedback me
   expect(storage.pendingWalkResult).not.toHaveProperty('route');
   expect(storage.pendingWalkResult).not.toHaveProperty('status');
 });
-test.each(['offline', 'active'])(
-  'matching pending Feedback cannot erase a 13-hour Walk before cloud confirmation (%s)',
-  async cloudState => {
-    const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+test.each([['offline', 13], ['active', 13], ['offline', 1], ['active', 1]])(
+  'matching pending Feedback cannot erase a Walk before cloud confirmation (%s, age=%i hours)',
+  async (cloudState, ageHours) => {
+    const walk = local(Date.now() - ageHours * 60 * 60 * 1000);
     storage.activeWalkSession = walk;
     storage.pendingWalkResult = terminal(walk);
     if (cloudState === 'offline') records.getWalk.mockRejectedValue(new Error('offline'));
@@ -143,8 +143,8 @@ test.each(['offline', 'active'])(
     expect(wx.removeStorageSync).not.toHaveBeenCalledWith('activeWalkSession');
   }
 );
-test('matching pending Feedback is cleared only after cloud confirms terminal', async () => {
-  const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+test.each([1, 13])('matching pending Feedback is cleared only after cloud confirms terminal (age=%i hours)', async ageHours => {
+  const walk = local(Date.now() - ageHours * 60 * 60 * 1000);
   storage.activeWalkSession = walk;
   storage.pendingWalkResult = terminal(walk);
   records.getWalk.mockResolvedValue(terminal(walk));
