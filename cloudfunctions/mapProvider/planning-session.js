@@ -38,7 +38,7 @@ function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
       const auth = await quota.begin(owner, event.requestId, hash(JSON.stringify([
         owner, event.requestId, pointKey(event), event.radius === undefined ? null : event.radius
       ])))
-      return { auth, admission: admission(auth, 'explore') }
+      return { auth, admission: admission(auth, 'explore'), abort: () => quota.close(auth) }
     },
     async complete(auth, event, result) {
       if (!result.success) { await quota.close(auth); return result }
