@@ -28,20 +28,25 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
           !Number.isSafeInteger(calendar.latestDay)) throw fail('MAP_QUOTA_NOT_READY')
       const id = `day_${day}`
       let data = await tx.get(id)
+      const initializing = !data
       if (!data) {
         // First activation day must be explicitly reconciled; only later days
         // can initialize empty. Never silently discard same-day historical use.
         if (day <= dayOf(activeFromMs) || day <= calendar.latestDay) throw fail('MAP_QUOTA_NOT_READY')
         data = { used: { explore: 0, walking: 0 }, users: {}, sessions: {}, creations: emptyCreations() }
       }
-      const state = JSON.parse(JSON.stringify(data))
+      const before = JSON.stringify(data)
+      const state = JSON.parse(before)
       validateState(state)
       for (const [sid, session] of Object.entries(state.sessions)) {
         if (session.expires <= time) delete state.sessions[sid]
       }
       const result = await work(state, tx, time)
       validateState(state)
-      await tx.set(id, state)
+      // Keep the transactional read/conflict check, but do not turn an
+      // idempotent close/refund/sweep into an unlimited ledger write endpoint.
+      // Real expiry pruning and first-day initialization still persist.
+      if (initializing || JSON.stringify(state) !== before) await tx.set(id, state)
       if (day > calendar.latestDay) await tx.set('calendar', { ...calendar, latestDay: day })
       return result
     })

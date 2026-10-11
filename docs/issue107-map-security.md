@@ -120,8 +120,9 @@ acknowledgements likewise never reset counts or authorize unconfirmed HTTP.
 
 Per day, at most **22,320 new request/attempt documents globally**:
 `2 * (360 + 10,800)`; at most **1,116 per owner**. Add one daily ledger and the
-singleton calendar. Pruning, failed close and repeated refund can update existing
-records but cannot enlarge this creation bound. Denied requests still cost
+singleton calendar. Actual pruning/refunds update existing records but cannot
+enlarge this creation bound. No-op close/refund/sweep no longer rewrites an
+unchanged ledger. Denied requests and repeated closes still cost
 function invocations, reads and transaction work: **this does not eliminate DoS**.
 The existing limiter protects Tencent sends and is downstream of claim; it is
 not an ingress limiter. Before release, assess a platform-enforced authenticated
@@ -140,6 +141,23 @@ The ledger serializes contention at this small configured daily scale. Only
 explicit transaction conflicts retry, with bounded jitter. Database failures
 and uncertain commit acknowledgements fail closed.
 
+The transaction compares the validated resulting ledger with its original JSON
+snapshot and writes only on an actual change or first initialization. It still
+reads the ledger inside the transaction, preserving conflict detection and
+atomicity. The first close deletes the remaining reservation; a repeated close
+of a missing session succeeds without any ledger/document write. If genuinely
+expired reservations are pruned during that transaction, that one real change
+is persisted; subsequent no-op closes do not rewrite it. Creation counters and
+used attempts are never released by close. Calendar high-water advancement and
+new-day initialization retain their existing rules. An internal late close of
+an already removed old-day session does not touch the current-day ledger; public
+expired tokens continue to fail authorization.
+
+This fixes unbounded **no-op ledger writes**, not unbounded reads or transaction
+invocations. The 1000-close regression observes 1000 successful read-only
+transactions with zero writes after the first close. Ingress protection remains
+a release prerequisite; the downstream Tencent QPS limiter does not provide it.
+
 The existing QPS lease is acquired **before charging**. A committed debit then
 precedes final QPS confirmation and synchronous HTTP invocation. Slow debit or
 queue/lease/session expiry that definitely prevents invocation refunds through
@@ -148,6 +166,33 @@ no awaited quota work occurs between them. A lost debit acknowledgement sends
 no HTTP but may conservatively retain a charge. Invoked HTTP, including timeout,
 120, 121 and unknown network outcomes, is never refunded. This is a safe upper
 bound on possible starts, not exact provider billing reconciliation.
+
+### Close versus a pre-debited Walking request
+
+Close stops **new quota admissions**, not an already granted single-attempt
+permit. Debit and close serialize on the same day ledger. If close commits first,
+debit cannot find a live session and fails; if the confirmed debit commits first,
+that in-flight attempt may start even when close commits before final QPS
+confirmation. Its endpoints/owner were authorized before debit, and its permit
+is internal to that execution, not a reusable client credential. Close releases
+only the unused hold, preserving this already-used attempt.
+
+The permitted attempt must still pass QPS ownership/cooldown confirmation, the
+queue deadline, lease start window and permit/session/day expiry checks. No
+additional awaited quota read was inserted between final confirmation and the
+timestamp/HTTP invocation. QPS fencing, cooldown conflict detection and lease
+safety tails are unchanged. If a stale lease or cooldown prevents HTTP, the
+never-sent attempt can be refunded exactly once even after close, without
+resurrecting the session or refunding receipt creation capacity. Once HTTP is
+invoked, success, timeout or failure keeps the charge. A status-120 retry needs
+a new debit and therefore cannot send after close; new logical claims also fail.
+
+Reproducible tests pause the actual mock CloudBase QPS confirmation transaction
+at `beforeCommit`, after a confirmed quota debit and before any HTTP. A second
+operation closes the session, then the test resumes confirmation. Cases verify
+one allowed/charged send, a blocked 120 retry, no send with a safe refund on lease expiry,
+and concurrent cooldown publication causing a transaction conflict and no send.
+The limiter is not mocked out or weakened to obtain these results.
 
 Each logical request is claimed once. Duplicate IDs return
 `MAP_EXECUTION_UNKNOWN`, even if the first request completed: no route response
@@ -370,7 +415,7 @@ No dependency upgrade or automatic fix was performed. SDK dependency security
 sign-off, verified ingress protections, cleanup installation and controlled
 CloudBase/device checks remain release work, not completed deployment claims.
 
-### P0 local review inventory and benchmark comparison
+### Original P0 local review inventory and benchmark comparison
 
 All 32 added test cases and the original tests pass. The original two #91 A/B
 assertions remain enabled; this repair makes no A/B preparation or AI changes.
@@ -402,7 +447,7 @@ Initial-candidate benchmark also matches baseline, 250 fixtures per scenario:
 | mixed | 219 | 6.35 | 2.54 |
 | long-singletons | 250 | 2.12 | 1.06 |
 
-Changed local files (13 modified, 4 new; none staged):
+Files in the original P0 repair (13 modified, 4 new at that review):
 
 - Client: `miniprogram/pages/routes/routes.js`,
   `miniprogram/services/map-planning-authorization.js`,
@@ -422,3 +467,25 @@ Reviewed tracked diffs and the four new files; `git diff --check` passes. The
 original three unfinished client modifications were retained and completed.
 No add/commit/push/PR/merge, dependency upgrade, real Tencent stress call or online
 CloudBase/configuration/deployment operation was performed.
+
+### Follow-up review of f77e77f
+
+The repeated-close write repair changes only `cloudfunctions/mapProvider/quota.js`,
+`planning-session.test.js`, `quota-admission.test.js` and this document. Added
+seven cases cover 1000 signed duplicate closes, concurrent closes with a lost
+commit acknowledgement, expiry pruning and old-day cleanup, and the four
+post-debit/QPS-confirmation races above. Existing request creation and physical
+quota ceilings are unchanged; no AI/Track/client/limiter implementation changed.
+
+Follow-up local validation: **112 suites / 2558 tests passed** with
+`npm.cmd test -- --runInBand --silent`. Both #91 offline benchmarks completed;
+success counts, segment calls, candidate counts and cache hits match the tables
+above (CPU timings vary). `git diff --check` passes. All four changed files remain
+local and unstaged on `feature/issue-107-map-session-budget`; no commit, push, PR
+or deployment was performed for this follow-up.
+
+Release gates remain: authenticated ingress rate/concurrency protection against
+read/transaction abuse, the six SDK dependency findings and their security
+sign-off, deployment/migration and cleanup setup, and controlled CloudBase/device
+verification. This local repair does not declare those gates satisfied and does
+not deploy or change online settings.

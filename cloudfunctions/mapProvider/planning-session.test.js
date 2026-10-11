@@ -185,3 +185,63 @@ test('a missing previously initialized ledger or calendar never silently resets 
   clock += DAY
   await expect(discovery(3)).rejects.toMatchObject({ code: 'MAP_QUOTA_NOT_READY' })
 })
+
+test('1000 repeated signed closes perform no ledger writes or new records after the first release', async () => {
+  const { opened, response } = await discovery()
+  const admitted = await security.walking(walking(response), context)
+  await admitted.admission.prepare()
+  const commits = []
+  store.afterCommit = ({ writes }) => commits.push([...writes.keys()])
+  const close = () => security.close({ planningToken: response.planningToken }, context)
+  await expect(close()).resolves.toEqual({ success: true })
+  expect(commits).toEqual([['day_1']])
+  expect(store.documents.get('day_1').sessions[opened.auth.sid]).toBeUndefined()
+  const before = JSON.stringify([...store.documents])
+  commits.length = 0
+  for (let i = 0; i < 1000; i++) await expect(close()).resolves.toEqual({ success: true })
+  expect(commits).toHaveLength(1000) // Reads/transactions still occur; no ingress DoS claim.
+  expect(commits.every(ids => ids.length === 0)).toBe(true)
+  expect(JSON.stringify([...store.documents])).toBe(before)
+  expect(store.documents.get('day_1').used).toEqual({ explore: 3, walking: 1 })
+  await expect(admitted.admission.prepare()).rejects.toMatchObject({ code: 'MAP_SESSION_EXPIRED' })
+})
+
+test('concurrent closes and a lost first acknowledgement release once without rewriting the ledger', async () => {
+  const { response } = await discovery()
+  let writes = 0
+  store.afterCommit = ({ writes: changes }) => {
+    if (changes.has('day_1')) { writes++; throw new Error('lost close acknowledgement') }
+  }
+  const close = () => security.close({ planningToken: response.planningToken }, context)
+  const outcomes = await Promise.allSettled(Array.from({ length: 20 }, close))
+  expect(outcomes.filter(r => r.status === 'rejected')).toHaveLength(1)
+  expect(outcomes.find(r => r.status === 'rejected').reason.code).toBe('MAP_QUOTA_UNAVAILABLE')
+  expect(writes).toBe(1)
+  await expect(close()).resolves.toEqual({ success: true })
+  expect(writes).toBe(1)
+  expect(store.documents.get('day_1').sessions).toEqual({})
+  expect(store.documents.get('day_1').used.explore).toBe(3)
+})
+
+test('no-op close still persists genuine expiry pruning once and never changes the next-day ledger', async () => {
+  const { opened } = await discovery()
+  await quota.close(opened.auth)
+  const other = await discovery(2)
+  clock = other.opened.auth.expires
+  const commits = []
+  store.afterCommit = ({ writes }) => commits.push([...writes.keys()])
+  await quota.close(opened.auth)
+  expect(commits).toEqual([['day_1']])
+  expect(store.documents.get('day_1').sessions).toEqual({})
+  await quota.close(opened.auth)
+  await quota.sweep()
+  expect(commits.slice(1)).toEqual([[], []])
+  clock = DAY * 2 + 60000
+  await discovery(3)
+  const before = JSON.stringify([...store.documents])
+  commits.length = 0
+  await quota.close(opened.auth) // Internal late cleanup; public expired tokens are rejected.
+  expect(commits).toEqual([[]])
+  expect(JSON.stringify([...store.documents])).toBe(before)
+  expect(store.documents.get('calendar').latestDay).toBe(2)
+})

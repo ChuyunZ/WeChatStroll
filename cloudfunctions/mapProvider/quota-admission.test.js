@@ -20,6 +20,57 @@ beforeEach(async () => {
     cancel: jest.fn(permit => quota.refund(auth, permit)) }
 })
 afterEach(() => jest.useRealTimers())
+
+test.each(['complete', 'retry120', 'lease-expired', 'cooldown'])(
+  'close after confirmed debit, while final QPS confirmation is pending: %s', async mode => {
+    let reached, resume
+    const confirming = new Promise(resolve => { reached = resolve })
+    const gate = new Promise(resolve => { resume = resolve })
+    let paused = false
+    store.beforeCommit = async ({ result }) => {
+      // acquire returns a lease object; confirm returns true. Pause its real
+      // optimistic transaction, not a mocked limiter or bypassed lease check.
+      if (result === true && !paused) {
+        paused = true
+        reached()
+        await gate
+      }
+    }
+    const request = jest.fn(async () => {
+      expect(qstore.documents.get('day_1').sessions[auth.sid]).toBeUndefined()
+      expect(qstore.documents.get('day_1').used.walking).toBe(1)
+      return { data: { status: mode === 'retry120' ? 120 : 0 } }
+    })
+    const outcome = createProvider({ limiter, limits, request, admission })('walkingRoute')('mock', {})
+      .then(value => ({ value }), error => ({ error }))
+    await confirming
+    expect(admission.prepare).toHaveBeenCalledTimes(1)
+    expect(qstore.documents.get('day_1').used.walking).toBe(1)
+    expect(request).not.toHaveBeenCalled()
+    await quota.close(auth)
+    await expect(quota.claim(auth, 'request_after_close', 'edge')).rejects.toMatchObject({ code: 'MAP_SESSION_EXPIRED' })
+    if (mode === 'lease-expired') jest.setSystemTime(Date.now() + limits.leaseStartWindowMs + 1)
+    if (mode === 'cooldown') await limiter.cooldown('tencent:key', 20000, 'walkingRoute')
+    resume()
+    await jest.runAllTimersAsync()
+    const result = await outcome
+    if (mode === 'complete' || mode === 'retry120') {
+      expect(request).toHaveBeenCalledTimes(1)
+      expect(admission.cancel).not.toHaveBeenCalled()
+      expect(qstore.documents.get('day_1').used.walking).toBe(1)
+      if (mode === 'complete') expect(result.error).toBeUndefined()
+      else expect(result.error).toMatchObject({ code: 'MAP_SESSION_EXPIRED' }) // Retry needs a new debit.
+    } else {
+      expect(request).not.toHaveBeenCalled()
+      expect(admission.cancel).toHaveBeenCalledTimes(1)
+      expect(qstore.documents.get('day_1').used.walking).toBe(0)
+      expect(result.error).toMatchObject({ code: mode === 'cooldown' ? 'PROVIDER_BUSY' : 'MAP_SESSION_EXPIRED' })
+      if (mode === 'cooldown') expect(store.conflicts).toBeGreaterThan(0)
+    }
+    expect(qstore.documents.get('day_1').sessions).toEqual({})
+    expect(qstore.documents.get('day_1').creations.attempts.walking).toBe(1)
+    await expect(admission.prepare()).rejects.toMatchObject({ code: 'MAP_SESSION_EXPIRED' })
+  })
 test.each([[120, 2, 'PROVIDER_RATE_LIMITED'], [121, 1, 'PROVIDER_QUOTA_EXHAUSTED']])(
   'Tencent %i charges every physical attempt, then terminates', async (status, count, code) => {
     const request = jest.fn(async () => {
