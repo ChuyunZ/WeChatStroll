@@ -33,6 +33,34 @@ test('no identity or forged event identity cannot authorize discovery; missing c
   expect([...store.documents.keys()]).toEqual(['calendar'])
   expect(() => createPlanningSecurity({ store, env: {} })).toThrow()
 })
+test.each([
+  ['MAP_QUOTA_OFFSET_MINUTES', ''],
+  ['MAP_QUOTA_OFFSET_MINUTES', '   '],
+  ['MAP_QUOTA_OFFSET_MINUTES', '\\t'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '1.0'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '+0'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '1e2'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '0x10'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '9007199254740993'],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', ''],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '  '],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '1e3'],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '0x100'],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '+0'],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '1.5'],
+  ['MAP_QUOTA_ACTIVE_FROM_MS', '9007199254740993']
+])('invalid or ambiguous quota configuration %s=%j fails closed', (name, value) => {
+  expect(() => createPlanningSecurity({ store, env: { ...env, [name]: value }, now: () => clock }))
+    .toThrow('CONFIG_MISSING')
+  expect([...store.documents.keys()]).toEqual(['calendar'])
+})
+
+test('explicit decimal integer quota configuration accepts non-UTC offsets and safe activation timestamps', () => {
+  expect(() => createPlanningSecurity({ store, env: {
+    ...env, MAP_QUOTA_OFFSET_MINUTES: '-480', MAP_QUOTA_ACTIVE_FROM_MS: '1791676800000'
+  }, now: () => clock })).not.toThrow()
+})
+
 test('binds origin/POI scope, identity, session and expiry without storing provider data', async () => {
   const { response } = await discovery()
   await expect(security.walking(walking(response), { ...context, OPENID: 'other' })).rejects.toMatchObject({ code: 'MAP_SESSION_INVALID' })
