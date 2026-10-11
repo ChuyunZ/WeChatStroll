@@ -34,6 +34,53 @@ test.each([10, 100, 1000])('exhausted HTTP quota: %i unique AND repeated denied 
   expect(commit).not.toHaveBeenCalled()
 })
 
+test.each(['attempts', 'requests'])('a new base is denied before Explore if %s record capacity cannot honor 90 Walking', async kind => {
+  const record = { requests: { explore: 0, walking: 0 }, attempts: { explore: 0, walking: 0 } }
+  record[kind].walking = 451 // Only 89 slots are left; physical HTTP remains fully available.
+  store.documents.set('day_1', { used: { explore: 0, walking: 0 }, users: {}, sessions: {},
+    creations: { requests: { explore: 0, walking: kind === 'requests' ? 451 : 0 },
+      attempts: { explore: 0, walking: kind === 'attempts' ? 451 : 0 },
+      users: { [owner]: record } } })
+  const before = JSON.stringify([...store.documents])
+  await expect(quota.begin(owner, id(), 'input')).rejects.toMatchObject({ code: 'MAP_REQUEST_LIMITED' })
+  expect(JSON.stringify([...store.documents])).toBe(before)
+})
+
+test('creation holds protect all 90 Walking request documents and receipts across competing sessions', async () => {
+  const prior = { requests: { explore: 0, walking: 450 }, attempts: { explore: 0, walking: 450 } }
+  store.documents.set('day_1', { used: { explore: 0, walking: 0 }, users: {}, sessions: {},
+    creations: { requests: { explore: 0, walking: 450 }, attempts: { explore: 0, walking: 450 },
+      users: { [owner]: prior } } })
+  const auth = await open()
+  const hold = ledger().sessions[auth.sid].creationRemaining
+  expect(hold.requests.walking).toBe(90)
+  expect(hold.attempts.walking).toBe(90)
+  await expect(open()).rejects.toMatchObject({ code: 'MAP_REQUEST_LIMITED' })
+  for (let i = 0; i < 90; i++) {
+    await quota.claim(auth, id(), 'edge')
+    await quota.debit(auth, 'walking')
+  }
+  expect(ledger().creations.requests.walking).toBe(540)
+  expect(ledger().creations.attempts.walking).toBe(540)
+  expect(ledger().sessions[auth.sid].creationRemaining.requests.walking).toBe(0)
+  expect(ledger().sessions[auth.sid].creationRemaining.attempts.walking).toBe(0)
+  await expect(quota.claim(auth, id(), 'edge')).rejects.toMatchObject({ code: 'MAP_REQUEST_LIMITED' })
+})
+
+test('unused creation holds are released by close and cannot be refunded after records exist', async () => {
+  const auth = await open()
+  expect(ledger().sessions[auth.sid].creationRemaining.requests.walking).toBe(90)
+  await quota.close(auth)
+  const fresh = await open()
+  await quota.claim(fresh, id(), 'edge')
+  const permit = await quota.debit(fresh, 'walking')
+  await quota.refund(fresh, permit)
+  expect(ledger().creations.requests.walking).toBe(1)
+  expect(ledger().creations.attempts.walking).toBe(1)
+  expect(ledger().sessions[fresh.sid].creationRemaining.requests.walking).toBe(89)
+  expect(ledger().sessions[fresh.sid].creationRemaining.attempts.walking).toBe(89)
+})
+
 test('claims with no HTTP are bounded across sessions, close and random IDs; duplicate accepted requests stay unknown', async () => {
   const a = await open()
   const b = await open()
@@ -76,6 +123,8 @@ test('unused discovery close/reopen cannot reset request budget', async () => {
 test.each(['requests', 'attempts'])('independent instances contend for the final %s creation slot atomically', async kind => {
   const auth = await open()
   // Reconciled near-limit counters: avoid thousands of irrelevant setup transactions.
+  // Model 539 previously consumed records with no outstanding base hold.
+  ledger().sessions[auth.sid].creationRemaining[kind].walking = 0
   ledger().creations[kind].walking = 539
   ledger().creations.users[owner][kind].walking = 539
   const outcomes = await Promise.allSettled(Array.from({ length: 24 }, () => {
@@ -91,6 +140,7 @@ test.each(['requests', 'attempts'])('independent instances contend for the final
 test.each(['requests', 'attempts'])('global %s cap spans owners and cannot be bypassed by a fresh user', async kind => {
   const auth = await open()
   const c = ledger().creations
+  ledger().sessions[auth.sid].creationRemaining[kind].walking = 0
   for (let i = 1; i <= 20; i++) c.users[i.toString(16).padStart(64, '0')] = {
     requests: { explore: 0, walking: kind === 'requests' ? 540 : 0 },
     attempts: { explore: 0, walking: kind === 'attempts' ? 540 : 0 }
