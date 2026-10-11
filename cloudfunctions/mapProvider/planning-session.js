@@ -1,10 +1,19 @@
 const { createTokens, hash, ownerOf, pointKey, fail } = require('./planning-token')
 const { createQuota } = require('./quota')
+// These settings define the quota day and activation boundary. Never coerce
+// blank, whitespace, exponent or hex notation into an unintended timestamp.
+function requiredIntegerSetting(env, name) {
+  const raw = env[name]
+  if (typeof raw !== 'string' || !/^-?(?:0|[1-9]\\d*)$/.test(raw)) throw fail('CONFIG_MISSING')
+  const parsed = Number(raw)
+  if (!Number.isSafeInteger(parsed)) throw fail('CONFIG_MISSING')
+  return parsed
+}
 function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
   const tokens = createTokens(env.MAP_PLANNING_SECRET)
   const quota = createQuota({ store, now,
-    offsetMinutes: env.MAP_QUOTA_OFFSET_MINUTES === undefined ? NaN : Number(env.MAP_QUOTA_OFFSET_MINUTES),
-    activeFromMs: env.MAP_QUOTA_ACTIVE_FROM_MS === undefined ? NaN : Number(env.MAP_QUOTA_ACTIVE_FROM_MS),
+    offsetMinutes: requiredIntegerSetting(env, 'MAP_QUOTA_OFFSET_MINUTES'),
+    activeFromMs: requiredIntegerSetting(env, 'MAP_QUOTA_ACTIVE_FROM_MS'),
     ttlMs: env.MAP_SESSION_TTL_MS === undefined ? undefined : Number(env.MAP_SESSION_TTL_MS) })
   function identity(event, context) {
     if (!event._mapDelegation) return ownerOf(context)
