@@ -4,6 +4,7 @@
   "description": "Legacy nearbyPois forwarding to mapProvider",
   "main": "index.js",
   "dependencies": {
-    "@cloudbase/node-sdk": "3.17.2"
+    "@cloudbase/node-sdk": "3.17.2",
+    "wx-server-sdk": "^4.0.2"
   }
 }

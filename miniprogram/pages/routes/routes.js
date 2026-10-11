@@ -5,10 +5,11 @@ const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
 const routeCopy = require("../../services/route-copy");
 const { waypointSetKey, normalizePlanningFailure } = require("../../services/agentic-route-planning");
-const { isProviderUnavailableCode } = require("../../utils/provider-errors");
+const { isProviderUnavailableCode, mapErrorMessage } = require("../../utils/provider-errors");
 const { MAX_CORRECTION_CANDIDATES, MAX_CORRECTION_NEW_SEGMENTS } = require("../../config/route-planning");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
+const { releaseSession } = require("../../services/map-planning-authorization");
 
 const {
   ROUTE_TYPES
@@ -67,6 +68,7 @@ Page({
     replacingRouteId: "",
     isLoadingMoreRoutes: false,
     routes: [],
+    routeErrorMessage: "请稍后再试",
     routeState: "loading"
   },
 
@@ -127,6 +129,7 @@ Page({
 
   onUnload() {
     this._unloaded = true;
+    releaseSession(this._routePlanningSession);
     if (this._copyUnsubscribe) this._copyUnsubscribe();
     if (this._copySession) this._copySession.dispose();
     this._copyUnsubscribe = this._copySession = null;
@@ -150,6 +153,14 @@ Page({
   },
 
   async loadRoutes() {
+    const previous = {
+      _rawRoutes: this._rawRoutes,
+      _routePlanningSession: this._routePlanningSession,
+      _waypointCandidateCache: this._waypointCandidateCache,
+      _routeLocation: this._routeLocation,
+      _historicalPreferenceProfile: this._historicalPreferenceProfile,
+      _verifiedWaypointPool: this._verifiedWaypointPool
+    };
     // Retry is a new generation, but not a new questionnaire/copy budget.
     if (this._copySession) this._copySession.beginGeneration();
     this.resetManualAlternatives();
@@ -190,6 +201,7 @@ Page({
         requestId !==
         this._routeRequestId
       ) {
+        releaseSession(routeLoadResult && routeLoadResult.routePlanningSession);
         return;
       }
 
@@ -207,6 +219,8 @@ Page({
         routeLoadResult.routes;
 
       if (routes.length === 0) {
+        releaseSession(previous._routePlanningSession);
+        releaseSession(routeLoadResult.routePlanningSession);
         this._rawRoutes = [];
         this._routePlanningSession = null;
         this._waypointCandidateCache = null;
@@ -257,6 +271,7 @@ Page({
         routeLoadResult.waypointCandidateCache;
 
       this._routeLocation = routeLoadResult.location;
+      releaseSession(previous._routePlanningSession);
 
       this.renderRoutes({ routeState: "success" });
       // Do not await the remainder before making the first route usable.
@@ -268,6 +283,15 @@ Page({
       ) {
         return;
       }
+
+      if (mapErrorMessage(error) && previous._rawRoutes && previous._rawRoutes.length) {
+        Object.assign(this, previous);
+        this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
+        this.renderRoutes({ routeState: "success" });
+        wx.showToast({ title: mapErrorMessage(error), icon: "none" });
+        return;
+      }
+      releaseSession(previous._routePlanningSession);
 
       this._rawRoutes = [];
       this._routePlanningSession = null;
@@ -282,6 +306,7 @@ Page({
 
       this.setData({
         routes: [],
+        routeErrorMessage: mapErrorMessage(error) || "请稍后再试",
         routeState: "error"
       });
     }
@@ -770,7 +795,7 @@ Page({
             if (!isCurrent()) return;
             console.warn('[Manual AI Planning] Attempt failed:', { attempt: round, code: typeof (error && error.code) === 'string' ? error.code : 'AI_ROUTE_PLANNING_FAILED' });
             if (error && isProviderUnavailableCode(error.code)) {
-              wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+              wx.showToast({ title: mapErrorMessage(error) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
               return;
             }
             observations.push({ attempt: round, waypointIds: [],
@@ -818,7 +843,7 @@ Page({
           // The shared builder normally settles exceptions itself.
           batchCache.markFailed(candidate.candidateId);
           if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(error) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           observations.push({ attempt: round, waypointIds: [...candidate.waypointIds],
@@ -830,7 +855,7 @@ Page({
           if ([result.error, result.code, result.causeCode,
             result.failedSegment && result.failedSegment.causeCode,
             result.failedSegment && result.failedSegment.error].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(result) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           observations.push({ attempt: round,
@@ -890,7 +915,7 @@ Page({
             remainingSegmentBudget: correctionRemainingSegments
           });
           if (corrected.providerError) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(corrected.providerError) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           if (corrected.success) {

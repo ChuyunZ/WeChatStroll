@@ -4,7 +4,7 @@ const AVAILABILITY_STATUSES = new Set([500, 510, 520, 530, 531, 600])
 // not evidence that a particular walking edge is unreachable.
 const CONFIGURATION_STATUSES = new Set([110, 111, 112, 113, 190, 199, 311])
 
-function createProvider({ limiter, limits, request, now = Date.now, log = () => {} }) {
+function createProvider({ limiter, limits, request, admission, now = Date.now, log = () => {} }) {
   return function forOperation(operation) {
     const config = limits[operation]
     const scopes = [
@@ -19,7 +19,7 @@ function createProvider({ limiter, limits, request, now = Date.now, log = () => 
           execution = await limiter.execute(scopes, deadline, operation, ({ startedAtMs, waitMs }) => {
             log({ event: 'provider_start', operation, scope: config.scope, startedAtMs, waitMs, attempt })
             return request(url, { ...options, timeout: limits.requestTimeoutMs })
-          })
+          }, admission)
         } catch (error) {
           log({ event: 'acquisition_failed', operation })
           throw infrastructureFailure(error)

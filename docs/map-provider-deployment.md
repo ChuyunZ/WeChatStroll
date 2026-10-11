@@ -1,5 +1,10 @@
 # Map provider deployment (#94)
 
+**#107 local security update:** the contracts and rollout requirements in
+[Map authorization and coupled quotas](issue107-map-security.md) supersede the
+unsigned discovery/Walking examples below. The earlier smoke tests here remain
+historical development evidence, not validation of the new authorization path.
+
 This describes the current repository implementation and the development validation
 completed on 2026-10-04. Direct CloudBase smoke tests, legacy-wrapper forwarding and
 a Mini Program end-to-end route-generation check passed in the development environment.

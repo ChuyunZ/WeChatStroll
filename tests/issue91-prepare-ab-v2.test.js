@@ -31,6 +31,11 @@ test('fails closed if code anchors change', () => {
   expect(() => replaceExactlyOnce('abc abc', 'abc', 'x', 'example')).toThrow(/exactly one/)
 })
 
+test('LF and CRLF checkouts produce identical executable temporary functions', () => {
+  const lf = production.replace(/\r\n/g, '\n')
+  expect(buildTemporaryIndex(lf.replace(/\n/g, '\r\n'))).toBe(buildTemporaryIndex(lf))
+})
+
 
 test('generated temporary function selects the pinned prompt and returns aggregate diagnostics', async () => {
   const requests = jest.fn().mockResolvedValue({ success: true, data: { text: 'synthetic-json' } })

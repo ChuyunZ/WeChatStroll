@@ -152,20 +152,43 @@ function createLimiter({ store, now = Date.now,
     }, now() + bookkeepingWaitMs, operation)
   }
 
-  async function execute(scopes, deadline, operation, startRequest) {
+  async function execute(scopes, deadline, operation, startRequest, admission) {
     const queuedAt = now()
     while (now() <= deadline) {
       const lease = await acquire(scopes, deadline, operation)
-      if (!await confirm(lease, deadline, operation)) continue
+      let permit
+      try {
+        // Queue before charging. DB latency must precede the final lease check,
+        // never be inserted between the recorded start timestamp and HTTP.
+        if (admission) permit = await admission.prepare()
+        if (!await confirm(lease, deadline, operation)) {
+          if (permit) await admission.cancel(permit)
+          continue
+        }
+        if (permit && now() >= permit.startBefore) {
+          const expired = Object.assign(new Error('Session expired'), { code: 'MAP_SESSION_EXPIRED' })
+          throw expired
+        }
+      } catch (error) {
+        if (permit) await admission.cancel(permit)
+        await transact(async tx => clearOwned(tx, lease, await readScopes(tx, scopes)),
+          now() + bookkeepingWaitMs, operation)
+        throw error
+      }
       const startedAtMs = now()
       // Only a genuinely expired lease/queue forbids start, not normal commit
       // latency. The safety tail ensures even a crashed owner cannot start late.
-      if (startedAtMs > deadline || startedAtMs > lease.startBeforeMs) {
+      if (startedAtMs > deadline || startedAtMs > lease.startBeforeMs ||
+          (permit && startedAtMs >= permit.startBefore)) {
+        if (permit) await admission.cancel(permit)
         log({ event: 'lease_start_expired', operation })
         // No HTTP was sent. An ownership-checked release is safe; on storage
         // failure leave the lease for bounded recovery instead of starting.
         await transact(async tx => clearOwned(tx, lease, await readScopes(tx, scopes)),
           now() + bookkeepingWaitMs, operation)
+        if (permit && startedAtMs >= permit.startBefore) {
+          throw Object.assign(new Error('Session expired'), { code: 'MAP_SESSION_EXPIRED' })
+        }
         if (startedAtMs > deadline) throw queueExpired(operation, queuedAt)
         continue
       }

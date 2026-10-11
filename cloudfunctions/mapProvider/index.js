@@ -7,12 +7,16 @@ const { createProvider } = require('./provider')
 const { createNearbyHandler } = require('./nearby-pois')
 const { createWalkingHandler } = require('./walking')
 const { addTencentSignature } = require('./signing')
+const { createPlanningSecurity } = require('./planning-session')
+const { createQuotaStore } = require('./quota-store')
+const { isProviderCode } = require('./errors')
+const { pointKey } = require('./planning-token')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 exports.main = async event => {
   const operation = event && event.action
-  if (operation !== 'nearbyPois' && operation !== 'walkingRoute') {
+  if (!['nearbyPois', 'walkingRoute', 'closePlanning'].includes(operation)) {
     return { success: false, error: { code: 'INVALID_ACTION', message: 'Unsupported provider operation' } }
   }
   const apiKey = process.env.TENCENT_MAPS_API_KEY
@@ -20,17 +24,27 @@ exports.main = async event => {
   if (!apiKey || !secretKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
   const log = record => console.info('[Map Provider]', record)
   try {
+    if (operation === 'nearbyPois') pointKey(event)
+    if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
     const limits = loadLimits()
-    const store = createCloudBaseStore(cloud.database({ throwOnNotFound: false }))
+    const db = cloud.database({ throwOnNotFound: false })
+    const security = createPlanningSecurity({ store: createQuotaStore(db) })
+    const context = cloud.getWXContext()
+    if (operation === 'closePlanning') return await security.close(event, context)
+    const authorization = operation === 'nearbyPois'
+      ? await security.open(event, context) : await security.walking(event, context)
+    const store = createCloudBaseStore(db)
     const limiter = createLimiter({ store, ...limits, log })
-    const provider = createProvider({ limiter, limits, log,
+    const provider = createProvider({ limiter, limits, log, admission: authorization.admission,
       request: (url, options) => axios.get(url, addTencentSignature(url, options, secretKey)) })
     const createHandler = operation === 'walkingRoute' ? createWalkingHandler : createNearbyHandler
-    return await createHandler({ apiKey, request: provider(operation) })(event)
-  } catch (_) {
+    const result = await createHandler({ apiKey, request: provider(operation) })(event)
+    return operation === 'nearbyPois' ? await security.complete(authorization.auth, event, result) : result
+  } catch (error) {
     log({ event: 'gateway_unavailable', operation })
     return { success: false, error: {
-      code: 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
+      code: isProviderCode(error.code) || ['CONFIG_MISSING', 'INVALID_COORDINATES'].includes(error.code)
+        ? error.code : 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
     } }
   }
 }

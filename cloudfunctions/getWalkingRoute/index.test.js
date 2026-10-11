@@ -1,3 +1,5 @@
+jest.mock('wx-server-sdk', () => ({ init: jest.fn(), getWXContext: jest.fn(() => ({ OPENID: 'test-user', APPID: 'test-app' })) }))
+const originalPlanningSecret = process.env.MAP_PLANNING_SECRET
 jest.mock('@cloudbase/node-sdk', () => ({ init: jest.fn(() => ({ callFunction: mockInvoke })), SYMBOL_CURRENT_ENV: Symbol('current-env') }))
 const mockInvoke = jest.fn()
 const fs = require('fs')
@@ -10,18 +12,22 @@ const failure = { success: false, error: {
 } }
 
 beforeEach(() => {
+  process.env.MAP_PLANNING_SECRET = 'test-wrapper-secret-with-at-least-32-bytes'
   jest.useFakeTimers()
   jest.clearAllMocks()
   jest.spyOn(console, 'info').mockImplementation(() => {})
 })
-afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks() })
+afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks()
+  if (originalPlanningSecret === undefined) delete process.env.MAP_PLANNING_SECRET
+  else process.env.MAP_PLANNING_SECRET = originalPlanningSecret
+})
 
 test('forwards to the canonical gateway with fixed action and explicit Node SDK transport timeout', async () => {
   const result = { success: true, value: 'unchanged' }
   cloud.callFunction.mockResolvedValue({ result })
   expect(await main({ action: 'override', input: 'trusted-by-gateway' })).toBe(result)
   expect(cloud.callFunction).toHaveBeenCalledWith({ name: 'mapProvider',
-    data: { action: ACTION, input: 'trusted-by-gateway' } },
+    data: { action: ACTION, requestId: expect.any(String), _mapDelegation: expect.any(String) } },
     { timeout: 60000, retryOptions: { retries: 0 } })
   expect(cloud.callFunction.mock.calls[0]).toHaveLength(2)
   expect(jest.getTimerCount()).toBe(0)
@@ -82,7 +88,7 @@ test('forwards the walking route business result without wrapping it', async () 
   cloud.callFunction.mockResolvedValue({ result })
   expect(await main({})).toBe(result)
   expect(cloud.callFunction.mock.calls[0]).toEqual([{
-    name: 'mapProvider', data: { action: ACTION }
+    name: 'mapProvider', data: { action: ACTION, requestId: expect.any(String), _mapDelegation: expect.any(String) }
   }, { timeout: 60000, retryOptions: { retries: 0 } }])
 })
 
@@ -115,9 +121,9 @@ test('a never-settling SDK call is bounded without retrying or invoking AMap aga
 })
 
 test('wrapper has no direct provider dependency and remains independently deployable', () => {
-  expect(require('./package.json').dependencies).toEqual({ '@cloudbase/node-sdk': '3.17.2' })
+  expect(require('./package.json').dependencies).toEqual({ '@cloudbase/node-sdk': '3.17.2', 'wx-server-sdk': '^4.0.2' })
   const source = fs.readFileSync(path.join(__dirname, 'index.js'), 'utf8')
-  expect(source.match(/require\([^)]*\)/g)).toEqual(["require('@cloudbase/node-sdk')"])
+  expect(source.match(/require\([^)]*\)/g)).toEqual(["require('@cloudbase/node-sdk')", "require('./delegation')"])
   expect(source).not.toMatch(/axios|restapi\.amap|AMAP_API_KEY/)
 })
 

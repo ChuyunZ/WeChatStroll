@@ -469,7 +469,7 @@ describe('route-generation service', () => {
         {
           name: 'mapProvider',
           data: {
-            action: 'nearbyPois',
+            action: 'nearbyPois', requestId: expect.any(String),
             longitude: 113.264939,
             latitude: 23.129158,
             radius: 750
@@ -484,7 +484,7 @@ describe('route-generation service', () => {
         {
           name: 'mapProvider',
           data: {
-            action: 'walkingRoute',
+            action: 'walkingRoute', requestId: expect.any(String),
             start: {
               latitude: 23.129158,
               longitude: 113.264939
@@ -685,7 +685,7 @@ describe('route-generation service', () => {
           {
             name: 'mapProvider',
             data: {
-              action: 'walkingRoute',
+              action: 'walkingRoute', requestId: expect.any(String),
               start: {
                 latitude: TEST_LOCATION.latitude,
                 longitude: TEST_LOCATION.longitude
@@ -699,7 +699,7 @@ describe('route-generation service', () => {
           {
             name: 'mapProvider',
             data: {
-              action: 'walkingRoute',
+              action: 'walkingRoute', requestId: expect.any(String),
               start: {
                 latitude: PARK_POI.latitude,
                 longitude: PARK_POI.longitude
@@ -750,7 +750,7 @@ describe('route-generation service', () => {
       ).toHaveBeenCalledWith({
         name: 'mapProvider',
         data: {
-          action: 'nearbyPois',
+          action: 'nearbyPois', requestId: expect.any(String),
           longitude: 113.264939,
           latitude: 23.129158,
           radius: 1000

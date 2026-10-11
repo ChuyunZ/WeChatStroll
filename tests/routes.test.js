@@ -72,6 +72,24 @@ let pageDefinition;
 let page;
 let routeGenerationServiceMock;
 
+test.each(['MAP_USER_QUOTA_EXHAUSTED', 'MAP_GLOBAL_QUOTA_EXHAUSTED', 'MAP_SESSION_EXPIRED'])(
+  'reload failure %s preserves already displayed routes and their planning cache', async code => {
+    page.getRoutes = jest.fn().mockResolvedValue(createSuccessfulRouteLoadResult());
+    await page.loadRoutes();
+    const routes = page._rawRoutes;
+    const session = page._routePlanningSession;
+    const cached = page._waypointCandidateCache;
+    page.getRoutes.mockRejectedValue(Object.assign(new Error('quota'), { code }));
+    await page.loadRoutes();
+    expect(page._rawRoutes).toBe(routes);
+    expect(page._routePlanningSession).toBe(session);
+    expect(page._waypointCandidateCache).toBe(cached);
+    expect(page.data.routeState).toBe('success');
+    expect(page.data.routes).toHaveLength(routes.length);
+    expect(wx.showToast).toHaveBeenCalledWith({ title: expect.any(String), icon: 'none' });
+  }
+);
+
 
 function createDeferred() {
   let resolve;

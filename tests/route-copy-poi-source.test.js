@@ -18,7 +18,7 @@ test('dev source searches five nearby centers through existing map action and st
   expect(getLocation).toHaveBeenCalledTimes(1);
   expect(call).toHaveBeenCalledTimes(SEARCH_OFFSETS.length);
   expect(call).toHaveBeenNthCalledWith(1, 'mapProvider', {
-    action: 'nearbyPois', latitude: 31.2, longitude: 121.4, radius: 1000
+    action: 'nearbyPois', requestId: expect.any(String), latitude: 31.2, longitude: 121.4, radius: 1000
   }, expect.objectContaining({ fallbackCode: 'BENCHMARK_POI_UNAVAILABLE' }));
   for (const [, args] of call.mock.calls) {
     expect(args.radius).toBe(1000);

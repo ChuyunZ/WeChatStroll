@@ -27,7 +27,7 @@
     wx:elif="{{routeState === 'error'}}"
   >
     <text class="state-title">路线加载失败</text>
-    <text class="state-description">请稍后再试</text>
+    <text class="state-description">{{routeErrorMessage}}</text>
 
     <button
       class="secondary-button"

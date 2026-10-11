@@ -1,4 +1,5 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { requestId } = require('./map-planning-authorization')
 const { rememberStreetEvidence } = require('./street-evidence')
 const {
   isValidGeoPoint,
@@ -46,7 +47,8 @@ function normalizeWalkingRoute(route) {
 
 async function getWalkingSegment(
   fromPoint,
-  toPoint
+  toPoint,
+  planningToken
 ) {
   if (
     !isValidGeoPoint(fromPoint) ||
@@ -65,6 +67,8 @@ async function getWalkingSegment(
       'mapProvider',
       {
         action: 'walkingRoute',
+        requestId: requestId(),
+        ...(planningToken ? { planningToken } : {}),
         start: copyGeoPoint(fromPoint),
         destination: copyGeoPoint(toPoint)
       },

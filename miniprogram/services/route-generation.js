@@ -1,4 +1,5 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { requestId, rememberDiscovery, resolverFor, bindSession } = require('./map-planning-authorization')
 const locationService = require('./location')
 const { rankRoutes } = require('./route-ranking')
 const { transferStreetEvidence } = require('./street-evidence')
@@ -378,6 +379,7 @@ async function searchNearbyPois(
       'mapProvider',
       {
         action: 'nearbyPois',
+        requestId: requestId(),
         longitude: location.longitude,
         latitude: location.latitude,
         radius
@@ -400,7 +402,7 @@ async function searchNearbyPois(
     )
   }
 
-  return result.poisByCategory
+  return rememberDiscovery(result.poisByCategory, result)
 }
 
 async function loadHistoricalPreferenceProfile() {
@@ -1069,8 +1071,11 @@ async function buildFallbackGenerationResult({
     createRoutePlanningSession({
       start: location,
       verifiedWaypointPool: fallbackPois,
+      segmentResolver: resolverFor(poisByCategory),
       routeType
     })
+
+  bindSession(fallbackSession, poisByCategory)
 
   if (routePlanningSession) {
     fallbackSession.registerVerifiedWaypoints(
@@ -1314,9 +1319,11 @@ async function generateRoutes(
   const historicalPreferenceProfile = await loadHistoricalPreferenceProfile()
   const session = createRoutePlanningSession({
     start: location,
+    segmentResolver: resolverFor(poisByCategory),
     verifiedWaypointPool: nearbyPois,
     routeType: getRequestedRouteType(preferences)
   })
+  bindSession(session, poisByCategory)
   const attemptedWaypointSets = new Set()
   const observations = []
   let correctionRemainingSegments = MAX_CORRECTION_NEW_SEGMENTS
@@ -1559,11 +1566,13 @@ async function generateFirstRoute(
   const routePlanningSession =
     createRoutePlanningSession({
       start: location,
+      segmentResolver: resolverFor(poisByCategory),
       verifiedWaypointPool: [
         selectedPoi
       ],
       routeType
     })
+  bindSession(routePlanningSession, poisByCategory)
 
   const walkingRoute =
     await routePlanningSession

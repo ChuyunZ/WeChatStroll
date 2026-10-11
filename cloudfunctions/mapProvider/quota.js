@@ -1,0 +1,149 @@
+const { randomBytes } = require('crypto')
+const { transact } = require('./quota-store')
+const { fail, hash } = require('./planning-token')
+const DAY = 86400000
+const LIMITS = { user: { explore: 9, walking: 270 }, global: { explore: 180, walking: 5400 } }
+// No arbitrary global buffer: protect every admitted base reservation, then
+// extend one physical attempt at a time from genuinely unreserved capacity.
+function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs = 2 * 60 * 60 * 1000 }) {
+  if (!Number.isInteger(offsetMinutes) || Math.abs(offsetMinutes) > 840 ||
+      !Number.isSafeInteger(activeFromMs) || activeFromMs < 0 ||
+      !Number.isSafeInteger(ttlMs) || ttlMs < 60000 || ttlMs > 4 * 60 * 60 * 1000) throw fail('CONFIG_MISSING')
+  const dayOf = time => Math.floor((time + offsetMinutes * 60000) / DAY)
+  const endOf = day => (day + 1) * DAY - offsetMinutes * 60000
+  function validRequest(id) {
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(id)) throw fail('MAP_REQUEST_INVALID')
+  }
+  async function run(day, work) {
+    return transact(store, async tx => {
+      const time = now()
+      if (time < activeFromMs) throw fail('MAP_QUOTA_NOT_READY')
+      const calendar = await tx.get('calendar')
+      if (!calendar || calendar.activeFromMs !== activeFromMs || calendar.offsetMinutes !== offsetMinutes ||
+          !Number.isSafeInteger(calendar.latestDay)) throw fail('MAP_QUOTA_NOT_READY')
+      const id = `day_${day}`
+      let data = await tx.get(id)
+      if (!data) {
+        // First activation day must be explicitly reconciled; only later days
+        // can initialize empty. Never silently discard same-day historical use.
+        if (day <= dayOf(activeFromMs) || day <= calendar.latestDay) throw fail('MAP_QUOTA_NOT_READY')
+        data = { used: { explore: 0, walking: 0 }, users: {}, sessions: {} }
+      }
+      const state = JSON.parse(JSON.stringify(data))
+      validateState(state)
+      for (const [sid, session] of Object.entries(state.sessions)) {
+        if (session.expires <= time) delete state.sessions[sid]
+      }
+      const result = await work(state, tx, time)
+      validateState(state)
+      await tx.set(id, state)
+      if (day > calendar.latestDay) await tx.set('calendar', { ...calendar, latestDay: day })
+      return result
+    })
+  }
+  function user(state, owner) {
+    return state.users[owner] || (state.users[owner] = { explore: 0, walking: 0 })
+  }
+  function room(state, owner, api, amount) {
+    const sessions = Object.values(state.sessions)
+    const held = sessions.reduce((sum, s) => sum + s.remaining[api], 0)
+    const ownHeld = sessions.filter(s => s.owner === owner).reduce((sum, s) => sum + s.remaining[api], 0)
+    if (user(state, owner)[api] + ownHeld + amount > LIMITS.user[api]) throw fail('MAP_USER_QUOTA_EXHAUSTED')
+    if (state.used[api] + held + amount > LIMITS.global[api]) throw fail('MAP_GLOBAL_QUOTA_EXHAUSTED')
+  }
+  function sessionOf(state, sid, owner, time, day) {
+    const s = state.sessions[sid]
+    if (!s || s.owner !== owner || s.expires <= time || day !== dayOf(time) || time >= endOf(day) - 1000) {
+      throw fail('MAP_SESSION_EXPIRED')
+    }
+    return s
+  }
+  return {
+    async begin(owner, requestId, inputHash) {
+      validRequest(requestId)
+      const day = dayOf(now())
+      const sid = randomBytes(24).toString('hex')
+      return run(day, async (state, tx, time) => {
+        if (day !== dayOf(time) || time >= endOf(day) - 60000) throw fail('MAP_SESSION_EXPIRED')
+        const rid = `request_${hash(owner + ':' + requestId)}`
+        if (await tx.get(rid)) throw fail('MAP_EXECUTION_UNKNOWN')
+        room(state, owner, 'explore', 3)
+        room(state, owner, 'walking', 90)
+        const expires = Math.min(time + ttlMs, endOf(day) - 1000)
+        state.sessions[sid] = { owner, expires, ready: false, remaining: { explore: 3, walking: 90 } }
+        await tx.set(rid, { day, inputHash, expires: endOf(day) + DAY })
+        return { sid, day, expires, owner }
+      })
+    },
+    ready(auth, scopeHash) {
+      return run(auth.day, (state, tx, time) => {
+        const s = sessionOf(state, auth.sid, auth.owner, time, auth.day)
+        s.ready = true
+        s.scopeHash = scopeHash
+        s.remaining.explore = 0
+      })
+    },
+    claim(auth, requestId, inputHash) {
+      validRequest(requestId)
+      return run(auth.day, async (state, tx, time) => {
+        const s = sessionOf(state, auth.sid, auth.owner, time, auth.day)
+        if (!s.ready || s.scopeHash !== auth.scopeHash) throw fail('MAP_SESSION_INVALID')
+        const rid = `request_${hash(auth.owner + ':' + requestId)}`
+        if (await tx.get(rid)) throw fail('MAP_EXECUTION_UNKNOWN')
+        await tx.set(rid, { day: auth.day, inputHash, expires: endOf(auth.day) + DAY })
+      })
+    },
+    async debit(auth, api) {
+      const attemptId = randomBytes(24).toString('hex')
+      return run(auth.day, async (state, tx, time) => {
+        const s = sessionOf(state, auth.sid, auth.owner, time, auth.day)
+        if (api === 'walking' && (!s.ready || s.scopeHash !== auth.scopeHash)) throw fail('MAP_SESSION_INVALID')
+        if (!s.remaining[api]) {
+          room(state, auth.owner, api, 1)
+          s.remaining[api]++
+        }
+        s.remaining[api]--
+        state.used[api]++
+        user(state, auth.owner)[api]++
+        await tx.set(`attempt_${attemptId}`, { sid: auth.sid, owner: auth.owner, day: auth.day,
+          api, refunded: false, expires: endOf(auth.day) + DAY })
+        return { attemptId, startBefore: Math.min(s.expires, endOf(auth.day) - 1000) }
+      })
+    },
+    // Only called by the limiter when it can prove HTTP was never invoked.
+    refund(auth, permit) {
+      return run(auth.day, async (state, tx, time) => {
+        const id = `attempt_${permit.attemptId}`
+        const receipt = await tx.get(id)
+        if (!receipt || receipt.refunded || receipt.owner !== auth.owner || receipt.sid !== auth.sid) return
+        state.used[receipt.api]--
+        user(state, auth.owner)[receipt.api]--
+        const s = state.sessions[auth.sid]
+        if (s && s.expires > time) s.remaining[receipt.api]++
+        await tx.set(id, { ...receipt, refunded: true })
+      })
+    },
+    close(auth) {
+      return run(auth.day, state => {
+        const s = state.sessions[auth.sid]
+        if (s && s.owner !== auth.owner) throw fail('MAP_SESSION_INVALID')
+        delete state.sessions[auth.sid]
+      })
+    },
+    sweep: () => run(dayOf(now()), () => undefined)
+  }
+}
+function validateState(state) {
+  const counts = value => value && ['explore', 'walking'].every(k => Number.isSafeInteger(value[k]) && value[k] >= 0)
+  if (!counts(state.used) || !state.users || Array.isArray(state.users) || !state.sessions || Array.isArray(state.sessions) ||
+      !Object.entries(state.users).every(([owner, value]) => /^[a-f0-9]{64}$/.test(owner) && counts(value)) || !Object.values(state.sessions).every(s =>
+        /^[a-f0-9]{64}$/.test(s.owner) && Number.isSafeInteger(s.expires) && counts(s.remaining))) throw fail('MAP_QUOTA_UNAVAILABLE')
+  for (const api of ['explore', 'walking']) {
+    const sessions = Object.values(state.sessions)
+    if (sessions.reduce((sum, s) => sum + s.remaining[api], state.used[api]) > LIMITS.global[api]) throw fail('MAP_QUOTA_UNAVAILABLE')
+    for (const [owner, used] of Object.entries(state.users)) {
+      if (sessions.filter(s => s.owner === owner).reduce((sum, s) => sum + s.remaining[api], used[api]) > LIMITS.user[api]) throw fail('MAP_QUOTA_UNAVAILABLE')
+    }
+  }
+}
+module.exports = { createQuota, LIMITS, DAY }
