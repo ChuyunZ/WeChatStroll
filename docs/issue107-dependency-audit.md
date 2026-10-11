@@ -74,6 +74,52 @@ fix before enabling planning. No risk acceptance is made on the user's behalf.
    arbitrary SDK transport options out of map entrypoints. Any temporary
    exception needs an explicit owner, expiry and runtime reachability evidence.
 
+## Follow-up: official package versions and enforced transport boundary (2026-10-11)
+
+This follow-up uses **public npm/package metadata and the three checked-in lockfiles**;
+it does not replace the earlier read-only npm audit or assert a deployed runtime
+security sign-off.
+
+- The npm **stable** `wx-server-sdk` latest tag is still `4.0.2`. The advertised
+  `4.0.3-beta.1` updates its node SDK dependency, but is a prerelease and is
+  not evidence of an audited patch. Do not silently opt in to beta in production.
+  See [wx SDK releases](https://www.npmjs.com/package/wx-server-sdk?activeTab=versions)
+  and [upstream change log](https://github.com/wechat-miniprogram/wx-server-sdk).
+- A newer `@cloudbase/node-sdk@3.18.3` lockfile in Tencent's own toolkit
+  [still pins `@cloudbase/database@1.4.3` and `axios@0.27.2`](https://github.com/TencentCloudBase/CloudBase-AI-Toolkit/blob/main/examples/cloudbase-auth-endpoint-with-feishu/package-lock.json).
+  Updating `3.17.2` just to clear the audit would not remove these findings.
+  Independently deployed `mapProvider`, `getNearbyPois` and `getWalkingRoute`
+  all currently include the same vulnerable SDK subtree.
+- The [GitHub advisory for `lodash.set`](https://github.com/advisories/GHSA-p6mc-m468-83gw)
+  lists **no patched standalone `lodash.set` version**. Replacing it with a
+  different lodash module is *not* a drop-in semver resolution and would change
+  transitive SDK behavior. Pinning a random substitute or using `npm audit fix
+  --force` is not a verified mitigation.
+- Additional offline regression tests invoke each legacy wrapper through the
+  **actual installed Node SDK request construction** (the network layer is
+  intercepted). Malicious top-level fields (`__proto__`, `constructor`,
+  `action`, `name`, `url`, `proxy`, `headers`, `secretKey`, `timeout`,
+  forged user identity and delegation) cannot alter the fixed `mapProvider`
+  invocation target, SDK request settings, trusted owner or signed business
+  allowlist. This guards the observed forwarding boundary, **not arbitrary
+  internal SDK APIs or real runtime metadata acquisition**.
+- Tencent CloudBase warns that `wx-server-sdk.getWXContext()` may return
+  **stale identity across reused instances with mixed invocation sources**.
+  Official guidance permits it when a function is called only from Mini
+  Programs, not when HTTP/server calls can hit the same function. Thus review
+  every callable entrypoint, function trigger and published-client path;
+  validate identities on CloudBase with successive different users and any
+  delegated legacy call. See [CloudBase instance-reuse guidance](https://docs.cloudbase.net/cloud-function/instance).
+
+**Remaining blocker:** There is no confirmed safe upgrade that eliminates all
+reported findings without risking auth, transactional DB or forwarding behavior.
+Do not mark the dependency review resolved or approve production release on the
+basis of these tests alone. Obtain a maintained patched SDK, or documented
+runtime-specific reachability/sign-off and operational acceptance from the
+release owner, after controlled CloudBase E2E. If exposed mixed invocation
+sources or hostile metadata/proxy configuration are found, keep deployment
+blocked until remediated.
+
 ## Audit advisory inventory
 
 The following inventory is extracted from the read-only npm advisory response.
