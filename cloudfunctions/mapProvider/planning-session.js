@@ -4,7 +4,7 @@ const { createQuota } = require('./quota')
 // blank, whitespace, exponent or hex notation into an unintended timestamp.
 function requiredIntegerSetting(env, name) {
   const raw = env[name]
-  if (typeof raw !== 'string' || !/^-?(?:0|[1-9]\\d*)$/.test(raw)) throw fail('CONFIG_MISSING')
+  if (typeof raw !== 'string' || !/^-?(?:0|[1-9]\d*)$/.test(raw)) throw fail('CONFIG_MISSING')
   const parsed = Number(raw)
   if (!Number.isSafeInteger(parsed)) throw fail('CONFIG_MISSING')
   return parsed
