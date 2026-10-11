@@ -632,7 +632,6 @@ describe("Walking page", () => {
     expect(wx.getStorageSync("pendingWalkResult")).toEqual(
       expect.objectContaining({
         routeId: TEST_ROUTE.routeId,
-        route: TEST_ROUTE,
         startTime: "2026-10-01T12:00:00.000Z",
         endTime: "2026-10-01T12:12:30.000Z",
         actualDurationSeconds: 750,
@@ -643,6 +642,7 @@ describe("Walking page", () => {
       })
     );
 
+    expect(wx.getStorageSync("pendingWalkResult")).not.toHaveProperty("route");
     expect(page.data.ended).toBe(true);
     expect(page.data.finishing).toBe(true);
     expect(page.data.elapsedSeconds).toBe(750);
@@ -921,6 +921,27 @@ describe("Walking page", () => {
     warnSpy.mockRestore();
   });
 
+  test.each(["completed", "ended_early"])("terminal %s still clears route when optional Feedback write fails", async completionStatus => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const originalWrite = wx.setStorageSync.getMockImplementation();
+    wx.setStorageSync.mockImplementation((key, value) => {
+      if (key === "pendingWalkResult") throw new Error("feedback storage unavailable");
+      return originalWrite(key, value);
+    });
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
+    if (completionStatus === "completed") await page.finishWalk();
+    else await page.completeWalk("ended_early");
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(storage.pendingWalkResult).toBeUndefined();
+    expect(wx.removeStorageSync).toHaveBeenCalledWith("activeWalkSession");
+    expect(page._active).toBe(false);
+    expect(page.data.ended).toBe(true);
+    expect(wx.reLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      url: `/pages/feedback/feedback?walkId=${encodeURIComponent("walk-test")}`
+    }));
+    warn.mockRestore();
+  });
+
   test("retains terminal result when local active-lock cleanup fails", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -1141,6 +1162,14 @@ describe("durable completion before trajectory cleanup", () => {
     if (remainingLock) durable.activeWalkSession = oldLock;
     page = loadWalkingPage();
     storage = durable;
+    if (remainingLock) {
+      // The page mock is recreated on reload; model the *durable server*
+      // completion explicitly rather than treating local pending as proof.
+      walkRecords.getWalk.mockResolvedValueOnce({
+        ...durable.pendingWalkResult,
+        status: durable.pendingWalkResult.completionStatus
+      });
+    }
     await page.onLoad({ routeId: TEST_ROUTE.routeId });
     const service = require("../miniprogram/services/active-walk-session");
     expect(service.getActiveWalkSession()).toBeNull();

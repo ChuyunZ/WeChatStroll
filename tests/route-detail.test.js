@@ -972,10 +972,23 @@ describe(
           completionStatus: "completed"
         });
 
+        // Simulate the durable server status explicitly: pending local
+        // Feedback alone must never authorize clearing a valid route lock.
+        walkRecords.getWalk.mockResolvedValueOnce({
+          walkId: "walk-test",
+          routeId: GENERATED_ROUTE.routeId,
+          status: "completed",
+          completionStatus: "completed",
+          startTime: new Date(startTimeMs).toISOString(),
+          endTime: new Date(startTimeMs + 10 * 60 * 1000).toISOString(),
+          actualDurationSeconds: 600
+        });
+
         wx.navigateTo.mockClear();
 
         await page.onShow();
 
+        expect(walkRecords.getWalk).toHaveBeenCalledWith("walk-test");
         expect(wx.navigateTo).not.toHaveBeenCalled();
         expect(
           wx.getStorageSync("activeWalkSession")

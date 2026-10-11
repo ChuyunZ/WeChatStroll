@@ -1,6 +1,12 @@
 const ACTIVE_WALK_STORAGE_KEY = "activeWalkSession";
 const PENDING_WALK_RESULT_STORAGE_KEY = "pendingWalkResult";
 const ACTIVE_WALK_SESSION_VERSION = 2;
+const MAX_ACTIVE_WALK_AGE_MS = 12 * 60 * 60 * 1000;
+// Terminal results are optional Feedback metadata, never planned-route caches.
+const PENDING_FIELDS = [
+  "walkId", "routeId", "startTime", "endTime", "actualDurationSeconds",
+  "completionStatus", "trajectoryEnabled", "trajectoryPartial", "trajectoryEndTimeMs"
+];
 const { isValidPreferences } = require("./walk-records");
 const { isValidGeoPoint } = require("../utils/geo");
 
@@ -9,7 +15,7 @@ function isValidCompletionRequest(session) {
   return request === undefined || Boolean(request && request.walkId === session.walkId &&
     ["completed", "ended_early"].includes(request.completionStatus) &&
     Number.isSafeInteger(request.endTimeMs) && request.endTimeMs >= session.startTimeMs &&
-    request.endTimeMs <= Date.now() + 60000 && typeof request.trajectoryPartial === "boolean");
+    typeof request.trajectoryPartial === "boolean");
 }
 
 function isValidRouteSnapshot(route) {
@@ -37,7 +43,6 @@ function isValidActiveWalkSession(session) {
     session.route.routeId === session.routeId &&
     Number.isSafeInteger(session.startTimeMs) &&
     session.startTimeMs > 0 &&
-    session.startTimeMs <= Date.now() + 60000 &&
     isValidCompletionRequest(session) &&
     (
       session.trackingEnabled === undefined ||
@@ -46,22 +51,18 @@ function isValidActiveWalkSession(session) {
   );
 }
 
-function isCompletedActiveWalkSession(session) {
-  const pendingResult = getPendingWalkResult();
-
-  if (!pendingResult) {
+// A matching local terminal handoff can request a server check, but can
+// never authorize deleting the active lock by itself.
+function hasMatchingTerminalHandoff(session) {
+  try {
+    const pending = getPendingWalkResult();
+    return Boolean(pending &&
+      pending.walkId === session.walkId &&
+      pending.routeId === session.routeId &&
+      Date.parse(pending.startTime) === session.startTimeMs);
+  } catch (_) {
     return false;
   }
-
-  const pendingStartTimeMs =
-    Date.parse(pendingResult.startTime);
-
-  return (
-    pendingResult.walkId === session.walkId &&
-    pendingResult.routeId === session.routeId &&
-    Number.isFinite(pendingStartTimeMs) &&
-    pendingStartTimeMs === session.startTimeMs
-  );
 }
 
 function getActiveWalkSession() {
@@ -77,14 +78,9 @@ function getActiveWalkSession() {
     return null;
   }
 
-  if (
-    isCompletedActiveWalkSession(session)
-  ) {
-    require("./walking-tracker").stopTrackingForSession(session);
-    wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
-    return null;
-  }
-
+  // A pending Feedback handoff is device metadata, not authoritative proof
+  // of completion. CloudBase reconciliation must verify the Walk state before
+  // deleting a structurally valid route lock, including on cold launch.
   return session;
 }
 
@@ -156,38 +152,63 @@ function isValidPendingWalkResult(result) {
     result.walkId.trim() !== "" &&
     typeof result.routeId === "string" &&
     result.routeId.trim() !== "" &&
-    isValidRouteSnapshot(result.route) &&
-    result.route.routeId === result.routeId &&
     typeof result.startTime === "string" &&
     typeof result.endTime === "string" &&
+    Number.isFinite(Date.parse(result.startTime)) &&
+    Number.isFinite(Date.parse(result.endTime)) &&
     Number.isFinite(result.actualDurationSeconds) &&
     result.actualDurationSeconds >= 0 &&
-    ["completed", "ended_early"].includes(result.completionStatus)
+    ["completed", "ended_early"].includes(result.completionStatus) &&
+    (result.trajectoryEnabled === undefined || typeof result.trajectoryEnabled === "boolean") &&
+    (result.trajectoryPartial === undefined || typeof result.trajectoryPartial === "boolean") &&
+    (result.trajectoryEndTimeMs === undefined ||
+      (Number.isSafeInteger(result.trajectoryEndTimeMs) &&
+       result.trajectoryEndTimeMs >= Date.parse(result.endTime)))
   );
+}
+
+function minimalPendingWalkResult(result) {
+  const minimal = {};
+  for (const key of PENDING_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(result, key)) minimal[key] = result[key];
+  }
+  return minimal;
 }
 
 function savePendingWalkResult(result) {
   if (!isValidPendingWalkResult(result)) {
     throw new Error("Invalid pending walk result.");
   }
-
-  wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, result);
-  return result;
+  const minimal = minimalPendingWalkResult(result);
+  wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, minimal);
+  return minimal;
 }
 
 function getPendingWalkResult() {
   const result = wx.getStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
-
-  if (!result) {
-    return null;
-  }
-
+  if (!result) return null;
   if (!isValidPendingWalkResult(result)) {
     wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
     return null;
   }
 
-  return result;
+  // Rewrite legacy full-route terminal snapshots when the user next opens the app.
+  const minimal = minimalPendingWalkResult(result);
+  if (Object.keys(result).some(key => !PENDING_FIELDS.includes(key))) {
+    try {
+      wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, minimal);
+    } catch (_) {
+      // Do not retain a known full-route legacy snapshot just to preserve optional
+      // Feedback. If rewriting fails, prefer deleting the old provider data.
+      // Return sanitized metadata for the current page even after deletion.
+      try {
+        wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+      } catch (_) {
+        // Both storage operations failed; retry sanitization on the next read.
+      }
+    }
+  }
+  return minimal;
 }
 
 function clearPendingWalkResult(walkId) {
@@ -210,16 +231,35 @@ function restoreCloudWalk(walk, route) {
   return result.session;
 }
 
+// Foreground Home/Walking recovery waits for a cold-launch stale check, so the
+// same old Walk cannot race itself into a misleading navigation error.
+let startupStaleCheck = null;
 async function reconcileActiveWalk(route = null) {
+  if (startupStaleCheck) await startupStaleCheck;
+  return reconcileActiveWalkImpl(route);
+}
+
+async function reconcileActiveWalkImpl(route = null) {
   const records = require("./walk-records");
   const local = getActiveWalkSession();
   if (local) {
     const cloud = await records.getWalk(local.walkId);
+    // Ignore stale cloud responses rather than erasing a newer local session.
+    const current = getActiveWalkSession();
+    if (!current || current.walkId !== local.walkId ||
+        current.routeId !== local.routeId || current.startTimeMs !== local.startTimeMs) {
+      throw Object.assign(new Error("Active walk changed during reconciliation."), {
+        code: "WALK_STATE_CHANGED"
+      });
+    }
     if (cloud.status === "active") {
       if (cloud.routeId !== local.routeId || Date.parse(cloud.startTime) !== local.startTimeMs) {
         throw new Error("Local walk does not match cloud identity.");
       }
       return local;
+    }
+    if (!["completed", "ended_early", "abandoned"].includes(cloud.status)) {
+      throw new Error("Unexpected CloudBase Walk status.");
     }
     require("./walking-tracker").stopTrackingForSession(local);
     if (cloud.status === "abandoned") {
@@ -229,15 +269,43 @@ async function reconcileActiveWalk(route = null) {
         { code: "WALK_ABANDONED" }
       );
     }
-    try { savePendingWalkResult({ ...cloud, route: local.route }); }
-    finally { clearActiveWalkSession(local.routeId, local.walkId); }
+    try {
+      const pending = getPendingWalkResult();
+      // Do not replace a different, newer user's pending Feedback handoff.
+      if (!pending || pending.walkId === local.walkId) savePendingWalkResult(cloud);
+    } finally {
+      clearActiveWalkSession(local.routeId, local.walkId);
+    }
     return null;
   }
   const cloud = await records.getActiveWalk();
   return cloud ? restoreCloudWalk(cloud, route) : null;
 }
 
+// Check aged local sessions when the app restarts. Only CloudBase can establish
+// actual abandonment: never delete a still-active or unverified Walk by clock.
+async function cleanupStaleActiveWalk() {
+  const local = getActiveWalkSession();
+  if (!local) return false;
+  // A matching terminal handoff can mean route deletion failed during an
+  // earlier completion. Verify such locks promptly, even if younger than 12h.
+  if (Date.now() - local.startTimeMs < MAX_ACTIVE_WALK_AGE_MS &&
+      !hasMatchingTerminalHandoff(local)) return false;
+  const check = reconcileActiveWalkImpl();
+  startupStaleCheck = check;
+  try {
+    await check;
+  } catch (error) {
+    if (!error || error.code !== "WALK_ABANDONED") throw error;
+  } finally {
+    if (startupStaleCheck === check) startupStaleCheck = null;
+  }
+  return true;
+}
+
 module.exports = {
+  cleanupStaleActiveWalk,
+  MAX_ACTIVE_WALK_AGE_MS,
   restoreCloudWalk,
   reconcileActiveWalk,
   ACTIVE_WALK_STORAGE_KEY,
