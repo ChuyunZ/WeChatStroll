@@ -48,13 +48,19 @@ tokens, secret material or provider URLs, including platform debug/event logging
 | Walking | 270 | 5400 |
 
 All active holds count against both limits. A transaction admits a discovery
-only when it can reserve **3 Explore and 90 Walking together**. The three
+only when it can reserve **3 Explore and 90 Walking together**, plus the
+record-creation capacity to produce three Explore attempt receipts and 90 each
+of Walking logical-request records and attempt receipts. The three
 Explore requests and each status-120 retry convert holds into used attempts;
 retry capacity beyond three is acquired from unreserved capacity. Empty or
 failed discovery releases unused holds after all category tasks settle.
 
-Walking consumes its protected base hold, then atomically extends **one physical
-attempt at a time** if both ceilings permit. No fixed 540-attempt buffer is
+Walking consumes its protected base hold and corresponding request/receipt
+creation holds, then atomically extends **one physical attempt at a time**
+if both physical and record budgets permit. Creation holds are released on
+close/expiry; used record counts are never refunded. Repeated never-sent
+attempts can consume extra creation budget, so a base reservation is not a
+promise of 90 successful HTTP responses. No fixed 540-attempt buffer is
 withheld. Candidate complexity is not trusted as authority to enlarge a budget.
 
 Evidence and tradeoff:
@@ -101,15 +107,19 @@ attempt needs one receipt. Internal 120 retries create receipts, not new logical
 claims. Thus normal requests that fit the 270/5400 HTTP limits also fit these
 creation limits, including the 94/188 capacity fixtures, edits and candidates.
 Pathological repeated queue failures eventually stop; unlimited free retries
-would defeat the bound. This is a bounded failure allowance, not a guarantee of
-successful completion or a measured optimal traffic policy.
+would defeat the bound. New discoveries are refused up front if the remaining
+request/receipt budget cannot cover their 90-Walking base, including other
+sessions' creation holds. Each accepted base protects those records from
+competing sessions; used receipts and requests are irreversibly counted. This
+is a bounded failure allowance, not a guarantee of successful completion or a
+measured optimal traffic policy.
 
 `claim()` checks the live signed session, existing request identity, remaining
-hold or extensible physical capacity, receipt headroom and request headroom
-**before** writing. Existing claims remain `MAP_EXECUTION_UNKNOWN`, never replay
-HTTP. `begin()` also checks both APIs' receipt headroom and Walking claim
-headroom, then counts discovery creation; unused close/reopen loops cannot
-reset it. `debit()` counts receipts before granting HTTP permission. Close,
+hold or extensible physical capacity, its own reserved receipt/request creation
+slots or unreserved headroom **before** writing. Existing claims remain `MAP_EXECUTION_UNKNOWN`, never replay
+HTTP. `begin()` reserves the full base receipt/request headroom atomically, then
+counts discovery creation; unused close/reopen loops cannot reset spent
+records. `debit()` counts receipts before granting HTTP permission. Close,
 expiry and refund never decrement creation counters. Every owner shares them
 across all sessions and instances; random IDs do not increase the budget.
 
@@ -220,7 +230,11 @@ replacement succeeds or definitively fails. A quota/request-budget refusal
 restores it; overlapping reloads share that retained state. A stale result cannot
 take ownership. Unload closes both retained and pending credentials. Duplicate
 closes share one promise; failed close has one bounded retry, including a lost
-acknowledgement. Failures cannot mask the generation result. New resolver calls
+acknowledgement. Failures cannot mask the generation result. The gateway also makes a best-effort
+server-side release if an accepted discovery throws before the token is
+delivered (including a failed/uncertain ready transaction); failed cleanup
+and an unknown initial admission still rely on session expiry. This release
+does not refund HTTP attempts or record creations. New resolver calls
 stop on cancellation; already invoked HTTP may settle and remains charged.
 No raw route/credential persistence is added. Offline/crashed clients, a lost
 discovery response with no token, or two failed closes still rely on expiry.
