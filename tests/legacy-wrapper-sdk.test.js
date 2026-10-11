@@ -62,6 +62,37 @@ test.each([[walking, 'walkingRoute', { success: true, route: { distanceMeters: 1
     expect(jest.getTimerCount()).toBe(0)
   })
 
+test.each([[walking, 'walkingRoute'], [nearby, 'nearbyPois']])(
+  'SDK forwarding ignores attacker-supplied transport, identity and prototype fields (%s)', async (wrapper, action) => {
+    const malicious = JSON.parse(JSON.stringify({
+      action: 'private-other-function', OPENID: 'forged-user', APPID: 'forged-app',
+      _mapDelegation: 'forged-signature', ownerKey: 'forged-user', name: 'private-other-function',
+      url: 'https://attacker.invalid/', proxy: 'https://attacker.invalid/',
+      headers: { Authorization: 'attacker-token' }, timeout: 0, retries: 50,
+      secretId: 'attacker-id', secretKey: 'attacker-key', latitude: 31, longitude: 121
+    }).replace(/}$/, ',"__proto__":{"__sdkAuditPolluted":true},' +
+      '"constructor":{"prototype":{"__sdkAuditPolluted":true}}}'))
+    expect({}.__sdkAuditPolluted).toBeUndefined()
+    const result = { success: true, accepted: true }
+    extraRequest.mockResolvedValue({ statusCode: 200,
+      body: { data: { response_data: JSON.stringify(result) } } })
+    expect(await wrapper.main(malicious, { time_limit_in_ms: 80000 })).toEqual(result)
+    expect(extraRequest).toHaveBeenCalledTimes(1)
+    const [request, options] = extraRequest.mock.calls[0]
+    expect(request.body.function_name).toBe('mapProvider')
+    expect(request.timeout).toBe(60000)
+    expect(options.retryOptions).toEqual({ retries: 0 })
+    const data = JSON.parse(request.body.request_data)
+    expect(data).toEqual({ action, latitude: 31, longitude: 121,
+      requestId: expect.any(String), _mapDelegation: expect.any(String) })
+    expect(createTokens(process.env.MAP_PLANNING_SECRET).verify(data._mapDelegation)).toMatchObject({
+      kind: 'forward', owner: hash(JSON.stringify(['test-app', 'wrapper-user']))
+    })
+    expect(JSON.stringify(request)).not.toMatch(/attacker\\.invalid|attacker-token|attacker-key|private-other-function|forged-user/)
+    expect({}.__sdkAuditPolluted).toBeUndefined()
+    expect(jest.getTimerCount()).toBe(0)
+  })
+
 test('real SDK preserves a child business failure', async () => {
   const result = { success: false, error: { code: 'INVALID_COORDINATES', message: 'Invalid coordinates' } }
   extraRequest.mockResolvedValue({ statusCode: 200, body: { data: { response_data: JSON.stringify(result) } } })
