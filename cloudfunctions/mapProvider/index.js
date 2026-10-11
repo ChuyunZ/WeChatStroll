@@ -21,17 +21,21 @@ exports.main = async event => {
   }
   const apiKey = process.env.TENCENT_MAPS_API_KEY
   const secretKey = process.env.TENCENT_MAPS_SECRET_KEY
-  if (!apiKey || !secretKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
+  // Releasing a signed session only needs its owner and quota ledger, not
+  // Tencent API credentials. Keep these checks for provider traffic only.
+  if (operation !== 'closePlanning' && (!apiKey || !secretKey)) {
+    return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
+  }
   const log = record => console.info('[Map Provider]', record)
   let authorization
   try {
     if (operation === 'nearbyPois') pointKey(event)
     if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
-    const limits = loadLimits()
     const db = cloud.database({ throwOnNotFound: false })
     const security = createPlanningSecurity({ store: createQuotaStore(db) })
     const context = cloud.getWXContext()
     if (operation === 'closePlanning') return await security.close(event, context)
+    const limits = loadLimits()
     authorization = operation === 'nearbyPois'
       ? await security.open(event, context) : await security.walking(event, context)
     const store = createCloudBaseStore(db)
