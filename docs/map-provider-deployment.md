@@ -326,16 +326,20 @@ history. Never add persistent segment L2 caches on this limited confirmation.
 `activeWalkSession.route` is stored locally for an active Walk. Home and Walking
 reconcile local and CloudBase walk identity on resume. The existing backend
 12-hour abandonment boundary is supplemented by a best-effort **cold-launch**
-verification of aged local sessions. The full route is deleted only after
-CloudBase confirms terminal/abandoned status; local clock expiry alone or a
-network error never silently removes an active lock. Offline periods cannot
-execute background cleanup. The terminal `pendingWalkResult` now retains only
-allowlisted Feedback/recovery metadata: walkId, application routeId,
-start/end time, duration, completion state and optional trajectory flags/time
-boundary. No route geometry/POIs/polyline is persisted after confirmed
-completion. On first read after upgrading, legacy full-route pending snapshots
-are rewritten without Route fields; transient device-write failures retry
-on the next read. Existing optional Feedback submit/skip/leave cleanup remains.
+verification of aged local sessions. Valid route snapshots are reconciled
+against CloudBase before stale-session removal; device clock age alone never
+deletes a valid Walk lock. Missing/corrupt local session snapshots may still be
+removed by validation, and offline/background periods cannot complete the
+remote check. After CloudBase confirms terminal/abandoned status, the client
+attempts full-route deletion independently of optional Feedback metadata writes;
+persistent local-storage failures may require a later retry. The terminal
+`pendingWalkResult` retains only allowlisted Feedback/recovery metadata:
+walkId, application routeId, start/end time, duration, completion state and
+optional trajectory flags/time boundary. After upgrading, valid legacy
+full-route pending snapshots are rewritten without Route fields. If rewriting
+fails, removal of the old snapshot is attempted instead, prioritizing POI
+deletion over optional Feedback recovery; if both operations fail, sanitation
+retries on next read. Existing optional Feedback submit/skip/leave cleanup remains.
 
 Issue #79's `walkStore` persistence is deliberately narrower:
 it stores lifecycle/questionnaire metadata plus a provider-neutral application

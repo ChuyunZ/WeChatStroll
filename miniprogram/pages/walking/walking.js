@@ -769,11 +769,24 @@ Page({
     }
     Object.assign(walkResult, { endTime: terminal.endTime, completionStatus: terminal.status,
       actualDurationSeconds: terminal.actualDurationSeconds, trajectoryEndTimeMs: terminal.trajectoryEndTimeMs });
+    // Feedback is optional. A failed metadata write must never prevent an
+    // independent attempt to delete the full route after CloudBase is terminal.
+    let localStorageFailed = false;
     try {
       activeWalkSessionService.savePendingWalkResult(walkResult);
-      activeWalkSessionService.clearActiveWalkSession(walkResult.routeId, walkResult.walkId);
-    } catch (error) {
-      // Cloud is terminal even when device storage is unavailable. Next load reconciles by walkId.
+    } catch (_) {
+      localStorageFailed = true;
+    }
+    try {
+      if (!activeWalkSessionService.clearActiveWalkSession(walkResult.routeId, walkResult.walkId)) {
+        // A different/newer walk owns the lock; never delete its route.
+        localStorageFailed = true;
+      }
+    } catch (_) {
+      localStorageFailed = true;
+    }
+    if (localStorageFailed) {
+      // Cloud completion is authoritative; any retained local lock is retried on recovery.
       wx.showToast({ title: "散步已保存，本地恢复信息暂时无法更新", icon: "none" });
     }
 

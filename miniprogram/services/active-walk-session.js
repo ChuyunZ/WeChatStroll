@@ -15,7 +15,7 @@ function isValidCompletionRequest(session) {
   return request === undefined || Boolean(request && request.walkId === session.walkId &&
     ["completed", "ended_early"].includes(request.completionStatus) &&
     Number.isSafeInteger(request.endTimeMs) && request.endTimeMs >= session.startTimeMs &&
-    request.endTimeMs <= Date.now() + 60000 && typeof request.trajectoryPartial === "boolean");
+    typeof request.trajectoryPartial === "boolean");
 }
 
 function isValidRouteSnapshot(route) {
@@ -43,7 +43,6 @@ function isValidActiveWalkSession(session) {
     session.route.routeId === session.routeId &&
     Number.isSafeInteger(session.startTimeMs) &&
     session.startTimeMs > 0 &&
-    session.startTimeMs <= Date.now() + 60000 &&
     isValidCompletionRequest(session) &&
     (
       session.trackingEnabled === undefined ||
@@ -164,9 +163,16 @@ function isValidPendingWalkResult(result) {
     result.routeId.trim() !== "" &&
     typeof result.startTime === "string" &&
     typeof result.endTime === "string" &&
+    Number.isFinite(Date.parse(result.startTime)) &&
+    Number.isFinite(Date.parse(result.endTime)) &&
     Number.isFinite(result.actualDurationSeconds) &&
     result.actualDurationSeconds >= 0 &&
-    ["completed", "ended_early"].includes(result.completionStatus)
+    ["completed", "ended_early"].includes(result.completionStatus) &&
+    (result.trajectoryEnabled === undefined || typeof result.trajectoryEnabled === "boolean") &&
+    (result.trajectoryPartial === undefined || typeof result.trajectoryPartial === "boolean") &&
+    (result.trajectoryEndTimeMs === undefined ||
+      (Number.isSafeInteger(result.trajectoryEndTimeMs) &&
+       result.trajectoryEndTimeMs >= Date.parse(result.endTime)))
   );
 }
 
@@ -201,8 +207,14 @@ function getPendingWalkResult() {
     try {
       wx.setStorageSync(PENDING_WALK_RESULT_STORAGE_KEY, minimal);
     } catch (_) {
-      // Storage may be temporarily unavailable. Return safe in-memory metadata
-      // and retry sanitizing the old key on its next read.
+      // Do not retain a known full-route legacy snapshot just to preserve optional
+      // Feedback. If rewriting fails, prefer deleting the old provider data.
+      // Return sanitized metadata for the current page even after deletion.
+      try {
+        wx.removeStorageSync(PENDING_WALK_RESULT_STORAGE_KEY);
+      } catch (_) {
+        // Both storage operations failed; retry sanitization on the next read.
+      }
     }
   }
   return minimal;

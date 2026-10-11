@@ -48,13 +48,42 @@ test('legacy terminal snapshot is sanitized on read, idempotently', () => {
   expect(sessions.getPendingWalkResult()).toMatchObject({ walkId: walk.walkId });
   expect(wx.setStorageSync).toHaveBeenCalledTimes(1);
 });
-test('failed legacy storage rewrite returns safe metadata and retries next time', () => {
+test('failed legacy rewrite discards the full-route cache but returns sanitized metadata', () => {
   const walk = local(); storage.pendingWalkResult = { ...terminal(walk), route };
   wx.setStorageSync.mockImplementationOnce(() => { throw new Error('unavailable'); });
+  expect(sessions.getPendingWalkResult()).toMatchObject({ walkId: walk.walkId });
+  expect(storage.pendingWalkResult).toBeUndefined();
+  expect(wx.removeStorageSync).toHaveBeenCalledWith('pendingWalkResult');
+});
+test('legacy cleanup retries when both storage rewrite and removal fail', () => {
+  const walk = local(); storage.pendingWalkResult = { ...terminal(walk), route };
+  wx.setStorageSync.mockImplementationOnce(() => { throw new Error('unavailable'); });
+  wx.removeStorageSync.mockImplementationOnce(() => { throw new Error('unavailable'); });
   expect(sessions.getPendingWalkResult()).not.toHaveProperty('route');
   expect(storage.pendingWalkResult).toHaveProperty('route');
-  sessions.getPendingWalkResult();
+  expect(sessions.getPendingWalkResult()).toMatchObject({ walkId: walk.walkId });
   expect(storage.pendingWalkResult).not.toHaveProperty('route');
+});
+test('malformed optional trajectory fields and timestamp are rejected', () => {
+  const walk = local(), result = terminal(walk);
+  expect(sessions.isValidPendingWalkResult({ ...result, trajectoryPartial: 'false' })).toBe(false);
+  expect(sessions.isValidPendingWalkResult({ ...result, trajectoryEnabled: 1 })).toBe(false);
+  expect(sessions.isValidPendingWalkResult({ ...result, trajectoryEndTimeMs: -1 })).toBe(false);
+  expect(sessions.isValidPendingWalkResult({ ...result, startTime: 'broken' })).toBe(false);
+  expect(sessions.isValidPendingWalkResult(result)).toBe(true);
+});
+test('clock skew cannot discard an otherwise valid local route without cloud verification', async () => {
+  const future = local(Date.now() + 2 * 60 * 60 * 1000);
+  future.completionRequest = { walkId: future.walkId, completionStatus: 'completed',
+    endTimeMs: future.startTimeMs + 2000, trajectoryPartial: false };
+  storage.activeWalkSession = future;
+  expect(sessions.getActiveWalkSession()).toBe(future);
+  expect(await sessions.cleanupStaleActiveWalk()).toBe(false);
+  records.getWalk.mockResolvedValue({ walkId: future.walkId, routeId: future.routeId,
+    status: 'active', startTime: new Date(future.startTimeMs).toISOString() });
+  expect(await sessions.reconcileActiveWalk()).toBe(future);
+  expect(storage.activeWalkSession).toBe(future);
+  expect(wx.removeStorageSync).not.toHaveBeenCalledWith('activeWalkSession');
 });
 test('server-active walk remains locked after local 12-hour threshold', async () => {
   const walk = local(Date.now() - 13 * 60 * 60 * 1000);
@@ -147,4 +176,28 @@ test('cold launch checks old session and cleans up after cloud reply', async () 
     expect(wx.cloud.init).toHaveBeenCalledTimes(1);
     expect(storage.activeWalkSession).toBeUndefined();
   } finally { delete global.App; }
+});
+
+test('startup still checks aged Walk when corrupted terminal handoff cleanup throws', async () => {
+  const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+  storage.activeWalkSession = walk;
+  storage.pendingWalkResult = { broken: 'legacy' };
+  wx.removeStorageSync.mockImplementationOnce(key => {
+    if (key === 'pendingWalkResult') throw new Error('storage unavailable');
+    delete storage[key];
+  });
+  records.getWalk.mockResolvedValue({ status: 'abandoned' });
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+  wx.cloud = { init: jest.fn() };
+  global.App = jest.fn(definition => definition.onLaunch());
+  try {
+    require('../miniprogram/app');
+    await Promise.resolve(); await Promise.resolve();
+    expect(records.getWalk).toHaveBeenCalledWith(walk.walkId);
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(storage.pendingWalkResult).toEqual({ broken: 'legacy' });
+  } finally {
+    warn.mockRestore(); log.mockRestore(); delete global.App;
+  }
 });

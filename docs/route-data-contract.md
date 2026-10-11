@@ -272,12 +272,16 @@ This runtime shape is **not** a grant of permanent storage permission. Tencent's
 **only temporary device-side route/POI caching during an active Walk** for
 interruption recovery. `activeWalkSession.route` must be removed once CloudBase
 confirms terminal or abandoned state (including the 12-hour abandonment check
-after a cold launch). A local clock expiry or network failure must not erase
-a still-unverified active Walk. After completion, `pendingWalkResult` is a
-metadata-only optional Feedback handoff containing walkId, application routeId,
-start/end times, actual duration, completion status and optional trajectory
-metadata; it never stores POIs, route coordinates or polylines. Valid legacy
-full-route terminal handoffs are rewritten at their next read. No raw provider
+after a cold launch). Local clock age or network failure alone cannot delete
+a valid session; structurally corrupted session snapshots may still be removed.
+Terminal cleanup attempts route deletion even if optional Feedback metadata
+cannot be written. After completion, `pendingWalkResult` is a metadata-only
+optional Feedback handoff containing walkId, application routeId, start/end
+times, actual duration, completion status and optional trajectory metadata;
+it never intentionally stores POIs, route coordinates or polylines. Valid
+legacy full-route terminal handoffs are rewritten at their next read; if a
+rewrite fails, deletion is attempted, and if both operations fail cleanup
+retries later. No raw provider
 responses or persistent planned-route L2 segment cache are authorized. Actual
 user GPS collected with consent through Track Cloud remains a separate flow.
 See [deployment and data boundaries](map-provider-deployment.md).

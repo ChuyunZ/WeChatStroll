@@ -921,6 +921,27 @@ describe("Walking page", () => {
     warnSpy.mockRestore();
   });
 
+  test.each(["completed", "ended_early"])("terminal %s still clears route when optional Feedback write fails", async completionStatus => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    const originalWrite = wx.setStorageSync.getMockImplementation();
+    wx.setStorageSync.mockImplementation((key, value) => {
+      if (key === "pendingWalkResult") throw new Error("feedback storage unavailable");
+      return originalWrite(key, value);
+    });
+    await page.onLoad({ routeId: TEST_ROUTE.routeId });
+    if (completionStatus === "completed") await page.finishWalk();
+    else await page.completeWalk("ended_early");
+    expect(storage.activeWalkSession).toBeUndefined();
+    expect(storage.pendingWalkResult).toBeUndefined();
+    expect(wx.removeStorageSync).toHaveBeenCalledWith("activeWalkSession");
+    expect(page._active).toBe(false);
+    expect(page.data.ended).toBe(true);
+    expect(wx.reLaunch).toHaveBeenCalledWith(expect.objectContaining({
+      url: `/pages/feedback/feedback?walkId=${encodeURIComponent("walk-test")}`
+    }));
+    warn.mockRestore();
+  });
+
   test("retains terminal result when local active-lock cleanup fails", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
