@@ -23,6 +23,7 @@ exports.main = async event => {
   const secretKey = process.env.TENCENT_MAPS_SECRET_KEY
   if (!apiKey || !secretKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
   const log = record => console.info('[Map Provider]', record)
+  let authorization
   try {
     if (operation === 'nearbyPois') pointKey(event)
     if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
@@ -31,7 +32,7 @@ exports.main = async event => {
     const security = createPlanningSecurity({ store: createQuotaStore(db) })
     const context = cloud.getWXContext()
     if (operation === 'closePlanning') return await security.close(event, context)
-    const authorization = operation === 'nearbyPois'
+    authorization = operation === 'nearbyPois'
       ? await security.open(event, context) : await security.walking(event, context)
     const store = createCloudBaseStore(db)
     const limiter = createLimiter({ store, ...limits, log })
@@ -41,6 +42,12 @@ exports.main = async event => {
     const result = await createHandler({ apiKey, request: provider(operation) })(event)
     return operation === 'nearbyPois' ? await security.complete(authorization.auth, event, result) : result
   } catch (error) {
+    // No client received this discovery token. An exceptional handler/ready
+    // failure must release its holds; unknown DB outcomes remain fail-closed.
+    if (operation === 'nearbyPois' && authorization && authorization.abort) {
+      try { await authorization.abort() }
+      catch (_) { log({ event: 'discovery_cleanup_unavailable' }) }
+    }
     log({ event: 'gateway_unavailable', operation })
     return { success: false, error: {
       code: isProviderCode(error.code) || ['CONFIG_MISSING', 'INVALID_COORDINATES'].includes(error.code)
