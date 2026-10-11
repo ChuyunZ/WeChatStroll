@@ -36,7 +36,7 @@ test('no identity or forged event identity cannot authorize discovery; missing c
 test.each([
   ['MAP_QUOTA_OFFSET_MINUTES', ''],
   ['MAP_QUOTA_OFFSET_MINUTES', '   '],
-  ['MAP_QUOTA_OFFSET_MINUTES', '\\t'],
+  ['MAP_QUOTA_OFFSET_MINUTES', '\t'],
   ['MAP_QUOTA_OFFSET_MINUTES', '1.0'],
   ['MAP_QUOTA_OFFSET_MINUTES', '+0'],
   ['MAP_QUOTA_OFFSET_MINUTES', '1e2'],
