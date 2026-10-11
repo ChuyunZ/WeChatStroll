@@ -272,8 +272,10 @@ This runtime shape is **not** a grant of permanent storage permission. Tencent's
 **only temporary device-side route/POI caching during an active Walk** for
 interruption recovery. `activeWalkSession.route` must be removed once CloudBase
 confirms terminal or abandoned state (including the 12-hour abandonment check
-after a cold launch). Local clock age or network failure alone cannot delete
-a valid session; structurally corrupted session snapshots may still be removed.
+after a cold launch). Local clock age, a network failure, or the presence of
+matching local pending Feedback cannot independently delete a valid session;
+CloudBase must confirm terminal or abandoned status. Structurally corrupted
+session snapshots may still be removed.
 Terminal cleanup attempts route deletion even if optional Feedback metadata
 cannot be written. After completion, `pendingWalkResult` is a metadata-only
 optional Feedback handoff containing walkId, application routeId, start/end

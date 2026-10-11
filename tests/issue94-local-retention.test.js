@@ -116,6 +116,58 @@ test('terminal cloud status removes full route but recovers optional Feedback me
   expect(storage.pendingWalkResult).not.toHaveProperty('route');
   expect(storage.pendingWalkResult).not.toHaveProperty('status');
 });
+test.each(['offline', 'active'])(
+  'matching pending Feedback cannot erase a 13-hour Walk before cloud confirmation (%s)',
+  async cloudState => {
+    const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+    storage.activeWalkSession = walk;
+    storage.pendingWalkResult = terminal(walk);
+    if (cloudState === 'offline') records.getWalk.mockRejectedValue(new Error('offline'));
+    else records.getWalk.mockResolvedValue({
+      walkId: walk.walkId, routeId: walk.routeId, status: 'active',
+      startTime: new Date(walk.startTimeMs).toISOString()
+    });
+
+    // A read and the startup age check must not trust local Feedback as a
+    // replacement for an authoritative CloudBase terminal response.
+    expect(sessions.getActiveWalkSession()).toBe(walk);
+    if (cloudState === 'offline') {
+      await expect(sessions.cleanupStaleActiveWalk()).rejects.toThrow('offline');
+    } else {
+      await expect(sessions.cleanupStaleActiveWalk()).resolves.toBe(true);
+    }
+    expect(records.getWalk).toHaveBeenCalledWith(walk.walkId);
+    expect(storage.activeWalkSession).toBe(walk);
+    expect(storage.pendingWalkResult.walkId).toBe(walk.walkId);
+    expect(tracking.stopTrackingForSession).not.toHaveBeenCalled();
+    expect(wx.removeStorageSync).not.toHaveBeenCalledWith('activeWalkSession');
+  }
+);
+test('matching pending Feedback is cleared only after cloud confirms terminal', async () => {
+  const walk = local(Date.now() - 13 * 60 * 60 * 1000);
+  storage.activeWalkSession = walk;
+  storage.pendingWalkResult = terminal(walk);
+  records.getWalk.mockResolvedValue(terminal(walk));
+  expect(sessions.getActiveWalkSession()).toBe(walk);
+  expect(storage.activeWalkSession).toBe(walk);
+  await expect(sessions.cleanupStaleActiveWalk()).resolves.toBe(true);
+  expect(records.getWalk).toHaveBeenCalledWith(walk.walkId);
+  expect(storage.activeWalkSession).toBeUndefined();
+  expect(storage.pendingWalkResult).not.toHaveProperty('route');
+  expect(tracking.stopTrackingForSession).toHaveBeenCalledWith(walk);
+});
+test('foreground recovery checks CloudBase even with a matching pending handoff', async () => {
+  const walk = local();
+  storage.activeWalkSession = walk;
+  storage.pendingWalkResult = terminal(walk);
+  records.getWalk.mockResolvedValue({
+    walkId: walk.walkId, routeId: walk.routeId, status: 'active',
+    startTime: new Date(walk.startTimeMs).toISOString()
+  });
+  expect(await sessions.reconcileActiveWalk()).toBe(walk);
+  expect(storage.activeWalkSession).toBe(walk);
+  expect(records.getWalk).toHaveBeenCalledWith(walk.walkId);
+});
 test('cloud outage leaves original stale Walk recoverable', async () => {
   const walk = local(Date.now() - 13 * 60 * 60 * 1000);
   storage.activeWalkSession = walk;

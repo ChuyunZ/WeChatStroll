@@ -327,8 +327,10 @@ history. Never add persistent segment L2 caches on this limited confirmation.
 reconcile local and CloudBase walk identity on resume. The existing backend
 12-hour abandonment boundary is supplemented by a best-effort **cold-launch**
 verification of aged local sessions. Valid route snapshots are reconciled
-against CloudBase before stale-session removal; device clock age alone never
-deletes a valid Walk lock. Missing/corrupt local session snapshots may still be
+against CloudBase before stale-session removal; device clock age alone and
+local pending Feedback metadata never delete a valid Walk lock. Even when both
+local keys remain after a terminal handoff, CloudBase must confirm terminal or
+abandoned status before the full route is deleted. Missing/corrupt local session snapshots may still be
 removed by validation, and offline/background periods cannot complete the
 remote check. After CloudBase confirms terminal/abandoned status, the client
 attempts full-route deletion independently of optional Feedback metadata writes;

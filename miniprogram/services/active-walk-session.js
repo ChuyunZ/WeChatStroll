@@ -51,31 +51,6 @@ function isValidActiveWalkSession(session) {
   );
 }
 
-function isCompletedActiveWalkSession(session) {
-  let pendingResult;
-  try {
-    pendingResult = getPendingWalkResult();
-  } catch (_) {
-    // A corrupted optional Feedback handoff must not destroy or obstruct
-    // the active route. Let CloudBase reconciliation resolve its state.
-    return false;
-  }
-
-  if (!pendingResult) {
-    return false;
-  }
-
-  const pendingStartTimeMs =
-    Date.parse(pendingResult.startTime);
-
-  return (
-    pendingResult.walkId === session.walkId &&
-    pendingResult.routeId === session.routeId &&
-    Number.isFinite(pendingStartTimeMs) &&
-    pendingStartTimeMs === session.startTimeMs
-  );
-}
-
 function getActiveWalkSession() {
   const session = wx.getStorageSync(ACTIVE_WALK_STORAGE_KEY);
 
@@ -89,14 +64,9 @@ function getActiveWalkSession() {
     return null;
   }
 
-  if (
-    isCompletedActiveWalkSession(session)
-  ) {
-    require("./walking-tracker").stopTrackingForSession(session);
-    wx.removeStorageSync(ACTIVE_WALK_STORAGE_KEY);
-    return null;
-  }
-
+  // A pending Feedback handoff is device metadata, not authoritative proof
+  // of completion. CloudBase reconciliation must verify the Walk state before
+  // deleting a structurally valid route lock, including on cold launch.
   return session;
 }
 
@@ -273,6 +243,9 @@ async function reconcileActiveWalkImpl(route = null) {
         throw new Error("Local walk does not match cloud identity.");
       }
       return local;
+    }
+    if (!["completed", "ended_early", "abandoned"].includes(cloud.status)) {
+      throw new Error("Unexpected CloudBase Walk status.");
     }
     require("./walking-tracker").stopTrackingForSession(local);
     if (cloud.status === "abandoned") {

@@ -1162,6 +1162,14 @@ describe("durable completion before trajectory cleanup", () => {
     if (remainingLock) durable.activeWalkSession = oldLock;
     page = loadWalkingPage();
     storage = durable;
+    if (remainingLock) {
+      // The page mock is recreated on reload; model the *durable server*
+      // completion explicitly rather than treating local pending as proof.
+      walkRecords.getWalk.mockResolvedValueOnce({
+        ...durable.pendingWalkResult,
+        status: durable.pendingWalkResult.completionStatus
+      });
+    }
     await page.onLoad({ routeId: TEST_ROUTE.routeId });
     const service = require("../miniprogram/services/active-walk-session");
     expect(service.getActiveWalkSession()).toBeNull();
