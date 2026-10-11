@@ -52,7 +52,14 @@ function isValidActiveWalkSession(session) {
 }
 
 function isCompletedActiveWalkSession(session) {
-  const pendingResult = getPendingWalkResult();
+  let pendingResult;
+  try {
+    pendingResult = getPendingWalkResult();
+  } catch (_) {
+    // A corrupted optional Feedback handoff must not destroy or obstruct
+    // the active route. Let CloudBase reconciliation resolve its state.
+    return false;
+  }
 
   if (!pendingResult) {
     return false;

@@ -182,7 +182,7 @@ test('startup still checks aged Walk when corrupted terminal handoff cleanup thr
   const walk = local(Date.now() - 13 * 60 * 60 * 1000);
   storage.activeWalkSession = walk;
   storage.pendingWalkResult = { broken: 'legacy' };
-  wx.removeStorageSync.mockImplementationOnce(key => {
+  wx.removeStorageSync.mockImplementation(key => {
     if (key === 'pendingWalkResult') throw new Error('storage unavailable');
     delete storage[key];
   });
