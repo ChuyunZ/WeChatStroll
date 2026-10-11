@@ -8,6 +8,12 @@ const LIMITS = { user: { explore: 9, walking: 270 }, global: { explore: 180, wal
 const CREATION_LIMITS = Object.fromEntries(Object.entries(LIMITS).map(([scope, apis]) =>
   [scope, Object.fromEntries(Object.entries(apis).map(([api, limit]) => [api, limit * 2]))]))
 const emptyCreations = () => ({ requests: { explore: 0, walking: 0 }, attempts: { explore: 0, walking: 0 }, users: {} })
+// A base session reserves both physical calls AND the documents needed to use
+// them. Creation reservations are released on close/expiry, not on refund.
+const baseCreationHold = () => ({
+  requests: { explore: 0, walking: 90 },
+  attempts: { explore: 3, walking: 90 }
+})
 // No arbitrary global buffer: protect every admitted base reservation, then
 // extend one physical attempt at a time from genuinely unreserved capacity.
 function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs = 2 * 60 * 60 * 1000 }) {
@@ -68,15 +74,26 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
     }
     return s
   }
-  function creationRoom(state, owner, kind, api) {
+  function creationRoom(state, owner, kind, api, amount = 1) {
     const c = state.creations
-    const u = c.users[owner]
-    if ((u && u[kind][api] >= CREATION_LIMITS.user[api]) || c[kind][api] >= CREATION_LIMITS.global[api]) {
+    const usedByOwner = c.users[owner] ? c.users[owner][kind][api] : 0
+    let heldGlobal = 0
+    let heldByOwner = 0
+    for (const s of Object.values(state.sessions)) {
+      const held = s.creationRemaining[kind][api]
+      heldGlobal += held
+      if (s.owner === owner) heldByOwner += held
+    }
+    if (usedByOwner + heldByOwner + amount > CREATION_LIMITS.user[api] ||
+        c[kind][api] + heldGlobal + amount > CREATION_LIMITS.global[api]) {
       throw fail('MAP_REQUEST_LIMITED')
     }
   }
-  function createRecord(state, owner, kind, api) {
-    creationRoom(state, owner, kind, api)
+  function createRecord(state, owner, kind, api, session) {
+    // Convert this session's atomic creation hold into an irreversible record.
+    // Without a hold, compete only for genuinely unreserved capacity.
+    if (session && session.creationRemaining[kind][api] > 0) session.creationRemaining[kind][api]--
+    else creationRoom(state, owner, kind, api)
     const c = state.creations
     const u = c.users[owner] || (c.users[owner] = {
       requests: { explore: 0, walking: 0 }, attempts: { explore: 0, walking: 0 }
@@ -95,12 +112,13 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
         if (await tx.get(rid)) throw fail('MAP_EXECUTION_UNKNOWN')
         room(state, owner, 'explore', 3)
         room(state, owner, 'walking', 90)
-        creationRoom(state, owner, 'attempts', 'explore')
-        creationRoom(state, owner, 'attempts', 'walking')
-        creationRoom(state, owner, 'requests', 'walking')
+        creationRoom(state, owner, 'attempts', 'explore', 3)
+        creationRoom(state, owner, 'attempts', 'walking', 90)
+        creationRoom(state, owner, 'requests', 'walking', 90)
         createRecord(state, owner, 'requests', 'explore')
         const expires = Math.min(time + ttlMs, endOf(day) - 1000)
-        state.sessions[sid] = { owner, expires, ready: false, remaining: { explore: 3, walking: 90 } }
+        state.sessions[sid] = { owner, expires, ready: false, remaining: { explore: 3, walking: 90 },
+          creationRemaining: baseCreationHold() }
         await tx.set(rid, { day, inputHash, expires: endOf(day) + DAY })
         return { sid, day, expires, owner }
       })
@@ -111,6 +129,7 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
         s.ready = true
         s.scopeHash = scopeHash
         s.remaining.explore = 0
+        s.creationRemaining.attempts.explore = 0
       })
     },
     claim(auth, requestId, inputHash) {
@@ -123,8 +142,8 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
         // Reject exhausted physical capacity before persisting a new identity.
         // Other in-flight claims may compete for capacity; debit is still final.
         if (!s.remaining.walking) room(state, auth.owner, 'walking', 1)
-        creationRoom(state, auth.owner, 'attempts', 'walking')
-        createRecord(state, auth.owner, 'requests', 'walking')
+        if (!s.creationRemaining.attempts.walking) creationRoom(state, auth.owner, 'attempts', 'walking')
+        createRecord(state, auth.owner, 'requests', 'walking', s)
         await tx.set(rid, { day: auth.day, inputHash, expires: endOf(auth.day) + DAY })
       })
     },
@@ -140,7 +159,7 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
         s.remaining[api]--
         state.used[api]++
         user(state, auth.owner)[api]++
-        createRecord(state, auth.owner, 'attempts', api)
+        createRecord(state, auth.owner, 'attempts', api, s)
         await tx.set(`attempt_${attemptId}`, { sid: auth.sid, owner: auth.owner, day: auth.day,
           api, refunded: false, expires: endOf(auth.day) + DAY })
         return { attemptId, startBefore: Math.min(s.expires, endOf(auth.day) - 1000) }
@@ -184,7 +203,22 @@ function validateState(state) {
   }
   if (!counts(state.used) || !state.users || Array.isArray(state.users) || !state.sessions || Array.isArray(state.sessions) ||
       !Object.entries(state.users).every(([owner, value]) => /^[a-f0-9]{64}$/.test(owner) && counts(value)) || !Object.values(state.sessions).every(s =>
-        /^[a-f0-9]{64}$/.test(s.owner) && Number.isSafeInteger(s.expires) && counts(s.remaining))) throw fail('MAP_QUOTA_UNAVAILABLE')
+        /^[a-f0-9]{64}$/.test(s.owner) && Number.isSafeInteger(s.expires) && counts(s.remaining) &&
+        s.creationRemaining && counts(s.creationRemaining.requests) && counts(s.creationRemaining.attempts)))
+    throw fail('MAP_QUOTA_UNAVAILABLE')
+  // The same upper bounds protect both spent records and all live creation
+  // holds. Never accept a ledger whose future promised receipts cannot fit.
+  const sessions = Object.values(state.sessions)
+  for (const kind of ['requests', 'attempts']) for (const api of ['explore', 'walking']) {
+    const reserved = sessions.reduce((sum, s) => sum + s.creationRemaining[kind][api], 0)
+    if (c[kind][api] + reserved > CREATION_LIMITS.global[api]) throw fail('MAP_QUOTA_UNAVAILABLE')
+    for (const owner of new Set([...Object.keys(c.users), ...sessions.map(s => s.owner)])) {
+      const spent = c.users[owner] ? c.users[owner][kind][api] : 0
+      const held = sessions.filter(s => s.owner === owner)
+        .reduce((sum, s) => sum + s.creationRemaining[kind][api], 0)
+      if (spent + held > CREATION_LIMITS.user[api]) throw fail('MAP_QUOTA_UNAVAILABLE')
+    }
+  }
   for (const api of ['explore', 'walking']) {
     const sessions = Object.values(state.sessions)
     if (sessions.reduce((sum, s) => sum + s.remaining[api], state.used[api]) > LIMITS.global[api]) throw fail('MAP_QUOTA_UNAVAILABLE')
