@@ -419,3 +419,19 @@ page {
   background: #e4f8fc;
   font-size: 22rpx;
 }
+
+/* Read-only availability hints. Not an entitlement guarantee. */
+.quota-hint {
+  margin: 0 0 22rpx;
+  padding: 18rpx 22rpx;
+  background: #edf3ee;
+  color: #48634f;
+  font-size: 24rpx;
+  line-height: 36rpx;
+  border-radius: 16rpx;
+}
+
+.manual-quota-hint {
+  margin-top: 14rpx;
+  margin-bottom: 16rpx;
+}
