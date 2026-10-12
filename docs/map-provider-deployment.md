@@ -4,6 +4,10 @@
 [Map authorization and coupled quotas](issue107-map-security.md) supersede the
 unsigned discovery/Walking examples below. The earlier smoke tests here remain
 historical development evidence, not validation of the new authorization path.
+For #107 the team-selected **internal** quota day begins at **09:00 Beijing**
+(`MAP_QUOTA_OFFSET_MINUTES=-60`); Tencent has not confirmed its official
+WebService reset time. Apply the seed/calendar migration instructions in the
+linked #107 runbook, not an environment-only offset edit. No deployment is implied.
 
 This describes the current repository implementation and the development validation
 completed on 2026-10-04. Direct CloudBase smoke tests, legacy-wrapper forwarding and
