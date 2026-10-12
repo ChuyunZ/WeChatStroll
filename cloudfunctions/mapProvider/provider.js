@@ -4,7 +4,11 @@ const AVAILABILITY_STATUSES = new Set([500, 510, 520, 530, 531, 600])
 // not evidence that a particular walking edge is unreachable.
 const CONFIGURATION_STATUSES = new Set([110, 111, 112, 113, 190, 199, 311])
 
-function createProvider({ limiter, limits, request, admission, now = Date.now, log = () => {} }) {
+function createProvider({ limiter, limits, request, admission, quotaOffsetMinutes, now = Date.now, log = () => {} }) {
+  // When supplied by the authenticated gateway, the offset is the same value
+  // used by the shared quota calendar. The provider never trusts client input.
+  if (quotaOffsetMinutes !== undefined && (!Number.isInteger(quotaOffsetMinutes) ||
+    Math.abs(quotaOffsetMinutes) > 840)) throw gatewayFailed()
   return function forOperation(operation) {
     const config = limits[operation]
     const scopes = [
@@ -32,7 +36,25 @@ function createProvider({ limiter, limits, request, admission, now = Date.now, l
         const status = data && data.status
         if (status !== 120) {
           if (!execution.recorded) throw infrastructureFailure(execution.recordingError)
-          if (status === 121) throw quotaExhausted() // No retry or short fake cooldown.
+          if (status === 121) {
+            // Tencent's official day boundary is unknown. Block this Key's
+            // physical starts across instances until the NEXT internal day;
+            // a new start then probes normal Tencent availability. A 121 on
+            // that probe renews the block. Never retry the current request.
+            if (quotaOffsetMinutes !== undefined) {
+              const time = now()
+              const offsetMs = quotaOffsetMinutes * 60000
+              const nextResetMs = (Math.floor((time + offsetMs) / 86400000) + 1) * 86400000 - offsetMs
+              try {
+                await limiter.cooldown('tencent:key', Math.max(0, nextResetMs - time), operation)
+              } catch (error) {
+                log({ event: 'daily_quota_block_failed', operation })
+                throw infrastructureFailure(error)
+              }
+              log({ event: 'daily_quota_blocked', operation, untilMs: nextResetMs })
+            }
+            throw quotaExhausted()
+          }
           if (CONFIGURATION_STATUSES.has(status)) {
             log({ event: 'provider_configuration_failed', operation, status })
             throw gatewayFailed()
