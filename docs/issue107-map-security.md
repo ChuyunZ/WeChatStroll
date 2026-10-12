@@ -186,9 +186,13 @@ business response with an error.
   Official docs:
   https://docs.cloudbase.net/envconfig/ratelimit/intro
 - Ingress documents are one per distinct user, not one per invocation.
-  They **must** be covered by an operator-controlled retention process
-  for inactive users (verify no active lease and enough safety margin
-  before deletion). There is no deployed automatic cleanup in this PR.
+  At the initial ~20 users/day, automatic retention is intentionally
+  deferred to post-launch Issue #120 (P3). No cleanup function or scheduler
+  is deployed in #119. Monitor record/receipt counts and storage billing;
+  when implemented later, only an operator-controlled cleanup process may
+  delete inactive users after verifying no active lease and a safety margin.
+  This housekeeping deferral does NOT waive identity/ingress or SDK security
+  review required before public launch.
 - Test denied/concurrent requests with mock transports and database
   fixtures rather than flooding paid Tencent API. Verify trusted
   delegation, multi-instance contention, release under provider
