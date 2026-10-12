@@ -13,12 +13,12 @@ const POLICIES = Object.freeze({
   closePlanning: Object.freeze({ perMinute: 20, concurrent: 4 })
 })
 const MAX_DENIAL_CACHE = 2048
-const rejectedUntil = new Map()
+const globalRejectedUntil = new Map()
 
 function documentId(owner) {
   if (typeof owner !== 'string' || !/^[a-f0-9]{64}$/.test(owner)) throw fail('MAP_UNAUTHORIZED')
   // 112-bit deterministic lookup with the complete identity verified in data.
-  return 'ingress_' + owner.slice(0, 28)
+  return 'ingress_' + owner.slice(0, 24)
 }
 function emptyCounts() {
   return { nearbyPois: 0, walkingRoute: 0, quotaStatus: 0, closePlanning: 0 }
@@ -39,10 +39,11 @@ function validateLedger(state, owner) {
         lease.expiresAtMs < 0) throw fail('MAP_QUOTA_UNAVAILABLE')
   }
 }
-function createIngressGuard({ store, now = Date.now, nonce = () => randomBytes(16).toString('hex') }) {
+function createIngressGuard({ store, now = Date.now, nonce = () => randomBytes(16).toString('hex'), deniedCache = globalRejectedUntil }) {
   // Once a rate limit is established for this warm instance, skip its database
   // entirely for that owner/action/window. Other instances still enforce the
   // authoritative transactional ledger.
+  const rejectedUntil = deniedCache
   function cooldownKey(owner, operation) { return owner + ':' + operation }
   function rejectCached(owner, operation, time) {
     const key = cooldownKey(owner, operation)
