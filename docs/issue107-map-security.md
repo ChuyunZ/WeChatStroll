@@ -84,6 +84,48 @@ overwrite today's live ledger or fabricate zero historical usage. Keep all
 same-Key consumers under the same single ledger. Do not make any CloudBase
 configuration/database/deployment changes as part of this code-only change.
 
+### User-facing allowance hints (same #119 release/test cycle)
+
+The authenticated, **read-only** `mapProvider.quotaStatus` action uses the
+platform's `getWXContext().APPID/OPENID`, ignoring request-supplied user IDs.
+It returns `{ success: true, quota: { remainingPlanningSessions, resetAtMs } }`.
+The response intentionally contains **no** owner hashes, other-user counts,
+provider documents, location information or Planning Tokens. No Tencent API
+credentials or physical calls are required for this action. Failure is
+fail-closed and never converted into a fabricated balance.
+
+`remainingPlanningSessions` is the conservative number of new **full base
+planning sessions** that can be reserved with current account **and global**
+remaining Explore (3) / Walking (90) physical capacity and the matching
+request/attempt-creation budgets. Already consumed attempts, retries, and
+active sessions' outstanding holds all reduce this count; the smaller bound
+wins. A read-only status never spends counters, creates users, cleans records,
+or initializes new-day ledgers. A never-before-initialized later day can be
+projected only after validating the persisted high-water calendar. The
+final minute before the 09:00 quota boundary displays 0 for **new**
+planning admission.
+
+This is a **point-in-time estimate**, not a guarantee of successful routes:
+other users may compete for global budget, outgoing attempts may be larger
+than base reservations, Tencent could reject requests or still be under a
+status-121 cooldown, and AI also has distinct budgets. The front end displays
+"预计"; on any network/auth/storage/validation failure it displays "暂不可查询",
+**never zero by inference**. It fetches on the Preferences/Routes screen and
+after a generation completes, without polling every segment. Do not use
+status results as a security gate: backend admission still enforces limits.
+
+The separate "本批路线还可成功增加／更换 X / 3 次" only reflects the
+existing successful Add/Replace action counter. Failed/cancelled attempts do
+not consume that UI count, but can still consume real physical provider quota.
+The count is restored when a failed reload retains old routes, and reset when
+a new route batch starts.
+
+A status read still incurs a CloudBase authenticated transaction. Existing
+unresolved **ingress** rate/concurrency security review remains a release gate;
+the new read endpoint does not fix it. Validate normal browsing, exhausted
+balances, unavailable status, reload/recovery, cross-day rollover and
+privacy/forgery before public launch.
+
 ## Accounting and capacity decision
 
 | Physical HTTP attempts | User/day | Global/day |
