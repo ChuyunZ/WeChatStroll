@@ -1,9 +1,0 @@
-{
-  "name": "map-quota-cleanup",
-  "version": "1.0.0",
-  "private": true,
-  "main": "index.js",
-  "dependencies": {
-    "wx-server-sdk": "4.0.2"
-  }
-}
