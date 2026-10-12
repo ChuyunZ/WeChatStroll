@@ -263,6 +263,10 @@ function loadRoutesPage({
     );
 
 
+  // Route mutation regressions intentionally exclude unrelated quota-display
+  // refreshes. The independent quota reader has its own contract tests.
+  pageInstance.refreshQuotaStatus = jest.fn(async () => {});
+
   return pageInstance;
 }
 
