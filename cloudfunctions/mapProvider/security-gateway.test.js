@@ -137,3 +137,28 @@ test('authenticated legacy wrappers work when nested OPENID is absent, but do no
   expect(await unauthorized).toMatchObject({ error: { code: 'MAP_SESSION_INVALID' } })
   expect(axios.get).toHaveBeenCalledTimes(4)
 })
+
+test('quotaStatus is authenticated, read-only, and cannot be forged by event OPENID', async () => {
+  const before = JSON.stringify([...quotaStore.documents])
+  const first = await call({ action: 'quotaStatus', OPENID: 'forged-user', ownerKey: 'forged' })
+  expect(first).toMatchObject({
+    success: true,
+    quota: { remainingPlanningSessions: 3, resetAtMs: 2 * DAY }
+  })
+  expect(JSON.stringify([...quotaStore.documents])).toBe(before)
+  expect(axios.get).not.toHaveBeenCalled()
+  cloud.getWXContext.mockReturnValue({})
+  expect(await call({ action: 'quotaStatus', OPENID: 'synthetic-user' }))
+    .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
+  expect(JSON.stringify([...quotaStore.documents])).toBe(before)
+})
+test('quotaStatus uses live user holds and works without Tencent credentials', async () => {
+  const found = await call({ action: 'nearbyPois', ...start, requestId: 'quota_balance_discovery_1' })
+  expect(found.success).toBe(true)
+  delete process.env.TENCENT_MAPS_API_KEY
+  delete process.env.TENCENT_MAPS_SECRET_KEY
+  expect(await call({ action: 'quotaStatus' })).toMatchObject({
+    success: true, quota: { remainingPlanningSessions: 2 }
+  })
+  expect(axios.get).toHaveBeenCalledTimes(3)
+})
