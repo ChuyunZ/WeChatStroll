@@ -35,6 +35,7 @@ exports.main = async event => {
     const security = createPlanningSecurity({ store: createQuotaStore(db, { log }) })
     const context = cloud.getWXContext()
     if (operation === 'closePlanning') return await security.close(event, context)
+    if (operation === 'quotaStatus') return await security.quotaStatus(context)
     const limits = loadLimits()
     authorization = operation === 'nearbyPois'
       ? await security.open(event, context) : await security.walking(event, context)
