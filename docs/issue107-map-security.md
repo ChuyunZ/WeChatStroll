@@ -16,8 +16,11 @@ clamp are unchanged. A nonempty successful response additionally returns
 `closePlanning` accepts `{ planningToken }` and releases unused capacity.
 No raw Walking endpoint exists outside these checks.
 
-Direct identity comes exclusively from `getWXContext().APPID/OPENID`. Client
-OPENID/userId/ownerKey fields have no authority. Stored owners are SHA-256 of
+Direct identity comes exclusively from the current invocation's trusted SCF
+`context.environment` / `context.environ` (`WX_APPID`, `WX_OPENID`). The gateway
+never authenticates from process-global `getWXContext()` or an event-supplied
+OPENID/userId/ownerKey. Missing/malformed invocation identity fails closed;
+only a valid HMAC-signed wrapper delegation may omit nested Mini Program identity. Stored owners are SHA-256 of
 `JSON.stringify([APPID, OPENID])`. A domain-tagged HMAC-SHA256 token binds the
 owner, random session ID, quota day, absolute expiry, declared origin and exact
 six-decimal coordinate allowlist returned by Explore. Both Walking endpoints
@@ -87,7 +90,7 @@ configuration/database/deployment changes as part of this code-only change.
 ### User-facing allowance hints (same #119 release/test cycle)
 
 The authenticated, **read-only** `mapProvider.quotaStatus` action uses the
-platform's `getWXContext().APPID/OPENID`, ignoring request-supplied user IDs.
+current invocation's SCF identity, ignoring request-supplied user IDs.
 It returns `{ success: true, quota: { remainingPlanningSessions, resetAtMs } }`.
 The response intentionally contains **no** owner hashes, other-user counts,
 provider documents, location information or Planning Tokens. No Tencent API
@@ -446,8 +449,9 @@ Repository audit at base `06e5c64`:
 operator must inspect the WeChat published/trial versions and cloud invocation
 metrics before scheduling rollout. Do not infer that no old clients exist.
 
-Both old functions remain present. They authenticate locally through
-`getWXContext`, discard caller identity/delegation fields, allowlist business
+Both old functions remain present. They authenticate locally from each
+invocation's trusted SCF context (not reusable `getWXContext()`), discard caller
+identity/delegation fields, allowlist business
 fields and sign a 65-second forwarding envelope containing the hashed owner and
 payload digest. The gateway verifies it rather than assuming nested calls retain
 OPENID. Replayed forwarding cannot bypass request claims, session checks or quotas.
@@ -739,3 +743,10 @@ read/transaction abuse, the six SDK dependency findings and their security
 sign-off, deployment/migration and cleanup setup, and controlled CloudBase/device
 verification. This local repair does not declare those gates satisfied and does
 not deploy or change online settings.
+
+2026-10-12 identity-source hardening: the three independently deployed map
+entrypoints now ignore reusable process-global WX identity. Regression tests
+cover successive users, non-Mini Program invocations, forged event identities
+and signed legacy forwarding. Deployment must confirm the deployed SCF runtime
+supplies invocation-local `context.environment` or `context.environ` on genuine
+Mini Program calls; code-level tests alone do not establish live compatibility.
