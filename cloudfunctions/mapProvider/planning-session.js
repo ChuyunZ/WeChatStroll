@@ -44,6 +44,10 @@ function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
   }
   return {
     quotaOffsetMinutes, // Trusted, validated server setting; never a client parameter.
+    // Ignore caller-supplied owner identities; status belongs to WXContext only.
+    async quotaStatus(context) {
+      return { success: true, quota: await quota.status(ownerOf(context)) }
+    },
     async open(event, context) {
       const owner = identity(event, context)
       const auth = await quota.begin(owner, event.requestId, hash(JSON.stringify([
