@@ -9,6 +9,11 @@ jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({}
 jest.mock('./planning-session', () => ({ createPlanningSecurity: () => ({
   open: async () => ({}), walking: async () => ({}), complete: async (auth, event, result) => result
 }) }))
+// This suite isolates provider adapter/QPS behavior; actual authenticated
+// ingress is tested in security-gateway and ingress-guard suites.
+jest.mock('./ingress-guard', () => ({ createIngressGuard: () => ({
+  acquire: async () => async () => {}
+}) }))
 jest.mock('axios', () => ({ get: jest.fn() }))
 jest.mock('./cloudbase-store', () => ({
   ...jest.requireActual('./cloudbase-store'), createCloudBaseStore: jest.fn()
