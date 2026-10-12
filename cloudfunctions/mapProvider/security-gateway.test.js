@@ -4,8 +4,7 @@ jest.mock('axios', () => ({ get: jest.fn() }))
 jest.mock('@cloudbase/node-sdk', () => ({ SYMBOL_CURRENT_ENV: 'test', init: () => ({
   callFunction: async ({ data }) => {
     // Model the critical boundary: nested invocation has NO end-user context.
-    require('wx-server-sdk').getWXContext.mockReturnValueOnce({})
-    return { result: await require('./index').main(data) }
+    return { result: await require('./index').main(data, { environment: '{}' }) }
   }
 }) }))
 jest.mock('./cloudbase-store', () => ({ ...jest.requireActual('./cloudbase-store'), createCloudBaseStore: jest.fn() }))
@@ -38,7 +37,8 @@ beforeEach(() => {
   jest.spyOn(console, 'info').mockImplementation(() => {})
 })
 afterEach(() => { process.env = saved; jest.useRealTimers(); jest.restoreAllMocks() })
-async function call(event) { const result = main(event); await jest.runAllTimersAsync(); return result }
+const wxInvocation = (openid = 'synthetic-user') => ({ environment: JSON.stringify({ WX_APPID: 'app', WX_OPENID: openid }) })
+async function call(event, context = wxInvocation()) { const result = main(event, context); await jest.runAllTimersAsync(); return result }
 test('actual gateway authorizes discovery then Walking; duplicates cannot obtain another HTTP response', async () => {
   const found = await call({ action: 'nearbyPois', ...start, requestId: 'request_discovery_1' })
   expect(found.success).toBe(true)
@@ -78,12 +78,10 @@ test('closePlanning still requires the authenticated owner when Tencent credenti
   const found = await call({ action: 'nearbyPois', ...start, requestId: 'request_authenticated_close' })
   expect(found.success).toBe(true)
   delete process.env.TENCENT_MAPS_API_KEY
-  cloud.getWXContext.mockReturnValue({ OPENID: 'other-user', APPID: 'app' })
-  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }))
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }, wxInvocation('other-user')))
     .toMatchObject({ error: { code: 'MAP_SESSION_INVALID' } })
   expect(quotaStore.documents.get('day_1').sessions).not.toEqual({})
-  cloud.getWXContext.mockReturnValue({})
-  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }))
+  expect(await call({ action: 'closePlanning', planningToken: found.planningToken }, { environment: '{}' }))
     .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
   expect(quotaStore.documents.get('day_1').sessions).not.toEqual({})
   expect(axios.get).toHaveBeenCalledTimes(3)
@@ -116,8 +114,7 @@ test.each(['ready_rejected', 'ready_committed_ack_lost'])(
 test('unsigned direct and legacy-shaped requests cannot bypass gateway authorization', async () => {
   expect(await call({ action: 'walkingRoute', start, destination, OPENID: 'fake', ownerKey: 'fake' }))
     .toMatchObject({ error: { code: 'MAP_SESSION_INVALID' } })
-  cloud.getWXContext.mockReturnValue({})
-  expect(await call({ action: 'nearbyPois', ...start, OPENID: 'fake', requestId: 'request_discovery_1' }))
+  expect(await call({ action: 'nearbyPois', ...start, OPENID: 'fake', requestId: 'request_discovery_1' }, { environment: '{}' }))
     .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
   expect(axios.get).not.toHaveBeenCalled()
 })
@@ -125,14 +122,14 @@ test('unsigned direct and legacy-shaped requests cannot bypass gateway authoriza
 test('authenticated legacy wrappers work when nested OPENID is absent, but do not authorize old raw Walking', async () => {
   const nearby = require('../getNearbyPois')
   const walking = require('../getWalkingRoute')
-  const pending = nearby.main({ ...start, requestId: 'legacy_discovery_1', OPENID: 'forged', ownerKey: 'forged' })
+  const pending = nearby.main({ ...start, requestId: 'legacy_discovery_1', OPENID: 'forged', ownerKey: 'forged' }, wxInvocation())
   await jest.runAllTimersAsync()
   const found = await pending
   expect(found.success).toBe(true)
-  const walk = walking.main({ start, destination, planningToken: found.planningToken, requestId: 'legacy_walking_1' })
+  const walk = walking.main({ start, destination, planningToken: found.planningToken, requestId: 'legacy_walking_1' }, wxInvocation())
   await jest.runAllTimersAsync()
   expect(await walk).toMatchObject({ success: true })
-  const unauthorized = walking.main({ start, destination })
+  const unauthorized = walking.main({ start, destination }, wxInvocation())
   await jest.runAllTimersAsync()
   expect(await unauthorized).toMatchObject({ error: { code: 'MAP_SESSION_INVALID' } })
   expect(axios.get).toHaveBeenCalledTimes(4)
@@ -153,8 +150,7 @@ test('quotaStatus cannot spend map quota or be forged by event OPENID', async ()
   expect(ingress[0][1].counts.quotaStatus).toBe(1)
   expect(ingress[0][1].leases).toEqual([])
   expect(axios.get).not.toHaveBeenCalled()
-  cloud.getWXContext.mockReturnValue({})
-  expect(await call({ action: 'quotaStatus', OPENID: 'synthetic-user' }))
+  expect(await call({ action: 'quotaStatus', OPENID: 'synthetic-user' }, { environment: '{}' }))
     .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
   expect(protectedDocuments()).toBe(before)
   expect(ingress[0][1].counts.quotaStatus).toBe(1)
@@ -185,4 +181,15 @@ test('repeated authenticated quotaStatus is capped before daily quota reads, wit
     .toEqual({ success: true })
   expect(quotaStore.documents.get('day_1').sessions).toEqual({})
   expect(axios.get).toHaveBeenCalledTimes(3)
+})
+
+test('stale getWXContext never authenticates missing invocation identity or another user', async () => {
+  cloud.getWXContext.mockReturnValue({ OPENID: 'victim', APPID: 'app' })
+  const event = { action: 'nearbyPois', ...start, requestId: 'stale_context_attempt' }
+  expect(await call(event, { environment: '{}' }))
+    .toMatchObject({ success: false, error: { code: 'MAP_UNAUTHORIZED' } })
+  expect(await call({ action: 'quotaStatus' }, { environ: 'TRIGGER_SRC=server' }))
+    .toMatchObject({ success: false, error: { code: 'MAP_UNAUTHORIZED' } })
+  expect(axios.get).not.toHaveBeenCalled()
+  expect([...quotaStore.documents.keys()]).toEqual(['calendar'])
 })
