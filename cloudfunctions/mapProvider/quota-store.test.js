@@ -147,7 +147,7 @@ test('CloudBase-shaped documents round-trip safe nested keys and never write _id
   const stored = documents.get('day_1')
   const nestedKeys = [Object.keys(stored.users), Object.keys(stored.sessions),
     Object.keys(stored.creations.users)].flat()
-  expect(nestedKeys).toHaveLength(2)
+  expect(nestedKeys).toHaveLength(3)
   expect(nestedKeys.every(key => key.length === 32 && /^[us][a-f0-9]{31}$/.test(key))).toBe(true)
   expect(JSON.stringify(stored)).toContain(owner)
   expect(JSON.stringify(stored)).toContain(auth.sid)
