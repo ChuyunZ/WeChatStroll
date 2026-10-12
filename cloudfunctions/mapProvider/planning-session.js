@@ -43,6 +43,11 @@ function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
     return { ...auth, scopeHash: hash(event.planningToken) }
   }
   return {
+    // Exposes only a verified identity for admission, not client-supplied owner
+    // fields. Wrapper forwarding uses its independently signed delegation.
+    ingressOwner(event, context) {
+      return event && event.action === 'quotaStatus' ? ownerOf(context) : identity(event, context)
+    },
     quotaOffsetMinutes, // Trusted, validated server setting; never a client parameter.
     // Ignore caller-supplied owner identities; status belongs to WXContext only.
     async quotaStatus(context) {
