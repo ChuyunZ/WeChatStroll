@@ -138,19 +138,26 @@ test('authenticated legacy wrappers work when nested OPENID is absent, but do no
   expect(axios.get).toHaveBeenCalledTimes(4)
 })
 
-test('quotaStatus is authenticated, read-only, and cannot be forged by event OPENID', async () => {
-  const before = JSON.stringify([...quotaStore.documents])
+test('quotaStatus cannot spend map quota or be forged by event OPENID', async () => {
+  const protectedDocuments = () => JSON.stringify(
+    [...quotaStore.documents].filter(([id]) => !id.startsWith('ingress_')))
+  const before = protectedDocuments()
   const first = await call({ action: 'quotaStatus', OPENID: 'forged-user', ownerKey: 'forged' })
   expect(first).toMatchObject({
     success: true,
     quota: { remainingPlanningSessions: 3, resetAtMs: 2 * DAY }
   })
-  expect(JSON.stringify([...quotaStore.documents])).toBe(before)
+  expect(protectedDocuments()).toBe(before)
+  const ingress = [...quotaStore.documents].filter(([id]) => id.startsWith('ingress_'))
+  expect(ingress).toHaveLength(1)
+  expect(ingress[0][1].counts.quotaStatus).toBe(1)
+  expect(ingress[0][1].leases).toEqual([])
   expect(axios.get).not.toHaveBeenCalled()
   cloud.getWXContext.mockReturnValue({})
   expect(await call({ action: 'quotaStatus', OPENID: 'synthetic-user' }))
     .toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
-  expect(JSON.stringify([...quotaStore.documents])).toBe(before)
+  expect(protectedDocuments()).toBe(before)
+  expect(ingress[0][1].counts.quotaStatus).toBe(1)
 })
 test('quotaStatus uses live user holds and works without Tencent credentials', async () => {
   const found = await call({ action: 'nearbyPois', ...start, requestId: 'quota_balance_discovery_1' })
