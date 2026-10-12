@@ -23,7 +23,7 @@ exports.main = async event => {
   const secretKey = process.env.TENCENT_MAPS_SECRET_KEY
   // Releasing a signed session only needs its owner and quota ledger, not
   // Tencent API credentials. Keep these checks for provider traffic only.
-  if (operation !== 'closePlanning' && (!apiKey || !secretKey)) {
+  if (['nearbyPois', 'walkingRoute'].includes(operation) && (!apiKey || !secretKey)) {
     return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
   }
   const log = record => console.info('[Map Provider]', record)
