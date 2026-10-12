@@ -10,6 +10,9 @@
     <text class="subtitle">点击地图查看路线详情</text>
   </view>
 
+  <view class="quota-hint" aria-label="今日路线规划额度">
+    <text>{{quotaStatusText}}</text>
+  </view>
 
   <!-- Loading -->
   <view
@@ -173,6 +176,9 @@
     </view>
 
 
+    <view class="quota-hint manual-quota-hint">
+      本批路线还可成功增加／更换 {{manualRemaining}} / 3 次
+    </view>
     <view wx:if="{{isLoadingMoreRoutes}}" class="reason-text">正在继续寻找更多路线…</view>
     <view wx:if="{{manualAlternativePending}}" class="replacement-hint">正在寻找新路线，请稍候…</view>
     <button
