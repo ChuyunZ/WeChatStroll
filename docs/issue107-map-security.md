@@ -453,6 +453,30 @@ cannot reset quota. Full next-day grace exceeds the bounded function execution
 window; verify that window before enabling the worker. If cleanup is delayed
 indefinitely, total historical storage still grows by up to the daily bound.
 
+### First deployed E2E blocker (2026-10-12)
+
+The first WeChat DevTools 30-minute route-generation attempt returned
+`MAP_QUOTA_UNAVAILABLE` from `mapProvider.nearbyPois` (cloud invocation
+completed in ~287 ms with only `gateway_unavailable`, no `provider_start`).
+The user confirmed the initial `calendar` and `day_20738` documents and
+the 09:00 internal boundary. This is **not** proof of correct CloudBase
+transaction semantics; no successful real quota debit or Tencent send has
+yet been demonstrated. Do not merge/release on the earlier mock-based CI alone.
+
+A small diagnostic follow-up emits `map_quota_transaction_failed` on
+failure with only fixed phases (`start`, `read_calendar`, `read_day`,
+`read_request`, `read_attempt`, `write_*`, `commit`) and sanitized
+classification (`application`, `transaction_conflict`, or
+`sdk_or_unknown`, plus a strictly bounded symbolic database code if present).
+It logs **no exception messages, stack traces, IDs, tokens, owners, inputs or
+location data** and does not change quota semantics or failure responses.
+Only the Map Provider needs redeployment for this diagnostic pass.
+
+Run one controlled signed-in Mini Program discovery after deploying the
+diagnostic build, inspect the new phase log, then repair the *verified*
+underlying SDK/data issue. Do not reset documents, loosen `ADMINONLY`
+permissions, bypass the transaction or blindly retry an uncertain commit.
+
 ## Validation and remaining release checks
 
 Automated tests use synthetic POIs, HTTP responses and optimistic CloudBase
