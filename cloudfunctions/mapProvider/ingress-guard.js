@@ -13,6 +13,7 @@ const POLICIES = Object.freeze({
   closePlanning: Object.freeze({ perMinute: 20, concurrent: 4 })
 })
 const MAX_DENIAL_CACHE = 2048
+const rejectedUntil = new Map()
 
 function documentId(owner) {
   if (typeof owner !== 'string' || !/^[a-f0-9]{64}$/.test(owner)) throw fail('MAP_UNAUTHORIZED')
@@ -42,7 +43,6 @@ function createIngressGuard({ store, now = Date.now, nonce = () => randomBytes(1
   // Once a rate limit is established for this warm instance, skip its database
   // entirely for that owner/action/window. Other instances still enforce the
   // authoritative transactional ledger.
-  const rejectedUntil = new Map()
   function cooldownKey(owner, operation) { return owner + ':' + operation }
   function rejectCached(owner, operation, time) {
     const key = cooldownKey(owner, operation)
