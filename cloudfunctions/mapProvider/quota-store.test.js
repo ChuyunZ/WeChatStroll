@@ -93,3 +93,82 @@ test('successful transaction logs no diagnostic events', async () => {
   expect(log).not.toHaveBeenCalled()
   expect(tx.rollback).not.toHaveBeenCalled()
 })
+
+test('CloudBase-shaped documents round-trip safe nested keys and never write _id', async () => {
+  const { createQuota, emptyCreations, DAY } = require('./quota')
+  const owner = 'a'.repeat(64)
+  const documents = new Map([
+    ['calendar', { activeFromMs: 0, offsetMinutes: 0, latestDay: 1 }],
+    ['day_1', { used: { explore: 0, walking: 0 }, users: {},
+      sessions: {}, creations: emptyCreations() }]
+  ])
+  const badField = data => {
+    if (!data || typeof data !== 'object') return false
+    return Object.entries(data).some(([key, value]) =>
+      key.length > 32 || (value && typeof value === 'object' && badField(value)))
+  }
+  let writes = 0
+  const db = {
+    async startTransaction() {
+      const pending = new Map()
+      return {
+        collection(name) {
+          expect(name).toBe(COLLECTION)
+          return {
+            doc(id) {
+              return {
+                async get() {
+                  const data = pending.has(id) ? pending.get(id) : documents.get(id)
+                  return { data: data ? { _id: id, ...JSON.parse(JSON.stringify(data)) } : null }
+                },
+                async set({ data }) {
+                  if (Object.prototype.hasOwnProperty.call(data, '_id') || badField(data)) {
+                    throw new Error('CloudBase rejects system ID or overlong object field')
+                  }
+                  pending.set(id, JSON.parse(JSON.stringify(data)))
+                  writes++
+                }
+              }
+            }
+          }
+        },
+        async commit() {
+          for (const [id, data] of pending) documents.set(id, data)
+        },
+        async rollback() { pending.clear() }
+      }
+    }
+  }
+  const quota = createQuota({ store: createQuotaStore(db), now: () => DAY + 60000,
+    offsetMinutes: 0, activeFromMs: 0 })
+  expect((await quota.status(owner)).remainingPlanningSessions).toBe(3)
+  const auth = await quota.begin(owner, 'cloudbase_session_123', 'input')
+  expect(auth.sid).toHaveLength(48)
+  const stored = documents.get('day_1')
+  const nestedKeys = [Object.keys(stored.users), Object.keys(stored.sessions),
+    Object.keys(stored.creations.users)].flat()
+  expect(nestedKeys).toHaveLength(2)
+  expect(nestedKeys.every(key => key.length === 32 && /^[us][a-f0-9]{31}$/.test(key))).toBe(true)
+  expect(JSON.stringify(stored)).toContain(owner)
+  expect(JSON.stringify(stored)).toContain(auth.sid)
+  expect(stored.sessions[Object.keys(stored.sessions)[0]].sessionId).toBe(auth.sid)
+  expect((await quota.status(owner)).remainingPlanningSessions).toBe(2)
+  await quota.close(auth)
+  expect(documents.get('day_1').sessions).toEqual({})
+  expect(writes).toBeGreaterThan(0)
+})
+
+test('fail closed on inconsistent persisted owner map identities', async () => {
+  const record = { used: { explore: 0, walking: 0 }, users: {
+    ['u' + 'a'.repeat(31)]: { ownerHash: 'b'.repeat(64), explore: 0, walking: 0 }
+  }, sessions: {}, creations: { requests: { explore: 0, walking: 0 },
+    attempts: { explore: 0, walking: 0 }, users: {} } }
+  const tx = {
+    collection: () => ({ doc: () => ({ get: async () => ({ data: { _id: 'day_1', ...record } }) }) }),
+    rollback: jest.fn(), commit: jest.fn()
+  }
+  const store = createQuotaStore({ startTransaction: async () => tx })
+  await expect(transact(store, t => t.get('day_1')))
+    .rejects.toMatchObject({ code: 'MAP_QUOTA_UNAVAILABLE' })
+  expect(tx.commit).not.toHaveBeenCalled()
+})
