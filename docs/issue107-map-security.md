@@ -44,6 +44,41 @@ selecting UTC/epoch zero. Rotation invalidates active planning credentials;
 displayed routes and active Walks remain usable. Do not log invocation payloads,
 tokens, secret material or provider URLs, including platform debug/event logging.
 
+### Chosen daily accounting reset: 09:00 Beijing (operator policy)
+
+Tencent support (2026-10-11) confirmed the WebService daily allotment resets
+once per day but **could not confirm the exact time or timezone**. For this
+project we choose **09:00 Asia/Shanghai (UTC+08:00)** as the *internal*
+Explore/Walking daily ledger boundary, **not as a statement about Tencent's
+billing cycle**. It is 01:00 UTC; with the existing calculation
+`floor((nowMs + offsetMinutes * 60000) / 86400000)`, configure
+`MAP_QUOTA_OFFSET_MINUTES=-60` (**not** `480`). Both services share one
+`map_planning_quotas` calendar and therefore one boundary:
+
+- Beijing 08:59:59 remains in the previous internal quota day.
+- Beijing 09:00:00 begins the next internal quota day with fresh local
+  physical-usage, reservation and record-creation counters. Existing usage
+  remains in the old ledger; it is never deleted/reset to force admission.
+- A Planning Session expires by its original ledger boundary and cannot move
+  its unused Explore/Walking holds into the next day. New sessions are rejected
+  during the final 60 seconds of a quota day.
+- Tencent 120 still uses shared key-wide short cooldown and bounded retry;
+  Tencent 121 still terminates the **current physical request without retry**.
+  A local ledger reset **does not prove** Tencent's quota is available, and the
+  present provider path does not impose a persistent day-long key block on 121.
+  Do not describe this as guaranteed protection from an unknown official reset.
+
+**Activation/migration:** The offset is part of the persisted `calendar`
+contract. `MAP_QUOTA_OFFSET_MINUTES`, `MAP_QUOTA_ACTIVE_FROM_MS` and the
+seeded `calendar` must exactly agree. Never change only the environment
+variable on an already activated quota calendar: mismatches fail closed with
+`MAP_QUOTA_NOT_READY`. For a different existing offset, stop new planning,
+drain in-flight operations, preserve old documents and reconcile a new
+activation boundary under an independently reviewed maintenance plan. Do not
+overwrite today's live ledger or fabricate zero historical usage. Keep all
+same-Key consumers under the same single ledger. Do not make any CloudBase
+configuration/database/deployment changes as part of this code-only change.
+
 ## Accounting and capacity decision
 
 | Physical HTTP attempts | User/day | Global/day |
@@ -309,8 +344,10 @@ Operator sequence (none performed automatically):
 1. Inventory published/trial clients, all Key users and both old cloud functions.
    If any published version lacks this protocol, prepare an update/maintenance
    window for **new planning**, while preserving Walk/History/recovery access.
-2. Verify Tencent's actual reset timezone for this Key. This implementation has
-   no timezone default. Do not copy the AI quota's UTC convention. Confirm clocks.
+2. Tencent has not confirmed its actual reset time; apply our documented
+   **09:00 Beijing internal boundary** (`MAP_QUOTA_OFFSET_MINUTES=-60`) with
+   explicit awareness that it is not Tencent's verified billing cutoff.
+   Keep external availability errors fail-closed; confirm backend clock health.
 3. Require this Key's callers to use one authoritative gateway environment and
    its quota/QPS stores. Two independent environments each with 5400 are unsafe.
    Merely using the same secret does not create a shared ledger. If another
@@ -339,18 +376,23 @@ Operator sequence (none performed automatically):
 ## Offline initialization and metadata retention
 
 `node scripts/issue107-quota-seed.cjs reviewed-input.json` only prints JSON; it
-does not connect to CloudBase. Input example (offset **must be confirmed**, the
-example value is not a statement of Tencent policy):
+does not connect to CloudBase. Input example for the **operator-chosen** 09:00 Beijing policy (this is
+not Tencent's confirmed reset time):
 
 ```json
 {
   "date": "2026-10-12",
-  "offsetMinutes": 480,
+  "offsetMinutes": -60,
   "used": { "explore": 0, "walking": 0 },
   "users": {},
   "userUsageComplete": true
 }
 ```
+
+For this example `activeFromMs` is **2026-10-12T01:00:00.000Z**,
+corresponding to **2026-10-12 09:00 in Beijing**. Prepare activation only
+when the boundary has been reached, historical usage is reconciled, and no
+other same-Key caller can bypass the ledger.
 
 Review the emitted collection/document ID, `activeFromMs` and `data`. The operator
 sets the fixed activation epoch and imports `data` into that document exactly
