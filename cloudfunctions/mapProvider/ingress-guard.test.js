@@ -5,10 +5,11 @@ const alice = 'a'.repeat(64)
 const bob = 'b'.repeat(64)
 function harness() {
   const store = createTestStore()
+  const deniedCache = new Map()
   let time = 120000
   let sequence = 0
   const create = () => createIngressGuard({ store, now: () => time,
-    nonce: () => (++sequence).toString(16).padStart(32, '0') })
+    nonce: () => (++sequence).toString(16).padStart(32, '0'), deniedCache })
   return { store, create, step: ms => { time += ms }, now: () => time }
 }
 test('uses authoritative shared storage across independent gateway instances', async () => {
@@ -66,7 +67,7 @@ test('invalid owner and malformed storage fail closed before any provider work',
     .rejects.toMatchObject({ code: 'MAP_UNAUTHORIZED' })
   await expect(g.acquire(alice, 'nonexistent'))
     .rejects.toMatchObject({ code: 'MAP_REQUEST_INVALID' })
-  const id = 'ingress_' + alice.slice(0, 28)
+  const id = 'ingress_' + alice.slice(0, 24)
   store.documents.set(id, {
     ownerHash: bob, windowStartMs: 120000, updatedAtMs: 120000,
     counts: { nearbyPois: 0, walkingRoute: 0, quotaStatus: 0, closePlanning: 0 },
@@ -81,7 +82,7 @@ test('failed release cannot refund rate count or revoke successful response', as
   store.failure = new Error('private database failed')
   await expect(release()).resolves.toBeUndefined()
   store.failure = null
-  const id = 'ingress_' + alice.slice(0, 28)
+  const id = 'ingress_' + alice.slice(0, 24)
   expect(store.documents.get(id).counts.walkingRoute).toBe(1)
   expect(store.documents.get(id).leases).toHaveLength(1)
 })
