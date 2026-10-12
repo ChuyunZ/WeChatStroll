@@ -10,6 +10,7 @@ const { MAX_CORRECTION_CANDIDATES, MAX_CORRECTION_NEW_SEGMENTS } = require("../.
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
 const { releaseSession, createPlanningRun } = require("../../services/map-planning-authorization");
+const { getMapQuotaStatus, quotaStatusText } = require("../../services/map-quota-status");
 
 const {
   ROUTE_TYPES
@@ -63,6 +64,8 @@ function isValidWaypointCandidateCache(cache) {
 Page({
   data: {
     manualAlternativeAction: "",
+    manualRemaining: 3,
+    quotaStatusText: "正在查询今日规划额度…",
     manualAlternativePending: false,
     replacementSelection: false,
     replacingRouteId: "",
@@ -127,8 +130,28 @@ Page({
     this.loadRoutes();
   },
 
+  onShow() {
+    this.refreshQuotaStatus();
+  },
+
+  async refreshQuotaStatus() {
+    const request = (this._quotaStatusRequest || 0) + 1;
+    this._quotaStatusRequest = request;
+    try {
+      const status = await getMapQuotaStatus();
+      if (!this._unloaded && request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(status) });
+      }
+    } catch (_) {
+      if (!this._unloaded && request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(null) });
+      }
+    }
+  },
+
   onUnload() {
     this._unloaded = true;
+    this._quotaStatusRequest = (this._quotaStatusRequest || 0) + 1;
     if (this._planningRun) this._planningRun.cancel();
     releaseSession(this._retainedPlanningState && this._retainedPlanningState._routePlanningSession);
     this._retainedPlanningState = null;
@@ -191,6 +214,7 @@ Page({
     this.setData({
       routes: [],
       manualAlternativeAction: "",
+      manualRemaining: 3,
       manualAlternativePending: false,
       replacementSelection: false,
       replacingRouteId: "",
@@ -328,6 +352,8 @@ Page({
         releaseSession(routeLoadResult && routeLoadResult.routePlanningSession);
       }
       if (this._planningRun === run) this._planningRun = null;
+      // Refresh once per generation, not after every physical route segment.
+      if (!this._unloaded) this.refreshQuotaStatus();
     }
   },
 
@@ -735,6 +761,7 @@ Page({
     if (!action && !this._manualAlternativePending) this._replacementSelection = false;
     this.setData({
       manualAlternativeAction: action,
+      manualRemaining: Math.max(0, 3 - (this._manualAlternativeActionCount || 0)),
       manualAlternativePending: !!this._manualAlternativePending,
       replacementSelection: this._replacementSelection,
       replacingRouteId: this._manualAlternativePending && this._manualAlternativePending.routeId || ""
