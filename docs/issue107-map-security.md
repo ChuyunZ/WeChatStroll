@@ -126,6 +126,76 @@ the new read endpoint does not fix it. Validate normal browsing, exhausted
 balances, unavailable status, reload/recovery, cross-day rollover and
 privacy/forgery before public launch.
 
+## #119 follow-up: authenticated ingress rate/concurrency protection
+
+**Not deployed / not yet accepted on real CloudBase.** The previous E2E
+(planning, add/replace/edit and normal session close) predates this admission
+layer. Do not merge or treat passing Jest as new E2E acceptance.
+
+The new `ingress-guard.js` runs in `mapProvider` after verifying caller
+APPID/OPENID or a wrapper's HMAC-signed delegation, but **before any
+daily quota ledger read/write, provider limiter or Tencent request**. It
+uses the existing ADMINONLY `map_planning_quotas` collection (no new
+collection or environment variables). Each distinct authenticated owner
+has one `ingress_` + first 24 hex of SHA-256 owner ID document (32-character
+document ID); its full SHA-256 identity value is verified on every read,
+so a prefix collision fails closed. It persists **no raw OPENID, POI,
+coordinates, Tencent responses, URLs, API keys or tokens**. Guard state
+uses a fixed 60-second interval, atomic transactional count and
+90-second per-invocation concurrency leases.
+
+| Action | Max admitted starts / 60 s / owner | Concurrent in-flight / owner |
+| --- | ---: | ---: |
+| `nearbyPois` | 6 | 3 |
+| `walkingRoute` | 180 | 24 |
+| `quotaStatus` | 30 | 4 |
+| `closePlanning` | 20 | 4 |
+
+`closePlanning` has a **separate** allowance so an exhausted Walking or
+status budget cannot immediately block session release. Yet exhausting
+the close allowance itself can still delay cleanup to lease/session expiry;
+client cleanup and bounded retries remain best-effort. Both direct
+`mapProvider` invocations and authenticated legacy wrapper forwards share
+the same backend counter; wrappers still incur their own invocation cost
+before gateway admission. Rate refusal returns `MAP_REQUEST_LIMITED`
+and never sends Tencent traffic. Session/physical quota consumption
+rules are unchanged. A release failure leaves only a bounded in-flight
+guard lease; it never refunds a sent request or replaces a successful
+business response with an error.
+
+**Capacity/operations caveats:**
+
+- A successful operation now incurs a separate guard-admission transaction
+  plus a release transaction; `quotaStatus` remains read-only with
+  respect to **quota/counter documents**, but creates/updates the
+  independent ingress bookkeeping document. The additional cost/latency
+  needs **real-device CloudBase** measurement before public exposure.
+- Rejected hot-instance rate overages use a bounded in-memory denial cache
+  to avoid repeat database reads. The **authoritative** limit is still
+  transactional across function instances. Denied callers landing on a
+  fresh instance can still trigger one database transaction: **this is
+  not a DDoS-proof pre-invocation firewall**.
+- CloudBase resource-dimension per-function QPS limits are documented with
+  minimum 100 QPS; the user's current personal-tier console did not offer
+  client-dimension rules. Configure/verify a suitable platform-level
+  resource cap for **each** externally callable
+  `mapProvider`, `getNearbyPois`, `getWalkingRoute` to constrain
+  invocation churn and avoid unlimited SDK forwarding. Do not silently
+  enable enterprise-only settings, alter provider keys or change any
+  production configuration without explicit operator approval.
+  Official docs:
+  https://docs.cloudbase.net/envconfig/ratelimit/intro
+- Ingress documents are one per distinct user, not one per invocation.
+  They **must** be covered by an operator-controlled retention process
+  for inactive users (verify no active lease and enough safety margin
+  before deletion). There is no deployed automatic cleanup in this PR.
+- Test denied/concurrent requests with mock transports and database
+  fixtures rather than flooding paid Tencent API. Verify trusted
+  delegation, multi-instance contention, release under provider
+  saturation, 60-second window rollover, malformed data fail-closed,
+  burst latency and CloudBase resource-level limits in staging.
+  The unresolved SDK dependency audit remains a separate release gate.
+
 ## Accounting and capacity decision
 
 | Physical HTTP attempts | User/day | Global/day |
