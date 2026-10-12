@@ -18,6 +18,6 @@ async function getMapQuotaStatus({ call = callCloudFunction } = {}) {
 
 function quotaStatusText(status) {
   if (!status) return '今日规划额度暂不可查询'
-  return `今日预计还可发起 ${status.remainingPlanningSessions} 次完整规划 · 每天 09:00 更新`
+  return `今日预计还可发起 ${status.remainingPlanningSessions} 次完整规划 · 每天北京时间 09:00 重置`
 }
 module.exports = { getMapQuotaStatus, quotaStatusText }
