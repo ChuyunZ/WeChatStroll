@@ -7,6 +7,7 @@ jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({}
 // Adapter/pacing regressions remain isolated; security and real gateway wiring
 // are exercised separately in planning-session.test and security-gateway.test.
 jest.mock('./planning-session', () => ({ createPlanningSecurity: () => ({
+  ingressOwner: () => 'a'.repeat(64),
   open: async () => ({}), walking: async () => ({}), complete: async (auth, event, result) => result
 }) }))
 // This suite isolates provider adapter/QPS behavior; actual authenticated
