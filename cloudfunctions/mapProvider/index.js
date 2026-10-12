@@ -16,7 +16,7 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
 exports.main = async event => {
   const operation = event && event.action
-  if (!['nearbyPois', 'walkingRoute', 'closePlanning'].includes(operation)) {
+  if (!['nearbyPois', 'walkingRoute', 'closePlanning', 'quotaStatus'].includes(operation)) {
     return { success: false, error: { code: 'INVALID_ACTION', message: 'Unsupported provider operation' } }
   }
   const apiKey = process.env.TENCENT_MAPS_API_KEY
