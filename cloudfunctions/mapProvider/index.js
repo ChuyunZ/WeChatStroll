@@ -9,6 +9,7 @@ const { createWalkingHandler } = require('./walking')
 const { addTencentSignature } = require('./signing')
 const { createPlanningSecurity } = require('./planning-session')
 const { createQuotaStore } = require('./quota-store')
+const { createIngressGuard } = require('./ingress-guard')
 const { isProviderCode } = require('./errors')
 const { pointKey } = require('./planning-token')
 
@@ -28,12 +29,18 @@ exports.main = async event => {
   }
   const log = record => console.info('[Map Provider]', record)
   let authorization
+  let releaseIngress
   try {
     if (operation === 'nearbyPois') pointKey(event)
     if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
     const db = cloud.database({ throwOnNotFound: false })
-    const security = createPlanningSecurity({ store: createQuotaStore(db, { log }) })
+    const quotaStore = createQuotaStore(db, { log })
+    const security = createPlanningSecurity({ store: quotaStore })
     const context = cloud.getWXContext()
+    // Reject over-frequent calls before any daily quota transaction. Both
+    // direct users and wrapper delegations must use verified platform identity.
+    releaseIngress = await createIngressGuard({ store: quotaStore })
+      .acquire(security.ingressOwner(event, context), operation)
     if (operation === 'closePlanning') return await security.close(event, context)
     if (operation === 'quotaStatus') return await security.quotaStatus(context)
     const limits = loadLimits()
@@ -59,5 +66,7 @@ exports.main = async event => {
       code: isProviderCode(error.code) || ['CONFIG_MISSING', 'INVALID_COORDINATES'].includes(error.code)
         ? error.code : 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
     } }
+  } finally {
+    if (releaseIngress) await releaseIngress()
   }
 }
