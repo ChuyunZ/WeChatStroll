@@ -186,9 +186,12 @@ business response with an error.
   Official docs:
   https://docs.cloudbase.net/envconfig/ratelimit/intro
 - Ingress documents are one per distinct user, not one per invocation.
-  They **must** be covered by an operator-controlled retention process
-  for inactive users (verify no active lease and enough safety margin
-  before deletion). There is no deployed automatic cleanup in this PR.
+  A tested **7-day conservative inactivity retention** policy is now defined
+  in `scripts/issue107-ingress-retention.cjs` and integrated into the existing
+  `canDeleteQuotaRecord` predicate. The new `sweepIngressCandidates` helper
+  supports dry-run by default or explicit-approval deletion via a trusted
+  admin-provided read+delete transaction adapter. **No scheduled cleanup
+  service has been installed or configured.**
 - Test denied/concurrent requests with mock transports and database
   fixtures rather than flooding paid Tencent API. Verify trusted
   delegation, multi-instance contention, release under provider
@@ -551,6 +554,62 @@ machine-local/UTC midnight; requires full next-day receipt grace; rejects
 malformed/early expiry; preserves today's and three previous complete days'
 ledgers, the calendar and its latest initialized day even after a long idle
 period. Missing calendar or a backwards clock fails closed.
+
+### Ingress record retention: offline reviewed policy (2026-10-12)
+
+The `ingress_` limiter ledger does **not** follow the 09:00 Beijing
+provider quota boundary. It is a rolling operational admission record:
+`windowStartMs` anchors its 60-second fixed window, `updatedAtMs`
+tracks successful acquisitions/releases, and `leases[].expiresAtMs`
+protects an individual in-flight request for up to 90 seconds.
+The retention policy deliberately waits **7 full days after the latest
+of the update timestamp, the end of the 60-second count window, and
+any lease expiry**. It never removes an active or recently used account's
+limit history. This is storage hygiene, **not** a way to restore any
+daily provider quota or user allowance.
+
+The predicate checks all of the following; any unknown or malformed
+state is **not eligible**:
+
+- The ID must be `ingress_` plus exactly 24 lowercase hex characters
+  matching the first 24 characters of a full 64-hex `ownerHash`. If a
+  database read supplies `_id`, it must match the queried ID.
+- Timestamps must be safe, ordered, nonfuture integers; `counts`
+  must have exactly the four expected action keys and valid nonnegative
+  integer values. Lease entries must have unique 32-hex identifiers,
+  known actions, and valid expired timestamps; any unexpired lease
+  stops deletion.
+- The cleanup call must have a valid server-supplied clock and the
+  existing retention `calendar` validation must still pass if using
+  `canDeleteQuotaRecord`. Candidate prefixes cannot match `day_`,
+  `request_`, `attempt_`, or `calendar`.
+
+**Trusted admin-only execution contract** (not a deployed cloud function):
+`sweepIngressCandidates({candidateIds, transact, now})` defaults to
+`dryRun: true`. Non-dry-run requests also require
+`approval: 'DELETE_EXPIRED_INGRESS'`. Maximum batch size is 25
+unique valid ingress IDs. The operator enumerates candidate IDs using
+a bounded, paginated admin listing; the function then **re-reads the
+candidate inside the same atomic/versioned transaction that deletes it**.
+If another request acquires or releases a lease, the transaction must
+abort on write conflict and the record must survive. The adapter must
+provide `transact(work)` and `tx.get(id)` / `tx.delete(id)` with
+these guarantees. Do not implement these as a nontransactional
+`get()` followed by `remove()`; CloudBase supports server-side
+transactional delete through its documented API:
+https://docs.cloudbase.net/database/transaction
+
+The function reports aggregate `scanned/eligible/deleted/skipped/failed`
+counts, never hashed owner identifiers or tokens. Unknown commit outcomes
+count as **failed**, and a later admin run re-evaluates from a fresh read.
+This helper does **not** configure a privileged CloudBase identity,
+paginate the collection, deploy an endpoint, or install a timer. Those
+require explicit operator approval, least-privilege service credentials,
+real-SDK transactional-delete validation and a dry-run inventory. Never
+enable collection-level TTL, erase recent keys to reset per-minute rate
+limits, or expose the helper through a publicly callable Mini Program
+cloud function. Tests use isolated in-memory transactions and deliberate
+conflicts, not paid Tencent requests.
 
 For the later administrative worker: deny Mini Program invocation and client DB
 access; use a dedicated scheduled service identity with only this collection's
