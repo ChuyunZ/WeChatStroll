@@ -9,7 +9,7 @@ test('reads authenticated server-owned quota with only an action; formats a qual
     fallbackCode: 'MAP_QUOTA_UNAVAILABLE'
   }))
   expect(status).toEqual({ remainingPlanningSessions: 2, resetAtMs: 1791853200000 })
-  expect(quotaStatusText(status)).toContain('预计还可发起 2 次')
+  expect(quotaStatusText(status)).toBe('今日预计还可发起 2 次完整规划 · 每天北京时间 09:00 重置')
   expect(quotaStatusText(null)).toBe('今日规划额度暂不可查询')
 })
 test.each([
