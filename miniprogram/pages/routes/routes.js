@@ -188,7 +188,8 @@ Page({
       _waypointCandidateCache: this._waypointCandidateCache,
       _routeLocation: this._routeLocation,
       _historicalPreferenceProfile: this._historicalPreferenceProfile,
-      _verifiedWaypointPool: this._verifiedWaypointPool
+      _verifiedWaypointPool: this._verifiedWaypointPool,
+      _manualAlternativeActionCount: this._manualAlternativeActionCount || 0
     };
     this._retainedPlanningState = previous;
     // Retry is a new generation, but not a new questionnaire/copy budget.
@@ -324,6 +325,7 @@ Page({
         Object.assign(this, previous);
         this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
         this.renderRoutes({ routeState: "success" });
+        this.updateManualAlternativeControls();
         wx.showToast({ title: mapErrorMessage(error), icon: "none" });
         return;
       }
