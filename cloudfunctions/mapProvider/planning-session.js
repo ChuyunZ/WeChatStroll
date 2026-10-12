@@ -11,8 +11,9 @@ function requiredIntegerSetting(env, name) {
 }
 function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
   const tokens = createTokens(env.MAP_PLANNING_SECRET)
+  const quotaOffsetMinutes = requiredIntegerSetting(env, 'MAP_QUOTA_OFFSET_MINUTES')
   const quota = createQuota({ store, now,
-    offsetMinutes: requiredIntegerSetting(env, 'MAP_QUOTA_OFFSET_MINUTES'),
+    offsetMinutes: quotaOffsetMinutes,
     activeFromMs: requiredIntegerSetting(env, 'MAP_QUOTA_ACTIVE_FROM_MS'),
     ttlMs: env.MAP_SESSION_TTL_MS === undefined ? undefined : Number(env.MAP_SESSION_TTL_MS) })
   function identity(event, context) {
@@ -42,6 +43,7 @@ function createPlanningSecurity({ store, env = process.env, now = Date.now }) {
     return { ...auth, scopeHash: hash(event.planningToken) }
   }
   return {
+    quotaOffsetMinutes, // Trusted, validated server setting; never a client parameter.
     async open(event, context) {
       const owner = identity(event, context)
       const auth = await quota.begin(owner, event.requestId, hash(JSON.stringify([
