@@ -86,10 +86,9 @@ function fakeDb(rows = [], hooks = {}) {
   return db
 }
 test('cleanup shares exact ingress policy with mapProvider and defaults to dry-run', async () => {
-  expect(Object.keys(POLICIES).sort()).toEqual(
-    Object.keys(require('../cloudfunctions/mapQuotaCleanup/retention').canDeleteIngressRecord
-      ? { nearbyPois:1, walkingRoute:1, quotaStatus:1, closePlanning:1 } : {}).sort())
-  expect(WINDOW_MS).toBe(60000)
+  const retention = require('../cloudfunctions/mapQuotaCleanup/retention')
+  expect(retention.OPERATIONS.sort()).toEqual(Object.keys(POLICIES).sort())
+  expect(retention.WINDOW_MS).toBe(WINDOW_MS)
   const db = fakeDb([oldRecord(1), {
     ...oldRecord(2), updatedAtMs: time - 1000, windowStartMs: time - 1000
   }])
