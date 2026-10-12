@@ -41,6 +41,7 @@ exports.main = async event => {
     const store = createCloudBaseStore(db)
     const limiter = createLimiter({ store, ...limits, log })
     const provider = createProvider({ limiter, limits, log, admission: authorization.admission,
+      quotaOffsetMinutes: security.quotaOffsetMinutes,
       request: (url, options) => axios.get(url, addTencentSignature(url, options, secretKey)) })
     const createHandler = operation === 'walkingRoute' ? createWalkingHandler : createNearbyHandler
     const result = await createHandler({ apiKey, request: provider(operation) })(event)
