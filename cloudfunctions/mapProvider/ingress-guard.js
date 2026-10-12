@@ -17,7 +17,7 @@ const globalRejectedUntil = new Map()
 
 function documentId(owner) {
   if (typeof owner !== 'string' || !/^[a-f0-9]{64}$/.test(owner)) throw fail('MAP_UNAUTHORIZED')
-  // 112-bit deterministic lookup with the complete identity verified in data.
+  // 96-bit deterministic lookup with the complete identity verified in data.
   return 'ingress_' + owner.slice(0, 24)
 }
 function emptyCounts() {
