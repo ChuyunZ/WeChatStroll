@@ -486,6 +486,15 @@
 
 ====================== */
 
+/* The page's bottom navigation is fixed and removed from document flow.
+   Reserve real scrollable space after the final option so the last card can
+   clear the fixed controls on short screens and after the quota hint was added.
+   Do not set fixed heights or overflow:hidden on the page itself. */
+.page-two {
+  padding-bottom: 220rpx;
+  box-sizing: border-box;
+}
+
 .page-two .question-block {
 
   margin-top: 50rpx;
