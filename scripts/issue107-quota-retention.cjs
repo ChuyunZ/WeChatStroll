@@ -1,5 +1,6 @@
 // Pure operator policy, NOT a public cloud action or an installed cleanup job.
 const { DAY } = require('../cloudfunctions/mapProvider/quota')
+const { canDeleteIngressRecord } = require('./issue107-ingress-retention.cjs')
 function canDeleteQuotaRecord({ id, data, calendar, now }) {
   if (!calendar || !Number.isSafeInteger(now) || !Number.isSafeInteger(calendar.activeFromMs) ||
       !Number.isInteger(calendar.offsetMinutes) || Math.abs(calendar.offsetMinutes) > 840 ||
@@ -7,6 +8,9 @@ function canDeleteQuotaRecord({ id, data, calendar, now }) {
   const offset = calendar.offsetMinutes * 60000
   const today = Math.floor((now + offset) / DAY)
   if (calendar.latestDay > today) return false
+  if (typeof id === 'string' && id.startsWith('ingress_')) {
+    return canDeleteIngressRecord({ id, data, now })
+  }
   if (/^day_\d+$/.test(id)) {
     const day = Number(id.slice(4))
     return Number.isSafeInteger(day) && day < today - 3 && day < calendar.latestDay
