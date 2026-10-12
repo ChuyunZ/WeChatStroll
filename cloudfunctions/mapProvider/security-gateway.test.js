@@ -169,3 +169,20 @@ test('quotaStatus uses live user holds and works without Tencent credentials', a
   })
   expect(axios.get).toHaveBeenCalledTimes(3)
 })
+
+test('repeated authenticated quotaStatus is capped before daily quota reads, without exhausting close', async () => {
+  const discovery = await call({ action: 'nearbyPois', ...start, requestId: 'ingress_status_discovery' })
+  expect(discovery.success).toBe(true)
+  const spent = JSON.stringify(quotaStore.documents.get('day_1'))
+  for (let i = 0; i < 30; i++) {
+    const status = await call({ action: 'quotaStatus', OPENID: 'forged-value' })
+    expect(status.success).toBe(true)
+  }
+  expect(await call({ action: 'quotaStatus' }))
+    .toMatchObject({ success: false, error: { code: 'MAP_REQUEST_LIMITED' } })
+  expect(JSON.stringify(quotaStore.documents.get('day_1'))).toBe(spent)
+  expect(await call({ action: 'closePlanning', planningToken: discovery.planningToken }))
+    .toEqual({ success: true })
+  expect(quotaStore.documents.get('day_1').sessions).toEqual({})
+  expect(axios.get).toHaveBeenCalledTimes(3)
+})
