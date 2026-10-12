@@ -128,9 +128,11 @@ privacy/forgery before public launch.
 
 ## #119 follow-up: authenticated ingress rate/concurrency protection
 
-**Not deployed / not yet accepted on real CloudBase.** The previous E2E
-(planning, add/replace/edit and normal session close) predates this admission
-layer. Do not merge or treat passing Jest as new E2E acceptance.
+**Status as of 2026-10-12:** the ingress guard was deployed and normal
+CloudBase request/route/close flows were tested (see PR #119 live E2E notes).
+Negative-path burst/concurrency across real instances, runtime SDK security
+sign-off and platform-level mitigation are still outstanding. The
+operator-only ingress metadata cleanup helper below is **not installed**.
 
 The new `ingress-guard.js` runs in `mapProvider` after verifying caller
 APPID/OPENID or a wrapper's HMAC-signed delegation, but **before any
