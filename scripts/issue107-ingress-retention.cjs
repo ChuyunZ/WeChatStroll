@@ -2,7 +2,7 @@
 // helper. No CloudBase connection, public callable function or scheduled trigger
 // is installed here. A trusted admin supplies the DB transaction adapter.
 const { DAY } = require('../cloudfunctions/mapProvider/quota')
-const { POLICIES, WINDOW_MS, LEASE_MS } = require('../cloudfunctions/mapProvider/ingress-guard')
+const { POLICIES, WINDOW_MS } = require('../cloudfunctions/mapProvider/ingress-guard')
 
 const INGRESS_RETENTION_MS = 7 * DAY
 const MAX_BATCH = 25
