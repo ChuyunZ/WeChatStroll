@@ -79,11 +79,15 @@ test.each(['MAP_USER_QUOTA_EXHAUSTED', 'MAP_GLOBAL_QUOTA_EXHAUSTED', 'MAP_SESSIO
     const routes = page._rawRoutes;
     const session = page._routePlanningSession;
     const cached = page._waypointCandidateCache;
+    page._manualAlternativeActionCount = 2;
+    page.updateManualAlternativeControls();
     page.getRoutes.mockRejectedValue(Object.assign(new Error('quota'), { code }));
     await page.loadRoutes();
     expect(page._rawRoutes).toBe(routes);
     expect(page._routePlanningSession).toBe(session);
     expect(page._waypointCandidateCache).toBe(cached);
+    expect(page._manualAlternativeActionCount).toBe(2);
+    expect(page.data.manualRemaining).toBe(1);
     expect(page.data.routeState).toBe('success');
     expect(page.data.routes).toHaveLength(routes.length);
     expect(wx.showToast).toHaveBeenCalledWith({ title: expect.any(String), icon: 'none' });
@@ -710,6 +714,7 @@ describe('bounded manual alternatives', () => {
     expect(page._rawRoutes).toHaveLength(count + 1);
     original.forEach(item => expect(page._rawRoutes).toContain(item));
     expect(page._manualAlternativeActionCount).toBe(1);
+    expect(page.data.manualRemaining).toBe(2);
     expect(rank).toHaveBeenCalledTimes(1);
     expect(page._historicalPreferenceProfile).toBe(history);
     expect(routeGenerationServiceMock.buildOptimizedCandidateRoute).toHaveBeenCalledWith(expect.objectContaining({
@@ -746,6 +751,7 @@ describe('bounded manual alternatives', () => {
     expect(page._rawRoutes).toEqual(expect.arrayContaining([original[0], original[2], replacement]));
     expect(page._rawRoutes).not.toContain(original[1]);
     expect(page._manualAlternativeActionCount).toBe(1);
+    expect(page.data.manualRemaining).toBe(2);
     expect(page.data.routes.filter(item => item.isBestMatch)).toHaveLength(1);
   });
 
@@ -759,6 +765,7 @@ describe('bounded manual alternatives', () => {
       }
     }
     expect(page._manualAlternativeActionCount).toBe(3);
+    expect(page.data.manualRemaining).toBe(0);
     expect(page.data.manualAlternativeAction).toBe('');
     const original = page._rawRoutes;
     await page.showOtherRoutes();
