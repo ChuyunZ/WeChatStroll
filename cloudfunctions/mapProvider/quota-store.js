@@ -36,6 +36,9 @@ function compactKey(full, prefix, length) {
   return prefix + full.slice(0, 31)
 }
 function encodeMap(value, prefix, length, identity) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw fail('MAP_QUOTA_UNAVAILABLE')
+  }
   const result = {}
   for (const [full, entry] of Object.entries(value || {})) {
     const short = compactKey(full, prefix, length)
@@ -48,6 +51,9 @@ function encodeMap(value, prefix, length, identity) {
   return result
 }
 function decodeMap(value, prefix, length, identity) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw fail('MAP_QUOTA_UNAVAILABLE')
+  }
   const result = {}
   for (const [short, entry] of Object.entries(value || {})) {
     const full = entry && entry[identity]
