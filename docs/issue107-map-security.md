@@ -557,6 +557,83 @@ malformed/early expiry; preserves today's and three previous complete days'
 ledgers, the calendar and its latest initialized day even after a long idle
 period. Missing calendar or a backwards clock fails closed.
 
+### Admin-only scheduled ingress cleanup implementation (code staged, trigger disabled)
+
+PR #119 now includes a **separate** cloud function
+`cloudfunctions/mapQuotaCleanup`. It packages its own copy-free retention
+implementation in `retention.js`; offline tests and the existing
+`canDeleteQuotaRecord` import this *same* module, preventing drift.
+The function has `config.json: {"triggers":[]}` by default, and
+`MAP_QUOTA_CLEANUP_MODE` defaults to `disabled`. **Simply pulling or
+deploying the code will not turn on deletion or a cron job.**
+
+**Security setup before *any* non-disabled invocation:**
+
+1. In CloudBase **cloud function security rules** (environment-scoped),
+   preserve every existing rule and add the specific entry
+   `"mapQuotaCleanup": {"invoke": false}`, alongside the
+   existing mandatory `"*"` rule. This denies *client SDK* calls
+   while still allowing timer triggers and management API execution;
+   see https://docs.cloudbase.net/cloud-function/security-rules .
+   Verify client `callFunction({name:'mapQuotaCleanup'})` is denied in
+   a safe test. The rule does **not** block administrators calling through
+   management APIs; protect CloudBase admin credentials and IAM as usual.
+2. Confirm this cleanup function has **no HTTP gateway route or public
+   function URL**. The function additionally checks the official
+   `Type:'Timer', TriggerName:'dailyIngressRetention', Time:<UTC ISO>`
+   event envelope, but these fields **can be spoofed**, so they are not
+   an authorization boundary. Confirm function invocation source / security
+   rule rather than trusting the event alone.
+3. Deploy it *without uploading any timer triggers* and set only
+   `MAP_QUOTA_CLEANUP_MODE=dry-run`. It scans at most four pages of
+   25 documents (100 IDs per invocation), lexically by `_id`,
+   within the `ingress_` ID range; saves the last scanned key in the
+   independent `retention_control` bookkeeping document so later runs
+   advance rather than rescanning the same first page. Daily invocations
+   must be separated by at least **20 hours**, enforced by a
+   transaction on that control document. A crashed scan may wait
+   until the next run; it will not silently bypass the safety gate.
+   Do not manually reset `retention_control` to force extra runs.
+4. Run an isolated staging dry-run using the console's controlled timer
+   fixture, with a UTC `Time` no more than six hours old. Verify aggregate
+   `scanned/eligible/deleted/skipped/failed` results, `deleted=0`,
+   correct page and cursor progression, and no provider API traffic.
+   The optional `config.timer.example.json` is **not** an active trigger
+   until reviewed/copied to the console/config and uploaded. Seven-field
+   example cron `0 0 4 * * * *` expresses 04:00 in the
+   **scheduler's configured time zone**; verify that zone explicitly
+   before asserting the trigger runs at 04:00 Beijing.
+5. Only after inspecting dry-run results, test a deliberately seeded
+   **synthetic expired record in staging** (not a real user) and verify
+   transaction deletion plus the unchanged live data. For actual deletion
+   require both server env `MAP_QUOTA_CLEANUP_MODE=delete` and
+   `MAP_QUOTA_CLEANUP_DELETE_APPROVED=I_ACCEPT_7_DAY_CLEANUP`,
+   verified client-deny rule, a separately approved timer trigger and
+   trusted administrative access. Scheduled event payloads do **not**
+   enable delete mode. The 20-hour run interval means a dry-run and delete
+   test cannot share an immediate second run in the same environment;
+   use a separate staging environment or wait for the next allowed run.
+6. CloudBase Node server-side transaction docs specify
+   `startTransaction`, `get`, `delete`, `commit`, `rollback`:
+   https://docs.cloudbase.net/database/transaction . The SDK adapter
+   re-reads the exact document under a fresh transaction before
+   deleting; a concurrent updated document must cause a write conflict
+   and survive. If the database does not support the indexed `_id`
+   range query and ascending scan as coded, leave the function disabled
+   and patch/test the SDK adapter instead of permitting broad
+   collection reads/deletes.
+
+**Operational note:** The cleanup function should use *only* the existing
+ADMINONLY `map_planning_quotas` collection, and needs read access,
+individual-document transactions and deletes. It must not be exposed
+to Mini Program clients, add a public endpoint, change the
+`calendar` document or edit day/session/attempt/request ledgers. The
+`retention_control` cursor contains no identity values other than the
+last scanned prefix; treat even these prefixes as internal metadata and
+never log them. Staging fixtures and any production migration require
+separate explicit operator authorization. This change is **not**
+a proof of production scheduled operation or successful real SDK deletion.
+
 ### Ingress record retention: offline reviewed policy (2026-10-12)
 
 The `ingress_` limiter ledger does **not** follow the 09:00 Beijing
