@@ -101,7 +101,69 @@ function createQuota({ store, now = Date.now, offsetMinutes, activeFromMs, ttlMs
     u[kind][api]++
     c[kind][api]++
   }
+  // Conservative number of NEW full planning sessions that could be reserved.
+  // Includes other users' outstanding holds, retry usage and record-creation
+  // budgets. Does not promise successful routes or bound future consumption.
+  function availableBaseSessions(state, owner) {
+    const sessions = Object.values(state.sessions)
+    const own = sessions.filter(s => s.owner === owner)
+    const capacities = []
+    const roomFor = (ceiling, spent, held, cost) =>
+      Math.max(0, Math.floor((ceiling - spent - held) / cost))
+    for (const api of ['explore', 'walking']) {
+      const base = api === 'explore' ? 3 : 90
+      const held = list => list.reduce((sum, s) => sum + s.remaining[api], 0)
+      capacities.push(roomFor(LIMITS.global[api], state.used[api], held(sessions), base))
+      capacities.push(roomFor(LIMITS.user[api], state.users[owner]?.[api] || 0, held(own), base))
+    }
+    const baseCreation = baseCreationHold()
+    baseCreation.requests.explore = 1
+    for (const kind of ['requests', 'attempts']) {
+      for (const api of ['explore', 'walking']) {
+        const cost = baseCreation[kind][api]
+        if (!cost) continue
+        const held = list => list.reduce((sum, s) => sum + s.creationRemaining[kind][api], 0)
+        capacities.push(roomFor(CREATION_LIMITS.global[api], state.creations[kind][api], held(sessions), cost))
+        capacities.push(roomFor(CREATION_LIMITS.user[api],
+          state.creations.users[owner]?.[kind][api] || 0, held(own), cost))
+      }
+    }
+    return Math.min(...capacities)
+  }
+
   return {
+    // Read-only, authenticated status; never create user entries, spend a
+    // reservation or advance calendar. Fresh later days may be projected from
+    // zero only when the high-water marker proves they were never initialized.
+    status(owner) {
+      if (typeof owner !== 'string' || !/^[a-f0-9]{64}$/.test(owner)) throw fail('MAP_UNAUTHORIZED')
+      return transact(store, async tx => {
+        const time = now()
+        if (time < activeFromMs) throw fail('MAP_QUOTA_NOT_READY')
+        const calendar = await tx.get('calendar')
+        if (!calendar || calendar.activeFromMs !== activeFromMs ||
+            calendar.offsetMinutes !== offsetMinutes || !Number.isSafeInteger(calendar.latestDay)) {
+          throw fail('MAP_QUOTA_NOT_READY')
+        }
+        const day = dayOf(time)
+        let state = await tx.get(`day_${day}`)
+        if (!state) {
+          if (day <= dayOf(activeFromMs) || day <= calendar.latestDay) throw fail('MAP_QUOTA_NOT_READY')
+          state = { used: { explore: 0, walking: 0 }, users: {},
+            sessions: {}, creations: emptyCreations() }
+        } else {
+          state = JSON.parse(JSON.stringify(state))
+        }
+        validateState(state)
+        for (const [sid, session] of Object.entries(state.sessions)) {
+          if (session.expires <= time) delete state.sessions[sid]
+        }
+        return {
+          remainingPlanningSessions: time >= endOf(day) - 60000 ? 0 : availableBaseSessions(state, owner),
+          resetAtMs: endOf(day)
+        }
+      })
+    },
     async begin(owner, requestId, inputHash) {
       validRequest(requestId)
       const day = dayOf(now())
