@@ -23,7 +23,9 @@ const cloud = require('wx-server-sdk')
 const axios = require('axios')
 const { createCloudBaseStore } = require('./cloudbase-store')
 const { createTestStore } = require('./test-store')
-const { main } = require('./index')
+const { main: functionMain } = require('./index')
+const validInvocation = { environment: JSON.stringify({ WX_APPID: 'test-app', WX_OPENID: 'test-user' }) }
+const main = (event, context = {}) => functionMain(event, { ...validInvocation, ...context })
 const { main: legacyWalking } = require('../getWalkingRoute')
 const { main: legacyPois } = require('../getNearbyPois')
 const input = { action: 'nearbyPois', latitude: 30.123456, longitude: 120.654321 }
