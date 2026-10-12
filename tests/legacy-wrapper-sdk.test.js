@@ -10,6 +10,7 @@ const cloudbase = require('@cloudbase/node-sdk')
 const actualInit = cloudbase.init.bind(cloudbase)
 const walking = require('../cloudfunctions/getWalkingRoute')
 const nearby = require('../cloudfunctions/getNearbyPois')
+const wxInvocation = () => ({ environment: JSON.stringify({ WX_APPID: 'test-app', WX_OPENID: 'wrapper-user' }) })
 
 beforeEach(() => {
   wxCloud.getWXContext.mockReturnValue({ OPENID: 'wrapper-user', APPID: 'test-app' })
@@ -36,7 +37,7 @@ test.each([[walking, 'walkingRoute', { success: true, route: { distanceMeters: 1
     extraRequest.mockImplementation(() => { markStarted(); return new Promise(resolve => setTimeout(() => resolve({
       statusCode: 200, body: { data: { response_data: JSON.stringify(result) }, requestId: 'test-request' }
     }), 5240)) })
-    const context = { time_limit_in_ms: 80000, secret: 'private-context' }
+    const context = { time_limit_in_ms: 80000, secret: 'private-context', ...wxInvocation() }
     const pending = wrapper.main({ input: 'test' }, context)
     await started
     await jest.advanceTimersByTimeAsync(5240)
@@ -76,7 +77,7 @@ test.each([[walking, 'walkingRoute'], [nearby, 'nearbyPois']])(
     const result = { success: true, accepted: true }
     extraRequest.mockResolvedValue({ statusCode: 200,
       body: { data: { response_data: JSON.stringify(result) } } })
-    expect(await wrapper.main(malicious, { time_limit_in_ms: 80000 })).toEqual(result)
+    expect(await wrapper.main(malicious, { time_limit_in_ms: 80000, ...wxInvocation() })).toEqual(result)
     expect(extraRequest).toHaveBeenCalledTimes(1)
     const [request, options] = extraRequest.mock.calls[0]
     expect(request.body.function_name).toBe('mapProvider')
@@ -96,25 +97,24 @@ test.each([[walking, 'walkingRoute'], [nearby, 'nearbyPois']])(
 test('real SDK preserves a child business failure', async () => {
   const result = { success: false, error: { code: 'INVALID_COORDINATES', message: 'Invalid coordinates' } }
   extraRequest.mockResolvedValue({ statusCode: 200, body: { data: { response_data: JSON.stringify(result) } } })
-  expect(await nearby.main({})).toEqual(result)
+  expect(await nearby.main({}, wxInvocation())).toEqual(result)
 })
 
 test.each(['reject', 'envelope'])('real SDK %s failure is normalized without leaking details', async mode => {
   if (mode === 'reject') extraRequest.mockRejectedValue(Object.assign(new Error('private transport details'), { code: 'ETIMEDOUT' }))
   else extraRequest.mockResolvedValue({ statusCode: 200, body: { code: 'FUNCTION_NOT_FOUND', message: 'private infrastructure details' } })
-  expect(await nearby.main({})).toMatchObject({ success: false, error: { code: 'PROVIDER_GATEWAY_FAILED' } })
+  expect(await nearby.main({}, wxInvocation())).toMatchObject({ success: false, error: { code: 'PROVIDER_GATEWAY_FAILED' } })
   expect(extraRequest).toHaveBeenCalledTimes(1)
   expect(JSON.stringify(console.info.mock.calls)).not.toContain('private')
   expect(jest.getTimerCount()).toBe(0)
 })
 
 test.each([walking, nearby])('legacy entry fails before forwarding when server identity or signing secret is missing', async wrapper => {
-  wxCloud.getWXContext.mockReturnValue({})
-  expect(await wrapper.main({ OPENID: 'forged', userId: 'forged' })).toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
+  wxCloud.getWXContext.mockReturnValue({ OPENID: 'stale-other-user', APPID: 'test-app' })
+  expect(await wrapper.main({ OPENID: 'forged', userId: 'forged' }, { environment: '{}' })).toMatchObject({ error: { code: 'MAP_UNAUTHORIZED' } })
   expect(extraRequest).not.toHaveBeenCalled()
-  wxCloud.getWXContext.mockReturnValue({ OPENID: 'wrapper-user', APPID: 'test-app' })
   delete process.env.MAP_PLANNING_SECRET
-  expect(await wrapper.main({})).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
+  expect(await wrapper.main({}, wxInvocation())).toMatchObject({ error: { code: 'CONFIG_MISSING' } })
   expect(extraRequest).not.toHaveBeenCalled()
 })
 
