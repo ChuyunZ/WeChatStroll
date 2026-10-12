@@ -86,4 +86,4 @@ async function sweepIngressCandidates({
   return summary
 }
 
-module.exports = { canDeleteIngressRecord, sweepIngressCandidates, INGRESS_RETENTION_MS, MAX_BATCH }
+module.exports = { canDeleteIngressRecord, sweepIngressCandidates, INGRESS_RETENTION_MS, MAX_BATCH, WINDOW_MS, OPERATIONS }
