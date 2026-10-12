@@ -32,7 +32,7 @@ exports.main = async event => {
     if (operation === 'nearbyPois') pointKey(event)
     if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
     const db = cloud.database({ throwOnNotFound: false })
-    const security = createPlanningSecurity({ store: createQuotaStore(db) })
+    const security = createPlanningSecurity({ store: createQuotaStore(db, { log }) })
     const context = cloud.getWXContext()
     if (operation === 'closePlanning') return await security.close(event, context)
     const limits = loadLimits()
