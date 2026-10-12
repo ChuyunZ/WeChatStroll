@@ -73,3 +73,70 @@ test('an activated calendar cannot be silently switched to the chosen offset', a
     .rejects.toMatchObject({ code: 'MAP_QUOTA_NOT_READY' })
   expect([...store.documents.keys()]).toEqual(['calendar'])
 })
+
+test('Tencent 121 blocks all scopes on the shared Key until the next 09:00 boundary', async () => {
+  const { createLimiter } = require('./limiter')
+  const { createProvider } = require('./provider')
+  const { loadLimits } = require('./config')
+  jest.useFakeTimers()
+  try {
+    jest.setSystemTime(utc('2026-10-12T00:30:00.000Z')) // Beijing 08:30
+    const limits = loadLimits({})
+    const store = createTestStore()
+    const limiter = createLimiter({ store, ...limits })
+    const request = jest.fn().mockResolvedValueOnce({ data: { status: 121 } })
+      .mockResolvedValue({ data: { status: 0 } })
+    const provider = createProvider({ limiter, limits, request,
+      quotaOffsetMinutes: OFFSET_MINUTES })
+
+    const first = provider('walkingRoute')('mock', {}).catch(error => error)
+    await jest.runAllTimersAsync()
+    expect(await first).toMatchObject({ code: 'PROVIDER_QUOTA_EXHAUSTED' })
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(store.documents.get('tencent:key').cooldownUntilMs)
+      .toBeGreaterThanOrEqual(utc('2026-10-12T01:00:00.000Z'))
+
+    // Even another service cannot bypass a Key-wide daily quota block.
+    const blocked = provider('nearbyPois')('mock', {}).catch(error => error)
+    await jest.runAllTimersAsync()
+    expect(await blocked).toMatchObject({ code: 'PROVIDER_BUSY' })
+    expect(request).toHaveBeenCalledTimes(1)
+
+    // A new local quota day permits a fresh probe; it is not a guarantee that
+    // Tencent has reset. If Tencent returned 121 again we would re-block.
+    jest.setSystemTime(utc('2026-10-12T01:00:00.200Z'))
+    const recovered = provider('nearbyPois')('mock', {})
+    await jest.runAllTimersAsync()
+    await expect(recovered).resolves.toMatchObject({ data: { status: 0 } })
+    expect(request).toHaveBeenCalledTimes(2)
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+test('a second Tencent 121 after local reset renews the next-day shared block', async () => {
+  const { createLimiter } = require('./limiter')
+  const { createProvider } = require('./provider')
+  const { loadLimits } = require('./config')
+  jest.useFakeTimers()
+  try {
+    jest.setSystemTime(utc('2026-10-12T01:00:00.300Z')) // Just after 09:00 Beijing
+    const limits = loadLimits({})
+    const store = createTestStore()
+    const limiter = createLimiter({ store, ...limits })
+    const request = jest.fn(async () => ({ data: { status: 121 } }))
+    const provider = createProvider({ limiter, limits, request,
+      quotaOffsetMinutes: OFFSET_MINUTES })
+    const result = provider('nearbyPois')('mock', {}).catch(error => error)
+    await jest.runAllTimersAsync()
+    expect(await result).toMatchObject({ code: 'PROVIDER_QUOTA_EXHAUSTED' })
+    expect(store.documents.get('tencent:key').cooldownUntilMs)
+      .toBeGreaterThan(utc('2026-10-13T01:00:00.000Z'))
+    const blocked = provider('walkingRoute')('mock', {}).catch(error => error)
+    await jest.runAllTimersAsync()
+    expect(await blocked).toMatchObject({ code: 'PROVIDER_BUSY' })
+    expect(request).toHaveBeenCalledTimes(1)
+  } finally {
+    jest.useRealTimers()
+  }
+})
