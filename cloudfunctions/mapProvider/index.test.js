@@ -44,7 +44,7 @@ test('legacy and direct callers share mapProvider data and distributed pacing', 
   axios.get.mockImplementation(async url => ({ data: url.includes('/direction/')
     ? { status: 0, result: { routes: [{ distance: 100, duration: 2, polyline: [30, 120, 100, 100] }] } }
     : { status: 0, data: [] } }))
-  const pending = Promise.all([main(walking), legacyWalking(walking), legacyPois(input)])
+  const pending = Promise.all([main(walking), legacyWalking(walking, { ...validInvocation }), legacyPois(input, { ...validInvocation })])
   await jest.runAllTimersAsync()
   const results = await pending
   expect(results.every(result => result.success)).toBe(true)
