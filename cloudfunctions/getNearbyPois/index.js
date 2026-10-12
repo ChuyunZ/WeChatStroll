@@ -31,7 +31,7 @@ exports.main = async (event, context = {}) => {
   log({ event: 'forward_start', target: 'mapProvider', transport: 'cloudbase-node-3.17.2',
     timeoutMs: 60000, executionLimitMs: Number.isFinite(context.time_limit_in_ms) ? context.time_limit_in_ms : null })
   try {
-    const data = delegatedEvent(event, ACTION)
+    const data = delegatedEvent(event, ACTION, context)
     // The watchdog bounds a never-settling SDK promise independently of the
     // platform execution timeout; it does not retry or cancel the child.
     const deadline = new Promise((_, reject) => {
