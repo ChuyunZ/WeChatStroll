@@ -128,11 +128,9 @@ privacy/forgery before public launch.
 
 ## #119 follow-up: authenticated ingress rate/concurrency protection
 
-**Status as of 2026-10-12:** the ingress guard was deployed and normal
-CloudBase request/route/close flows were tested (see PR #119 live E2E notes).
-Negative-path burst/concurrency across real instances, runtime SDK security
-sign-off and platform-level mitigation are still outstanding. The
-operator-only ingress metadata cleanup helper below is **not installed**.
+**Not deployed / not yet accepted on real CloudBase.** The previous E2E
+(planning, add/replace/edit and normal session close) predates this admission
+layer. Do not merge or treat passing Jest as new E2E acceptance.
 
 The new `ingress-guard.js` runs in `mapProvider` after verifying caller
 APPID/OPENID or a wrapper's HMAC-signed delegation, but **before any
@@ -188,12 +186,9 @@ business response with an error.
   Official docs:
   https://docs.cloudbase.net/envconfig/ratelimit/intro
 - Ingress documents are one per distinct user, not one per invocation.
-  A tested **7-day conservative inactivity retention** policy is now defined
-  in `scripts/issue107-ingress-retention.cjs` and integrated into the existing
-  `canDeleteQuotaRecord` predicate. The new `sweepIngressCandidates` helper
-  supports dry-run by default or explicit-approval deletion via a trusted
-  admin-provided read+delete transaction adapter. **No scheduled cleanup
-  service has been installed or configured.**
+  They **must** be covered by an operator-controlled retention process
+  for inactive users (verify no active lease and enough safety margin
+  before deletion). There is no deployed automatic cleanup in this PR.
 - Test denied/concurrent requests with mock transports and database
   fixtures rather than flooding paid Tencent API. Verify trusted
   delegation, multi-instance contention, release under provider
@@ -556,139 +551,6 @@ machine-local/UTC midnight; requires full next-day receipt grace; rejects
 malformed/early expiry; preserves today's and three previous complete days'
 ledgers, the calendar and its latest initialized day even after a long idle
 period. Missing calendar or a backwards clock fails closed.
-
-### Admin-only scheduled ingress cleanup implementation (code staged, trigger disabled)
-
-PR #119 now includes a **separate** cloud function
-`cloudfunctions/mapQuotaCleanup`. It packages its own copy-free retention
-implementation in `retention.js`; offline tests and the existing
-`canDeleteQuotaRecord` import this *same* module, preventing drift.
-The function has `config.json: {"triggers":[]}` by default, and
-`MAP_QUOTA_CLEANUP_MODE` defaults to `disabled`. **Simply pulling or
-deploying the code will not turn on deletion or a cron job.**
-
-**Security setup before *any* non-disabled invocation:**
-
-1. In CloudBase **cloud function security rules** (environment-scoped),
-   preserve every existing rule and add the specific entry
-   `"mapQuotaCleanup": {"invoke": false}`, alongside the
-   existing mandatory `"*"` rule. This denies *client SDK* calls
-   while still allowing timer triggers and management API execution;
-   see https://docs.cloudbase.net/cloud-function/security-rules .
-   Verify client `callFunction({name:'mapQuotaCleanup'})` is denied in
-   a safe test. The rule does **not** block administrators calling through
-   management APIs; protect CloudBase admin credentials and IAM as usual.
-2. Confirm this cleanup function has **no HTTP gateway route or public
-   function URL**. The function additionally checks the official
-   `Type:'Timer', TriggerName:'dailyIngressRetention', Time:<UTC ISO>`
-   event envelope, but these fields **can be spoofed**, so they are not
-   an authorization boundary. Confirm function invocation source / security
-   rule rather than trusting the event alone.
-3. Deploy it *without uploading any timer triggers* and set only
-   `MAP_QUOTA_CLEANUP_MODE=dry-run`. It scans at most four pages of
-   25 documents (100 IDs per invocation), lexically by `_id`,
-   within the `ingress_` ID range; saves the last scanned key in the
-   independent `retention_control` bookkeeping document so later runs
-   advance rather than rescanning the same first page. Daily invocations
-   must be separated by at least **20 hours**, enforced by a
-   transaction on that control document. A crashed scan may wait
-   until the next run; it will not silently bypass the safety gate.
-   Do not manually reset `retention_control` to force extra runs.
-4. Run an isolated staging dry-run using the console's controlled timer
-   fixture, with a UTC `Time` no more than six hours old. Verify aggregate
-   `scanned/eligible/deleted/skipped/failed` results, `deleted=0`,
-   correct page and cursor progression, and no provider API traffic.
-   The optional `config.timer.example.json` is **not** an active trigger
-   until reviewed/copied to the console/config and uploaded. Seven-field
-   example cron `0 0 4 * * * *` expresses 04:00 in the
-   **scheduler's configured time zone**; verify that zone explicitly
-   before asserting the trigger runs at 04:00 Beijing.
-5. Only after inspecting dry-run results, test a deliberately seeded
-   **synthetic expired record in staging** (not a real user) and verify
-   transaction deletion plus the unchanged live data. For actual deletion
-   require both server env `MAP_QUOTA_CLEANUP_MODE=delete` and
-   `MAP_QUOTA_CLEANUP_DELETE_APPROVED=I_ACCEPT_7_DAY_CLEANUP`,
-   verified client-deny rule, a separately approved timer trigger and
-   trusted administrative access. Scheduled event payloads do **not**
-   enable delete mode. The 20-hour run interval means a dry-run and delete
-   test cannot share an immediate second run in the same environment;
-   use a separate staging environment or wait for the next allowed run.
-6. CloudBase Node server-side transaction docs specify
-   `startTransaction`, `get`, `delete`, `commit`, `rollback`:
-   https://docs.cloudbase.net/database/transaction . The SDK adapter
-   re-reads the exact document under a fresh transaction before
-   deleting; a concurrent updated document must cause a write conflict
-   and survive. If the database does not support the indexed `_id`
-   range query and ascending scan as coded, leave the function disabled
-   and patch/test the SDK adapter instead of permitting broad
-   collection reads/deletes.
-
-**Operational note:** The cleanup function should use *only* the existing
-ADMINONLY `map_planning_quotas` collection, and needs read access,
-individual-document transactions and deletes. It must not be exposed
-to Mini Program clients, add a public endpoint, change the
-`calendar` document or edit day/session/attempt/request ledgers. The
-`retention_control` cursor contains no identity values other than the
-last scanned prefix; treat even these prefixes as internal metadata and
-never log them. Staging fixtures and any production migration require
-separate explicit operator authorization. This change is **not**
-a proof of production scheduled operation or successful real SDK deletion.
-
-### Ingress record retention: offline reviewed policy (2026-10-12)
-
-The `ingress_` limiter ledger does **not** follow the 09:00 Beijing
-provider quota boundary. It is a rolling operational admission record:
-`windowStartMs` anchors its 60-second fixed window, `updatedAtMs`
-tracks successful acquisitions/releases, and `leases[].expiresAtMs`
-protects an individual in-flight request for up to 90 seconds.
-The retention policy deliberately waits **7 full days after the latest
-of the update timestamp, the end of the 60-second count window, and
-any lease expiry**. It never removes an active or recently used account's
-limit history. This is storage hygiene, **not** a way to restore any
-daily provider quota or user allowance.
-
-The predicate checks all of the following; any unknown or malformed
-state is **not eligible**:
-
-- The ID must be `ingress_` plus exactly 24 lowercase hex characters
-  matching the first 24 characters of a full 64-hex `ownerHash`. If a
-  database read supplies `_id`, it must match the queried ID.
-- Timestamps must be safe, ordered, nonfuture integers; `counts`
-  must have exactly the four expected action keys and valid nonnegative
-  integer values. Lease entries must have unique 32-hex identifiers,
-  known actions, and valid expired timestamps; any unexpired lease
-  stops deletion.
-- The cleanup call must have a valid server-supplied clock and the
-  existing retention `calendar` validation must still pass if using
-  `canDeleteQuotaRecord`. Candidate prefixes cannot match `day_`,
-  `request_`, `attempt_`, or `calendar`.
-
-**Trusted admin-only execution contract** (not a deployed cloud function):
-`sweepIngressCandidates({candidateIds, transact, now})` defaults to
-`dryRun: true`. Non-dry-run requests also require
-`approval: 'DELETE_EXPIRED_INGRESS'`. Maximum batch size is 25
-unique valid ingress IDs. The operator enumerates candidate IDs using
-a bounded, paginated admin listing; the function then **re-reads the
-candidate inside the same atomic/versioned transaction that deletes it**.
-If another request acquires or releases a lease, the transaction must
-abort on write conflict and the record must survive. The adapter must
-provide `transact(work)` and `tx.get(id)` / `tx.delete(id)` with
-these guarantees. Do not implement these as a nontransactional
-`get()` followed by `remove()`; CloudBase supports server-side
-transactional delete through its documented API:
-https://docs.cloudbase.net/database/transaction
-
-The function reports aggregate `scanned/eligible/deleted/skipped/failed`
-counts, never hashed owner identifiers or tokens. Unknown commit outcomes
-count as **failed**, and a later admin run re-evaluates from a fresh read.
-This helper does **not** configure a privileged CloudBase identity,
-paginate the collection, deploy an endpoint, or install a timer. Those
-require explicit operator approval, least-privilege service credentials,
-real-SDK transactional-delete validation and a dry-run inventory. Never
-enable collection-level TTL, erase recent keys to reset per-minute rate
-limits, or expose the helper through a publicly callable Mini Program
-cloud function. Tests use isolated in-memory transactions and deliberate
-conflicts, not paid Tencent requests.
 
 For the later administrative worker: deny Mini Program invocation and client DB
 access; use a dedicated scheduled service identity with only this collection's
