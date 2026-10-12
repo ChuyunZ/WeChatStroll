@@ -1,0 +1,9 @@
+{
+  "triggers": [
+    {
+      "name": "dailyIngressRetention",
+      "type": "timer",
+      "config": "0 0 4 * * * *"
+    }
+  ]
+}
