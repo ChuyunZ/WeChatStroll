@@ -498,26 +498,26 @@ indefinitely, total historical storage still grows by up to the daily bound.
 ### Real CloudBase write failure repair (2026-10-12)
 
 After deploying the diagnostic code and rerunning one signed-in discovery at 09:55,
-the cloud function reported \`map_quota_transaction_failed\` at
-\`phase: 'write_day'\`, \`kind: 'sdk_or_unknown'\`; no Tencent request was
-observed. The new read-only \`quotaStatus\` response had returned the expected
+the cloud function reported `map_quota_transaction_failed` at
+`phase: 'write_day'`, `kind: 'sdk_or_unknown'`; no Tencent request was
+observed. The new read-only `quotaStatus` response had returned the expected
 three-session estimate, so reads and semantic validations had succeeded.
 **Observed failure phase is certain; the precise SDK rejection was not exposed.**
 
 Two independent, documented CloudBase write hazards were identified:
 
 - Document field names are limited to 32 characters. The quota ledger had been
-  using 64-character owner hashes in \`users\`/\`creations.users\` and 48-character
-  session IDs in \`sessions\` as **field names**, even though their values can
+  using 64-character owner hashes in `users`/`creations.users` and 48-character
+  session IDs in `sessions` as **field names**, even though their values can
   be stored safely as strings.
-- A document read contains the reserved \`_id\`, which must not be sent back
-  as a mutable field in \`doc().set()\`. Previously the adapter returned the
+- A document read contains the reserved `_id`, which must not be sent back
+  as a mutable field in `doc().set()`. Previously the adapter returned the
   entire SDK data object unchanged.
 
-The repair is localized to \`quota-store.js\`: strip and check a matching
-\`_id\` on **each** read/write, and encode full owner hash/session IDs as
+The repair is localized to `quota-store.js`: strip and check a matching
+`_id` on **each** read/write, and encode full owner hash/session IDs as
 **values** on disk behind fixed 32-character prefixed hashed identities
-(\`u\` + first 31 hex of the owner hash, \`s\` + first 31 hex of the random
+(`u` + first 31 hex of the owner hash, `s` + first 31 hex of the random
 session ID). On read, validate and reconstruct full key identities before
 running existing business logic; corrupted mappings or collisions fail
 closed. No session tokens, full owner hash validation, counter ceilings,
@@ -528,9 +528,9 @@ reconciliation/migration. The current day's initial seed was empty, but
 confirm its latest contents before deploying.
 
 Regression tests run a CloudBase-shaped transactional adapter that includes
-\`_id\` in query results and rejects nested fields longer than 32 characters
-or writes containing \`_id\`. Tests cover \`begin\` -> read-only
-\`quotaStatus\` -> \`close\` without leaking identities as field names and
+`_id` in query results and rejects nested fields longer than 32 characters
+or writes containing `_id`. Tests cover `begin` -> read-only
+`quotaStatus` -> `close` without leaking identities as field names and
 malformed mappings failing closed. Real CloudBase E2E is still required to
 confirm the SDK rejection and the correctness of this fix.
 
