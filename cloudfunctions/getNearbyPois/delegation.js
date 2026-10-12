@@ -1,8 +1,7 @@
-const cloud = require('wx-server-sdk')
+const { currentWXIdentity } = require('./invocation-identity')
 const crypto = require('crypto')
-cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
-function delegatedEvent(event, action) {
-  const context = cloud.getWXContext()
+function delegatedEvent(event, action, invocationContext) {
+  const context = currentWXIdentity(invocationContext)
   if (!context || typeof context.OPENID !== 'string' || !context.OPENID.trim() ||
       typeof context.APPID !== 'string' || !context.APPID.trim()) {
     throw Object.assign(new Error('Authentication required'), { code: 'MAP_UNAUTHORIZED' })
