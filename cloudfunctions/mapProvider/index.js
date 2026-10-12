@@ -12,10 +12,11 @@ const { createQuotaStore } = require('./quota-store')
 const { createIngressGuard } = require('./ingress-guard')
 const { isProviderCode } = require('./errors')
 const { pointKey } = require('./planning-token')
+const { currentWXIdentity } = require('./invocation-identity')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
-exports.main = async event => {
+exports.main = async (event, invocationContext) => {
   const operation = event && event.action
   if (!['nearbyPois', 'walkingRoute', 'closePlanning', 'quotaStatus'].includes(operation)) {
     return { success: false, error: { code: 'INVALID_ACTION', message: 'Unsupported provider operation' } }
@@ -36,7 +37,12 @@ exports.main = async event => {
     const db = cloud.database({ throwOnNotFound: false })
     const quotaStore = createQuotaStore(db, { log })
     const security = createPlanningSecurity({ store: quotaStore })
-    const context = cloud.getWXContext()
+    let context = {}
+    try { context = currentWXIdentity(invocationContext) }
+    catch (error) {
+      // Only a valid server-signed delegation may lack Mini Program identity.
+      if (!event || !event._mapDelegation || error.code !== 'MAP_UNAUTHORIZED') throw error
+    }
     // Reject over-frequent calls before any daily quota transaction. Both
     // direct users and wrapper delegations must use verified platform identity.
     releaseIngress = await createIngressGuard({ store: quotaStore })
