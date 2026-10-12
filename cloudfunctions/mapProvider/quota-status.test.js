@@ -58,7 +58,7 @@ test('status fails closed for mismatched, lost or previously initialized ledgers
   calendar.offsetMinutes = 0
   store.documents.get('day_1').creations.requests.walking = 1
   await expect(quota.status(owner)).rejects.toMatchObject({ code: 'MAP_QUOTA_UNAVAILABLE' })
-  await expect(quota.status('raw-openid')).rejects.toMatchObject({ code: 'MAP_UNAUTHORIZED' })
+  expect(() => quota.status('raw-openid')).toThrow('MAP_UNAUTHORIZED')
 })
 test('status refuses a new session during the last 60 seconds of an internal quota day', async () => {
   const { store, quota, setTime } = harness({ time: 2 * DAY - 30000, marker: 1 })
