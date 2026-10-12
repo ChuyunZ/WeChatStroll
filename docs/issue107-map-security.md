@@ -62,11 +62,16 @@ billing cycle**. It is 01:00 UTC; with the existing calculation
 - A Planning Session expires by its original ledger boundary and cannot move
   its unused Explore/Walking holds into the next day. New sessions are rejected
   during the final 60 seconds of a quota day.
-- Tencent 120 still uses shared key-wide short cooldown and bounded retry;
-  Tencent 121 still terminates the **current physical request without retry**.
-  A local ledger reset **does not prove** Tencent's quota is available, and the
-  present provider path does not impose a persistent day-long key block on 121.
-  Do not describe this as guaranteed protection from an unknown official reset.
+- Tencent 120 still uses shared key-wide short cooldown and bounded retry.
+  Tencent 121 terminates the current request without retry and publishes a
+  shared `tencent:key` cooldown through the **next 09:00 Beijing boundary**.
+  This blocks new physical sends from both Explore and Walking across instances
+  (but cannot revoke starts already admitted before the feedback commit).
+  New attempts after that boundary still go through normal admission; if the
+  first Tencent response is 121 again, the same block renews for another
+  internal day. Blocked calls return `PROVIDER_BUSY`; the triggering
+  121 returns `PROVIDER_QUOTA_EXHAUSTED`. No local reset guarantees Tencent
+  availability or changes its actual provider billing cycle.
 
 **Activation/migration:** The offset is part of the persisted `calendar`
 contract. `MAP_QUOTA_OFFSET_MINUTES`, `MAP_QUOTA_ACTIVE_FROM_MS` and the
