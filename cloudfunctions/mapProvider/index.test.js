@@ -2,7 +2,19 @@ jest.mock('@cloudbase/node-sdk', () => ({
   SYMBOL_CURRENT_ENV: Symbol('current-env'),
   init: jest.fn(() => ({ callFunction: (...args) => require('wx-server-sdk').callFunction(...args) }))
 }))
-jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({})), callFunction: jest.fn() }))
+jest.mock('wx-server-sdk', () => ({ init: jest.fn(), database: jest.fn(() => ({})), callFunction: jest.fn(),
+  getWXContext: jest.fn(() => ({ OPENID: 'test-user', APPID: 'test-app' })) }))
+// Adapter/pacing regressions remain isolated; security and real gateway wiring
+// are exercised separately in planning-session.test and security-gateway.test.
+jest.mock('./planning-session', () => ({ createPlanningSecurity: () => ({
+  ingressOwner: () => 'a'.repeat(64),
+  open: async () => ({}), walking: async () => ({}), complete: async (auth, event, result) => result
+}) }))
+// This suite isolates provider adapter/QPS behavior; actual authenticated
+// ingress is tested in security-gateway and ingress-guard suites.
+jest.mock('./ingress-guard', () => ({ createIngressGuard: () => ({
+  acquire: async () => async () => {}
+}) }))
 jest.mock('axios', () => ({ get: jest.fn() }))
 jest.mock('./cloudbase-store', () => ({
   ...jest.requireActual('./cloudbase-store'), createCloudBaseStore: jest.fn()
@@ -11,7 +23,9 @@ const cloud = require('wx-server-sdk')
 const axios = require('axios')
 const { createCloudBaseStore } = require('./cloudbase-store')
 const { createTestStore } = require('./test-store')
-const { main } = require('./index')
+const { main: functionMain } = require('./index')
+const validInvocation = { environment: JSON.stringify({ WX_APPID: 'test-app', WX_OPENID: 'test-user' }) }
+const main = (event, context = {}) => functionMain(event, { ...validInvocation, ...context })
 const { main: legacyWalking } = require('../getWalkingRoute')
 const { main: legacyPois } = require('../getNearbyPois')
 const input = { action: 'nearbyPois', latitude: 30.123456, longitude: 120.654321 }
@@ -19,6 +33,7 @@ const walking = { action: 'walkingRoute', start: { latitude: 30.123456, longitud
   destination: { latitude: 30.124456, longitude: 120.655321 } }
 let originalKey
 let originalSecretKey
+let originalPlanningSecret
 let store
 
 test('legacy and direct callers share mapProvider data and distributed pacing', async () => {
@@ -29,7 +44,7 @@ test('legacy and direct callers share mapProvider data and distributed pacing', 
   axios.get.mockImplementation(async url => ({ data: url.includes('/direction/')
     ? { status: 0, result: { routes: [{ distance: 100, duration: 2, polyline: [30, 120, 100, 100] }] } }
     : { status: 0, data: [] } }))
-  const pending = Promise.all([main(walking), legacyWalking(walking), legacyPois(input)])
+  const pending = Promise.all([main(walking), legacyWalking(walking, { ...validInvocation }), legacyPois(input, { ...validInvocation })])
   await jest.runAllTimersAsync()
   const results = await pending
   expect(results.every(result => result.success)).toBe(true)
@@ -48,6 +63,8 @@ beforeEach(() => {
   jest.setSystemTime(100000)
   jest.clearAllMocks()
   originalKey = process.env.TENCENT_MAPS_API_KEY
+  originalPlanningSecret = process.env.MAP_PLANNING_SECRET
+  process.env.MAP_PLANNING_SECRET = 'test-planning-secret-at-least-32-bytes'
   originalSecretKey = process.env.TENCENT_MAPS_SECRET_KEY
   process.env.TENCENT_MAPS_API_KEY = 'private-test-key'
   process.env.TENCENT_MAPS_SECRET_KEY = 'private-test-secret'
@@ -59,6 +76,8 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers()
   jest.restoreAllMocks()
+  if (originalPlanningSecret === undefined) delete process.env.MAP_PLANNING_SECRET
+  else process.env.MAP_PLANNING_SECRET = originalPlanningSecret
   if (originalKey === undefined) delete process.env.TENCENT_MAPS_API_KEY
   else process.env.TENCENT_MAPS_API_KEY = originalKey
   if (originalSecretKey === undefined) delete process.env.TENCENT_MAPS_SECRET_KEY

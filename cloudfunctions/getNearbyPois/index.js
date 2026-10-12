@@ -1,4 +1,5 @@
 const cloudbase = require('@cloudbase/node-sdk')
+const { delegatedEvent } = require('./delegation')
 
 const ACTION = 'nearbyPois'
 const FORWARD_DEADLINE_MS = 65000
@@ -30,6 +31,7 @@ exports.main = async (event, context = {}) => {
   log({ event: 'forward_start', target: 'mapProvider', transport: 'cloudbase-node-3.17.2',
     timeoutMs: 60000, executionLimitMs: Number.isFinite(context.time_limit_in_ms) ? context.time_limit_in_ms : null })
   try {
+    const data = delegatedEvent(event, ACTION, context)
     // The watchdog bounds a never-settling SDK promise independently of the
     // platform execution timeout; it does not retry or cancel the child.
     const deadline = new Promise((_, reject) => {
@@ -40,7 +42,7 @@ exports.main = async (event, context = {}) => {
     const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV,
       timeout: 60000, retries: 0, keepalive: false })
     const invocation = app.callFunction({
-      name: 'mapProvider', data: { ...(event || {}), action: ACTION }
+      name: 'mapProvider', data
     }, { timeout: 60000, retryOptions: { retries: 0 } })
     const response = await Promise.race([invocation, deadline])
     // The Node SDK can resolve infrastructure failures as error envelopes.
@@ -53,6 +55,9 @@ exports.main = async (event, context = {}) => {
     }
     log({ event: 'forward_failed', code: 'INVALID_GATEWAY_RESULT' })
   } catch (error) {
+    if (['MAP_UNAUTHORIZED', 'CONFIG_MISSING'].includes(error.code)) {
+      return { success: false, error: { code: error.code, message: 'Map authorization unavailable' } }
+    }
     log({ event: 'forward_failed', code: diagnosticCode(error) })
   } finally {
     clearTimeout(timer)

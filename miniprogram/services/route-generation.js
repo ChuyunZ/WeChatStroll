@@ -1,4 +1,5 @@
 const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { requestId, rememberDiscovery, resolverFor, bindSession, createPlanningRun } = require('./map-planning-authorization')
 const locationService = require('./location')
 const { rankRoutes } = require('./route-ranking')
 const { transferStreetEvidence } = require('./street-evidence')
@@ -371,13 +372,16 @@ function buildFallbackPoiCandidates(
 
 async function searchNearbyPois(
   location,
-  radius
+  radius,
+  run
 ) {
+  if (run) run.check()
   const result =
     await callCloudFunction(
       'mapProvider',
       {
         action: 'nearbyPois',
+        requestId: requestId(),
         longitude: location.longitude,
         latitude: location.latitude,
         radius
@@ -389,6 +393,9 @@ async function searchNearbyPois(
       }
     )
 
+  // Capture before validation, so even an invalid response with a valid token
+  // is owned by this operation and can be closed.
+  if (run) run.capture(result && result.poisByCategory, result)
   if (
     !result.poisByCategory ||
     typeof result.poisByCategory !== 'object' ||
@@ -400,7 +407,7 @@ async function searchNearbyPois(
     )
   }
 
-  return result.poisByCategory
+  return run ? result.poisByCategory : rememberDiscovery(result.poisByCategory, result)
 }
 
 async function loadHistoricalPreferenceProfile() {
@@ -665,8 +672,8 @@ function buildPoiCandidates(poisByCategory) {
   return flattenPois
 }
 
-async function generateWaypointPlan(
-  preferences = {}
+async function generateWaypointPlanWork(
+  preferences, run
 ) {
   const location =
     await locationService.getCurrentLocation()
@@ -684,7 +691,7 @@ async function generateWaypointPlan(
     )
 
   const poisByCategory =
-    await searchNearbyPois(location, radius)
+    await searchNearbyPois(location, radius, run)
 
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
@@ -709,6 +716,7 @@ async function generateWaypointPlan(
 
   const historicalPreferenceProfile =
     await loadHistoricalPreferenceProfile()
+  run.check()
   const plan =
     await requestWaypointPlan({
       location,
@@ -1069,8 +1077,11 @@ async function buildFallbackGenerationResult({
     createRoutePlanningSession({
       start: location,
       verifiedWaypointPool: fallbackPois,
+      segmentResolver: resolverFor(poisByCategory),
       routeType
     })
+
+  bindSession(fallbackSession, poisByCategory)
 
   if (routePlanningSession) {
     fallbackSession.registerVerifiedWaypoints(
@@ -1267,8 +1278,8 @@ async function attemptRouteCorrections({
 }
 
 // AI waypoint candidates -> walking routes
-async function generateRoutes(
-  preferences = {}
+async function generateRoutesWork(
+  preferences, run
 ) {
   const planningStartedAt = Date.now()
   const location =
@@ -1287,7 +1298,7 @@ async function generateRoutes(
     )
 
   const poisByCategory =
-    await searchNearbyPois(location, radius)
+    await searchNearbyPois(location, radius, run)
 
   const nearbyPois =
     buildPoiCandidates(poisByCategory)
@@ -1312,11 +1323,14 @@ async function generateRoutes(
 
   // One detached snapshot per invocation, shared by every replanning attempt.
   const historicalPreferenceProfile = await loadHistoricalPreferenceProfile()
+  run.check()
   const session = createRoutePlanningSession({
     start: location,
+    segmentResolver: resolverFor(poisByCategory),
     verifiedWaypointPool: nearbyPois,
     routeType: getRequestedRouteType(preferences)
   })
+  bindSession(session, poisByCategory)
   const attemptedWaypointSets = new Set()
   const observations = []
   let correctionRemainingSegments = MAX_CORRECTION_NEW_SEGMENTS
@@ -1325,6 +1339,7 @@ async function generateRoutes(
   let trigger = 'NO_VALID_AI_ROUTE'
 
   for (let attempt = 1; attempt <= MAX_AI_PLANNING_ATTEMPTS; attempt++) {
+    run.check()
     attemptCount = attempt
     console.log('[Agent Planning] Attempt start:', { attempt, observationCount: observations.length })
     let plan
@@ -1342,6 +1357,7 @@ async function generateRoutes(
     }
 
     const attemptObservations = []
+    run.check()
     let attemptedCandidates = 0
     let canReplan = true
     if (planFailure) {
@@ -1398,6 +1414,7 @@ async function generateRoutes(
         }
       }
       for (const { candidateIndex, candidate, key } of unseen) {
+        run.check()
         attemptedWaypointSets.add(key)
         attemptedCandidates++
         const result = await buildOptimizedCandidateRoute({
@@ -1497,6 +1514,7 @@ async function generateRoutes(
     console.log('[Agent Planning] Replanning:', { nextAttempt: attempt + 1, observationCount: observations.length })
   }
 
+  run.check()
   const result = await buildFallbackGenerationResult({
     location, poisByCategory, preferences, trigger, routePlanningSession: session
   })
@@ -1516,8 +1534,8 @@ async function generateRoutes(
     planningMetadata: buildPlanningMetadata(attemptCount, true, observations) }
 }
 
-async function generateFirstRoute(
-  preferences = {}
+async function generateFirstRouteWork(
+  preferences, run
 ) {
   const location =
     await locationService.getCurrentLocation()
@@ -1537,7 +1555,8 @@ async function generateFirstRoute(
   const poisByCategory =
     await searchNearbyPois(
       location,
-      radius
+      radius,
+      run
     )
 
   const selectedPoi =
@@ -1559,11 +1578,13 @@ async function generateFirstRoute(
   const routePlanningSession =
     createRoutePlanningSession({
       start: location,
+      segmentResolver: resolverFor(poisByCategory),
       verifiedWaypointPool: [
         selectedPoi
       ],
       routeType
     })
+  bindSession(routePlanningSession, poisByCategory)
 
   const walkingRoute =
     await routePlanningSession
@@ -1615,6 +1636,16 @@ async function generateFirstRoute(
     routePlanningSession
   }
 }
+
+// One owner encompasses discovery, AI, correction and fallback. Only a live
+// successful route transfers responsibility to its consumer; every other exit
+// (including exceptions and late cancellation) closes the captured credential.
+const generateRoutes = (preferences = {}, run = createPlanningRun()) =>
+  run.execute(() => generateRoutesWork(preferences, run))
+const generateFirstRoute = (preferences = {}, run = createPlanningRun()) =>
+  run.execute(() => generateFirstRouteWork(preferences, run))
+const generateWaypointPlan = (preferences = {}, run = createPlanningRun()) =>
+  run.execute(() => generateWaypointPlanWork(preferences, run))
 
 // Reuse the generation formatter for all engine-derived display facts.
 // Recommendation metadata and the original editable pool never shrink.

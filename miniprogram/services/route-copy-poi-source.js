@@ -5,6 +5,8 @@
 // a claimed set of POIs reachable from the original location.
 const { getCurrentLocation } = require('./location');
 const { callCloudFunction } = require('./cloud-function-client');
+const { requestId } = require('./map-planning-authorization');
+const { isProviderUnavailableCode } = require('../utils/provider-errors');
 const { isValidGeoPoint } = require('../utils/geo');
 const { normalizePoiPool } = require('./route-copy-benchmark');
 
@@ -51,6 +53,7 @@ async function loadBenchmarkPoiPool({
     try {
       result = await call('mapProvider', {
         action: 'nearbyPois', latitude: center.latitude,
+        requestId: requestId(),
         longitude: center.longitude, radius: RADIUS_METERS
       }, {
         fallbackCode: 'BENCHMARK_POI_UNAVAILABLE',
@@ -60,9 +63,15 @@ async function loadBenchmarkPoiPool({
       // A failure at the original location is fatal. Satellite centers are
       // best-effort; do not retry unknown provider execution or expose errors.
       if (index === 0) throw error;
+      if (isProviderUnavailableCode(error.code)) break;
       continue;
     }
     const grouped = result && result.poisByCategory;
+    // This development tool needs no Walking capacity. Release unused hold.
+    if (result && result.planningToken) {
+      try { await call('mapProvider', { action: 'closePlanning', planningToken: result.planningToken }); }
+      catch (_) { /* expiration reclaims the hold; never retry discovery */ }
+    }
     if (!grouped || typeof grouped !== 'object' || Array.isArray(grouped) ||
         CATEGORIES.some(category => !Array.isArray(grouped[category]))) {
       if (index === 0) throw poiSourceError('BENCHMARK_POI_INVALID');

@@ -486,6 +486,15 @@
 
 ====================== */
 
+/* The page's bottom navigation is fixed and removed from document flow.
+   Reserve real scrollable space after the final option so the last card can
+   clear the fixed controls on short screens and after the quota hint was added.
+   Do not set fixed heights or overflow:hidden on the page itself. */
+.page-two {
+  padding-bottom: 220rpx;
+  box-sizing: border-box;
+}
+
 .page-two .question-block {
 
   margin-top: 50rpx;
@@ -717,4 +726,19 @@
 
 .page-one-bottom-space {
   height: 150rpx;
+}
+/* Read-only availability hints. Not an entitlement guarantee. */
+.quota-hint {
+  margin: 0 0 22rpx;
+  padding: 18rpx 22rpx;
+  background: #edf3ee;
+  color: #48634f;
+  font-size: 24rpx;
+  line-height: 36rpx;
+  border-radius: 16rpx;
+}
+
+.quota-hint {
+  margin: 28rpx 0 8rpx;
+  text-align: center;
 }

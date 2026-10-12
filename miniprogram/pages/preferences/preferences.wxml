@@ -12,6 +12,9 @@
 
 </view>
 
+<view class="quota-hint" aria-label="今日路线规划额度">
+  <text>{{quotaStatusText}}</text>
+</view>
 
 <!-- ==================== -->
 <!-- PAGE 1 -->

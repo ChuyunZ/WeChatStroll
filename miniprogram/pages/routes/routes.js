@@ -5,10 +5,12 @@ const { buildRouteMap } = require("../../utils/route-map");
 const routeRankingService = require("../../services/route-ranking");
 const routeCopy = require("../../services/route-copy");
 const { waypointSetKey, normalizePlanningFailure } = require("../../services/agentic-route-planning");
-const { isProviderUnavailableCode } = require("../../utils/provider-errors");
+const { isProviderUnavailableCode, mapErrorMessage } = require("../../utils/provider-errors");
 const { MAX_CORRECTION_CANDIDATES, MAX_CORRECTION_NEW_SEGMENTS } = require("../../config/route-planning");
 const { validateGeneratedWalkingRoute } = require("../../services/route-validation");
 const { isValidEditableOrder, routeEditErrorMessage } = require("../../services/route-editing");
+const { releaseSession, createPlanningRun } = require("../../services/map-planning-authorization");
+const { getMapQuotaStatus, quotaStatusText } = require("../../services/map-quota-status");
 
 const {
   ROUTE_TYPES
@@ -62,11 +64,14 @@ function isValidWaypointCandidateCache(cache) {
 Page({
   data: {
     manualAlternativeAction: "",
+    manualRemaining: 3,
+    quotaStatusText: "正在查询今日规划额度…",
     manualAlternativePending: false,
     replacementSelection: false,
     replacingRouteId: "",
     isLoadingMoreRoutes: false,
     routes: [],
+    routeErrorMessage: "请稍后再试",
     routeState: "loading"
   },
 
@@ -125,8 +130,32 @@ Page({
     this.loadRoutes();
   },
 
+  onShow() {
+    this.refreshQuotaStatus();
+  },
+
+  async refreshQuotaStatus() {
+    const request = (this._quotaStatusRequest || 0) + 1;
+    this._quotaStatusRequest = request;
+    try {
+      const status = await getMapQuotaStatus();
+      if (!this._unloaded && request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(status) });
+      }
+    } catch (_) {
+      if (!this._unloaded && request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(null) });
+      }
+    }
+  },
+
   onUnload() {
     this._unloaded = true;
+    this._quotaStatusRequest = (this._quotaStatusRequest || 0) + 1;
+    if (this._planningRun) this._planningRun.cancel();
+    releaseSession(this._retainedPlanningState && this._retainedPlanningState._routePlanningSession);
+    this._retainedPlanningState = null;
+    releaseSession(this._routePlanningSession);
     if (this._copyUnsubscribe) this._copyUnsubscribe();
     if (this._copySession) this._copySession.dispose();
     this._copyUnsubscribe = this._copySession = null;
@@ -150,6 +179,19 @@ Page({
   },
 
   async loadRoutes() {
+    if (this._planningRun) this._planningRun.cancel();
+    const run = createPlanningRun();
+    this._planningRun = run;
+    const previous = this._retainedPlanningState || {
+      _rawRoutes: this._rawRoutes,
+      _routePlanningSession: this._routePlanningSession,
+      _waypointCandidateCache: this._waypointCandidateCache,
+      _routeLocation: this._routeLocation,
+      _historicalPreferenceProfile: this._historicalPreferenceProfile,
+      _verifiedWaypointPool: this._verifiedWaypointPool,
+      _manualAlternativeActionCount: this._manualAlternativeActionCount || 0
+    };
+    this._retainedPlanningState = previous;
     // Retry is a new generation, but not a new questionnaire/copy budget.
     if (this._copySession) this._copySession.beginGeneration();
     this.resetManualAlternatives();
@@ -173,6 +215,7 @@ Page({
     this.setData({
       routes: [],
       manualAlternativeAction: "",
+      manualRemaining: 3,
       manualAlternativePending: false,
       replacementSelection: false,
       replacingRouteId: "",
@@ -180,9 +223,10 @@ Page({
       routeState: "loading"
     });
 
+    let routeLoadResult;
+    let adopted = false;
     try {
-      const routeLoadResult =
-        await this.getRoutes();
+      routeLoadResult = await this.getRoutes(run);
 
       // 新请求已经开始，
       // 当前结果已经过期。
@@ -190,6 +234,7 @@ Page({
         requestId !==
         this._routeRequestId
       ) {
+        releaseSession(routeLoadResult && routeLoadResult.routePlanningSession);
         return;
       }
 
@@ -207,6 +252,9 @@ Page({
         routeLoadResult.routes;
 
       if (routes.length === 0) {
+        this._retainedPlanningState = null;
+        releaseSession(previous._routePlanningSession);
+        releaseSession(routeLoadResult.routePlanningSession);
         this._rawRoutes = [];
         this._routePlanningSession = null;
         this._waypointCandidateCache = null;
@@ -257,8 +305,11 @@ Page({
         routeLoadResult.waypointCandidateCache;
 
       this._routeLocation = routeLoadResult.location;
-
       this.renderRoutes({ routeState: "success" });
+      run.detach(this._routePlanningSession);
+      adopted = true;
+      this._retainedPlanningState = null;
+      releaseSession(previous._routePlanningSession);
       // Do not await the remainder before making the first route usable.
       this._initialFillPromise = this.fillInitialRoutes(requestId);
     } catch (error) {
@@ -268,6 +319,18 @@ Page({
       ) {
         return;
       }
+
+      if (mapErrorMessage(error) && previous._rawRoutes && previous._rawRoutes.length) {
+        this._retainedPlanningState = null;
+        Object.assign(this, previous);
+        this._rawRoutes.forEach(route => this.rememberSurfacedRoute(route));
+        this.renderRoutes({ routeState: "success" });
+        this.updateManualAlternativeControls();
+        wx.showToast({ title: mapErrorMessage(error), icon: "none" });
+        return;
+      }
+      releaseSession(previous._routePlanningSession);
+      this._retainedPlanningState = null;
 
       this._rawRoutes = [];
       this._routePlanningSession = null;
@@ -282,16 +345,26 @@ Page({
 
       this.setData({
         routes: [],
+        routeErrorMessage: mapErrorMessage(error) || "请稍后再试",
         routeState: "error"
       });
+    } finally {
+      if (!adopted) {
+        run.cancel();
+        releaseSession(routeLoadResult && routeLoadResult.routePlanningSession);
+      }
+      if (this._planningRun === run) this._planningRun = null;
+      // Refresh once per generation, not after every physical route segment.
+      if (!this._unloaded) this.refreshQuotaStatus();
     }
   },
 
-  async getRoutes() {
+  async getRoutes(run) {
     const result =
       await routeGenerationService
         .generateRoutes(
-          this._routePreferences || {}
+          this._routePreferences || {},
+          ...(run ? [run] : [])
         );
 
     if (
@@ -304,6 +377,7 @@ Page({
     }
 
     if (result.status === "empty") {
+      releaseSession(result.routePlanningSession);
       return {
         routes: [],
         routePlanningSession: null,
@@ -321,6 +395,7 @@ Page({
         result.waypointCandidateCache
       )
     ) {
+      releaseSession(result.routePlanningSession);
       throw new Error(
         "Invalid route generation result"
       );
@@ -688,6 +763,7 @@ Page({
     if (!action && !this._manualAlternativePending) this._replacementSelection = false;
     this.setData({
       manualAlternativeAction: action,
+      manualRemaining: Math.max(0, 3 - (this._manualAlternativeActionCount || 0)),
       manualAlternativePending: !!this._manualAlternativePending,
       replacementSelection: this._replacementSelection,
       replacingRouteId: this._manualAlternativePending && this._manualAlternativePending.routeId || ""
@@ -770,7 +846,7 @@ Page({
             if (!isCurrent()) return;
             console.warn('[Manual AI Planning] Attempt failed:', { attempt: round, code: typeof (error && error.code) === 'string' ? error.code : 'AI_ROUTE_PLANNING_FAILED' });
             if (error && isProviderUnavailableCode(error.code)) {
-              wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+              wx.showToast({ title: mapErrorMessage(error) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
               return;
             }
             observations.push({ attempt: round, waypointIds: [],
@@ -818,7 +894,7 @@ Page({
           // The shared builder normally settles exceptions itself.
           batchCache.markFailed(candidate.candidateId);
           if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(error) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           observations.push({ attempt: round, waypointIds: [...candidate.waypointIds],
@@ -830,7 +906,7 @@ Page({
           if ([result.error, result.code, result.causeCode,
             result.failedSegment && result.failedSegment.causeCode,
             result.failedSegment && result.failedSegment.error].some(isProviderUnavailableCode)) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(result) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           observations.push({ attempt: round,
@@ -890,7 +966,7 @@ Page({
             remainingSegmentBudget: correctionRemainingSegments
           });
           if (corrected.providerError) {
-            wx.showToast({ title: "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
+            wx.showToast({ title: mapErrorMessage(corrected.providerError) || "路线服务暂时繁忙，请稍后重新规划", icon: "none" });
             return;
           }
           if (corrected.success) {
@@ -938,6 +1014,9 @@ Page({
       if (isCurrent()) {
         this._manualAlternativePending = null;
         this.updateManualAlternativeControls();
+        // Manual route attempts also use Walking calls; refresh the separate
+        // daily admission estimate even when no new route was accepted.
+        this.refreshQuotaStatus();
       }
       routeGenerationService.logCandidateSummary(candidateCache);
     }

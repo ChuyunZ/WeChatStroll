@@ -1,4 +1,4 @@
-const { isProviderUnavailableCode } = require('../utils/provider-errors')
+const { isProviderUnavailableCode, mapErrorMessage } = require('../utils/provider-errors')
 // The route-local pool, not the session-wide registry, defines edit permissions.
 function isValidEditableOrder(route, ids) {
   const pool = route && route.editableWaypoints
@@ -18,6 +18,8 @@ function copyEditableWaypoint(poi) {
 }
 
 function routeEditErrorMessage(error) {
+  const message = mapErrorMessage(error)
+  if (message) return message
   if (error && [error.code, error.error, error.causeCode].some(isProviderUnavailableCode)) {
     return '路线服务暂时繁忙，请稍后重试'
   }

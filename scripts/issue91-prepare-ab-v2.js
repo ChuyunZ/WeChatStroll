@@ -21,6 +21,8 @@ function replaceExactlyOnce(source, search, replacement, label) {
 }
 
 function buildTemporaryIndex(production) {
+  // Git on Windows may check out CRLF; anchors intentionally use canonical LF.
+  production = production.replace(/\r\n/g, '\n')
   let source = replaceExactlyOnce(
     production,
     'const { buildRoutePlanningPrompt } = require("./routePlanningPrompt")',

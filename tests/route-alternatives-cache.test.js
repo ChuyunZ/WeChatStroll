@@ -105,7 +105,11 @@ test('page Add and Replace reuse initial optimizer segments and never refresh hi
   expect(page._manualAlternativeActionCount).toBe(3)
   expect(page._routePlanningSession).toBe(session)
   expect(page._waypointCandidateCache).toBe(cache)
-  expect(callCloudFunction).not.toHaveBeenCalled()
+  // Display-only quota reads are allowed. They must not trigger any AI,
+  // Explore or Walking call or change the cached segment count.
+  expect(callCloudFunction).toHaveBeenCalledTimes(3)
+  expect(callCloudFunction.mock.calls.every(([name, data]) =>
+    name === 'mapProvider' && data.action === 'quotaStatus')).toBe(true)
   expect(refreshProfile).not.toHaveBeenCalled()
 })
 

@@ -7,30 +7,72 @@ const { createProvider } = require('./provider')
 const { createNearbyHandler } = require('./nearby-pois')
 const { createWalkingHandler } = require('./walking')
 const { addTencentSignature } = require('./signing')
+const { createPlanningSecurity } = require('./planning-session')
+const { createQuotaStore } = require('./quota-store')
+const { createIngressGuard } = require('./ingress-guard')
+const { isProviderCode } = require('./errors')
+const { pointKey } = require('./planning-token')
+const { currentWXIdentity } = require('./invocation-identity')
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV })
 
-exports.main = async event => {
+exports.main = async (event, invocationContext) => {
   const operation = event && event.action
-  if (operation !== 'nearbyPois' && operation !== 'walkingRoute') {
+  if (!['nearbyPois', 'walkingRoute', 'closePlanning', 'quotaStatus'].includes(operation)) {
     return { success: false, error: { code: 'INVALID_ACTION', message: 'Unsupported provider operation' } }
   }
   const apiKey = process.env.TENCENT_MAPS_API_KEY
   const secretKey = process.env.TENCENT_MAPS_SECRET_KEY
-  if (!apiKey || !secretKey) return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
+  // Releasing a signed session only needs its owner and quota ledger, not
+  // Tencent API credentials. Keep these checks for provider traffic only.
+  if (['nearbyPois', 'walkingRoute'].includes(operation) && (!apiKey || !secretKey)) {
+    return { success: false, error: { code: 'CONFIG_MISSING', message: 'Map API credentials are not configured' } }
+  }
   const log = record => console.info('[Map Provider]', record)
+  let authorization
+  let releaseIngress
   try {
+    if (operation === 'nearbyPois') pointKey(event)
+    if (operation === 'walkingRoute') { pointKey(event.start); pointKey(event.destination) }
+    const db = cloud.database({ throwOnNotFound: false })
+    const quotaStore = createQuotaStore(db, { log })
+    const security = createPlanningSecurity({ store: quotaStore })
+    let context = {}
+    try { context = currentWXIdentity(invocationContext) }
+    catch (error) {
+      // Only a valid server-signed delegation may lack Mini Program identity.
+      if (!event || !event._mapDelegation || error.code !== 'MAP_UNAUTHORIZED') throw error
+    }
+    // Reject over-frequent calls before any daily quota transaction. Both
+    // direct users and wrapper delegations must use verified platform identity.
+    releaseIngress = await createIngressGuard({ store: quotaStore })
+      .acquire(security.ingressOwner(event, context), operation)
+    if (operation === 'closePlanning') return await security.close(event, context)
+    if (operation === 'quotaStatus') return await security.quotaStatus(context)
     const limits = loadLimits()
-    const store = createCloudBaseStore(cloud.database({ throwOnNotFound: false }))
+    authorization = operation === 'nearbyPois'
+      ? await security.open(event, context) : await security.walking(event, context)
+    const store = createCloudBaseStore(db)
     const limiter = createLimiter({ store, ...limits, log })
-    const provider = createProvider({ limiter, limits, log,
+    const provider = createProvider({ limiter, limits, log, admission: authorization.admission,
+      quotaOffsetMinutes: security.quotaOffsetMinutes,
       request: (url, options) => axios.get(url, addTencentSignature(url, options, secretKey)) })
     const createHandler = operation === 'walkingRoute' ? createWalkingHandler : createNearbyHandler
-    return await createHandler({ apiKey, request: provider(operation) })(event)
-  } catch (_) {
+    const result = await createHandler({ apiKey, request: provider(operation) })(event)
+    return operation === 'nearbyPois' ? await security.complete(authorization.auth, event, result) : result
+  } catch (error) {
+    // No client received this discovery token. An exceptional handler/ready
+    // failure must release its holds; unknown DB outcomes remain fail-closed.
+    if (operation === 'nearbyPois' && authorization && authorization.abort) {
+      try { await authorization.abort() }
+      catch (_) { log({ event: 'discovery_cleanup_unavailable' }) }
+    }
     log({ event: 'gateway_unavailable', operation })
     return { success: false, error: {
-      code: 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
+      code: isProviderCode(error.code) || ['CONFIG_MISSING', 'INVALID_COORDINATES'].includes(error.code)
+        ? error.code : 'PROVIDER_GATEWAY_FAILED', message: 'Provider service is temporarily unavailable'
     } }
+  } finally {
+    if (releaseIngress) await releaseIngress()
   }
 }

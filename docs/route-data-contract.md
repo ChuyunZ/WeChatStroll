@@ -1,5 +1,11 @@
 # Route Data Contract
 
+#107 planning authorization (`planningToken`, expiry, request IDs and quota
+state) is transport/runtime state only. It must never become a Route, POI,
+Walk, History, recovery snapshot or AI prompt field. Credentials are held in
+WeakMaps and session-bound resolver closures; see
+[map planning security](issue107-map-security.md).
+
 This document defines the shared route data structure used by the WeChatStroll frontend, backend, and future AI route-generation components.
 
 The goal is to make sure every part of the application uses the same field names and data formats.

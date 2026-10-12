@@ -39,7 +39,7 @@ test('Tencent config overrides defaults without reading AMap configuration', () 
   expect(limits.nearbyPois.minIntervalMs).toBe(2500)
 })
 
-test('deployment is self-contained, dependencies match lockfile, limiter/store are unchanged copies', () => {
+test('deployment is self-contained, dependencies match lockfile, store remains compatible', () => {
   const pkg = require('./package.json')
   const lock = require('./package-lock.json')
   expect(pkg.dependencies).toEqual({ 'wx-server-sdk': '4.0.2', axios: '1.20.0' })
@@ -49,11 +49,13 @@ test('deployment is self-contained, dependencies match lockfile, limiter/store a
   for (const [name, version] of Object.entries(pkg.dependencies)) {
     expect(lock.packages[`node_modules/${name}`].version).toBe(version)
   }
-  for (const file of ['limiter.js', 'cloudbase-store.js']) {
+  // The limiter now has admission hooks; lease.test.js runs the complete old
+  // pacing contract on it, plus quota-admission.test.js exercises the hooks.
+  for (const file of ['cloudbase-store.js']) {
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8'))
       .toBe(fs.readFileSync(path.join(__dirname, '../amapProvider', file), 'utf8'))
   }
-  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js', 'walking.js', 'signing.js']) {
+  for (const file of ['index.js', 'provider.js', 'limiter.js', 'cloudbase-store.js', 'errors.js', 'config.js', 'nearby-pois.js', 'walking.js', 'signing.js', 'quota.js', 'quota-store.js', 'planning-token.js', 'planning-session.js']) {
     expect(fs.readFileSync(path.join(__dirname, file), 'utf8')).not.toMatch(/require\(['"]\.\.\//)
   }
 })

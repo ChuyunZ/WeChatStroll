@@ -152,7 +152,7 @@ describe('walking-segment', () => {
         name: 'mapProvider',
 
         data: {
-          action: 'walkingRoute',
+          action: 'walkingRoute', requestId: expect.any(String),
           start: {
             latitude: 31.2304,
             longitude: 121.4737

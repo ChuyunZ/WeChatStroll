@@ -1,5 +1,14 @@
 # Map provider deployment (#94)
 
+**#107 local security update:** the contracts and rollout requirements in
+[Map authorization and coupled quotas](issue107-map-security.md) supersede the
+unsigned discovery/Walking examples below. The earlier smoke tests here remain
+historical development evidence, not validation of the new authorization path.
+For #107 the team-selected **internal** quota day begins at **09:00 Beijing**
+(`MAP_QUOTA_OFFSET_MINUTES=-60`); Tencent has not confirmed its official
+WebService reset time. Apply the seed/calendar migration instructions in the
+linked #107 runbook, not an environment-only offset edit. No deployment is implied.
+
 This describes the current repository implementation and the development validation
 completed on 2026-10-04. Direct CloudBase smoke tests, legacy-wrapper forwarding and
 a Mini Program end-to-end route-generation check passed in the development environment.
@@ -114,7 +123,7 @@ Business failures use `{ success: false, error: { code, message } }`.
 | Availability code | Meaning |
 | --- | --- |
 | `PROVIDER_RATE_LIMITED` | Tencent status 120 exhausted the bounded provider attempt budget |
-| `PROVIDER_QUOTA_EXHAUSTED` | Tencent status 121; no retry or artificial short cooldown |
+| `PROVIDER_QUOTA_EXHAUSTED` | Tencent status 121; no retry; publishes shared Key cooldown through the next internal 09:00 Beijing quota boundary under #107 |
 | `PROVIDER_BUSY` | Queue deadline or bounded transaction contention budget exhausted |
 | `PROVIDER_GATEWAY_FAILED` | Provider/service, key/signature/origin authorization, configuration initialization or shared-state infrastructure failure |
 
@@ -160,9 +169,14 @@ coordination to fence shared cooldown changes.
 Database errors, corrupt state and failed start accounting fail closed. After HTTP
 has started, bookkeeping failure must not unlock state optimistically or bypass the
 limiter for another attempt. Shared cooldown is monotonic. Tencent status **120**
-publishes key-wide cooldown, including on the final attempt; only this status permits
+publishes key-wide short cooldown, including on the final attempt; only this status permits
 bounded provider retry, with admission reacquired each time. Status **121** does not
-retry. There are no client-side provider retries or a client request-start scheduler;
+retry: with #107 server quota configuration, it publishes a shared Key-wide
+cooldown until the next internal 09:00 Beijing day boundary. Later calls blocked
+by that cooldown return `PROVIDER_BUSY` without sending HTTP; this cannot
+revoke already-admitted starts. A subsequent Tencent 121 after 09:00 renews
+the block. Neither the internal reset nor its cooldown asserts Tencent's
+unconfirmed official reset time. There are no client-side provider retries or a client request-start scheduler;
 the engine's logical concurrency and session cache remain separate from backend pacing.
 
 Each physical route/category request establishes a queue deadline shared by its

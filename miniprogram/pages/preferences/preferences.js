@@ -1,6 +1,7 @@
 const {
   ROUTE_TYPES
 } = require('../../constants/route-types')
+const { getMapQuotaStatus, quotaStatusText } = require('../../services/map-quota-status')
 
 const CROWD_PREFERENCE_MAP = {
   "安静": "low",
@@ -19,6 +20,7 @@ const MINUTE_OPTIONS = [
 Page({
   data: {
     currentPage: 0,
+    quotaStatusText: '正在查询今日规划额度…',
 
     // Q2 图片预览
     previewVisible: false,
@@ -116,6 +118,34 @@ Page({
     ]
   },
 
+
+  onShow() {
+    this.refreshQuotaStatus()
+  },
+
+  onHide() {
+    this._quotaStatusRequest = (this._quotaStatusRequest || 0) + 1
+  },
+
+  onUnload() {
+    this._quotaStatusRequest = (this._quotaStatusRequest || 0) + 1
+  },
+
+  async refreshQuotaStatus() {
+    const request = (this._quotaStatusRequest || 0) + 1
+    this._quotaStatusRequest = request
+    this.setData({ quotaStatusText: '正在查询今日规划额度…' })
+    try {
+      const status = await getMapQuotaStatus()
+      if (request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(status) })
+      }
+    } catch (_) {
+      if (request === this._quotaStatusRequest) {
+        this.setData({ quotaStatusText: quotaStatusText(null) })
+      }
+    }
+  },
 
   // =========================
   // Q1

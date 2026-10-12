@@ -82,7 +82,7 @@ test.each(['PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_BUSY',
     expect(await session.evaluateRouteOrder(order)).toMatchObject({ error: code })
     expect(wx.cloud.callFunction).toHaveBeenCalledTimes(1)
     expect(wx.cloud.callFunction).toHaveBeenCalledWith({ name: 'mapProvider', data: {
-      action: 'walkingRoute', start, destination: { latitude: pool[0].latitude, longitude: pool[0].longitude }
+      action: 'walkingRoute', requestId: expect.any(String), start, destination: { latitude: pool[0].latitude, longitude: pool[0].longitude }
     } })
   } finally { delete global.wx }
 })
