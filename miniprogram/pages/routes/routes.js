@@ -1014,6 +1014,9 @@ Page({
       if (isCurrent()) {
         this._manualAlternativePending = null;
         this.updateManualAlternativeControls();
+        // Manual route attempts also use Walking calls; refresh the separate
+        // daily admission estimate even when no new route was accepted.
+        this.refreshQuotaStatus();
       }
       routeGenerationService.logCandidateSummary(candidateCache);
     }
