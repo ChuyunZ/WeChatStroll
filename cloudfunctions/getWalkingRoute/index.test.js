@@ -5,7 +5,9 @@ const mockInvoke = jest.fn()
 const fs = require('fs')
 const path = require('path')
 const cloud = { callFunction: mockInvoke }
-const { main } = require('./index')
+const { main: functionMain } = require('./index')
+const validInvocation = { environment: JSON.stringify({ WX_APPID: 'test-app', WX_OPENID: 'test-user' }) }
+const main = (event, context = {}) => functionMain(event, { ...validInvocation, ...context })
 const ACTION = 'walkingRoute'
 const failure = { success: false, error: {
   code: 'PROVIDER_GATEWAY_FAILED', message: 'Unable to contact the provider gateway'
